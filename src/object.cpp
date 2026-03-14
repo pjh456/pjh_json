@@ -23,7 +23,7 @@ namespace pjh::json
 
         if (it == m_data.end())
         {
-            m_data.emplace_back(std::string(key), Json{});
+            m_data.emplace_back(std::string(key), Json());
             return m_data.back().second;
         }
 
@@ -31,6 +31,32 @@ namespace pjh::json
     }
 
     const Json &Object::operator[](std::string_view key) const
+    {
+        auto it = std::ranges::find_if(
+            m_data.begin(), m_data.end(),
+            [&](auto &kv)
+            { return kv.first == key; });
+
+        if (it == m_data.end())
+            throw std::out_of_range("json key not found");
+
+        return it->second;
+    }
+
+    Json &Object::at(std::string_view key)
+    {
+        auto it = std::ranges::find_if(
+            m_data.begin(), m_data.end(),
+            [&](auto &kv)
+            { return kv.first == key; });
+
+        if (it == m_data.end())
+            throw std::out_of_range("json key not found");
+
+        return it->second;
+    }
+
+    const Json &Object::at(std::string_view key) const
     {
         auto it = std::ranges::find_if(
             m_data.begin(), m_data.end(),

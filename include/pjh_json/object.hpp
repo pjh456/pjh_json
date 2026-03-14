@@ -44,8 +44,10 @@ namespace pjh::json
 
     public:
         Json &operator[](std::string_view key);
-
         const Json &operator[](std::string_view key) const;
+
+        Json &at(std::string_view key);
+        const Json &at(std::string_view key) const;
 
     public:
         void insert(std::string_view key, Json val);
