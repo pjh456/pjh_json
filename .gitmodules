@@ -1,0 +1,3 @@
+[submodule "include/xsimd"]
+	path = include/xsimd
+	url = https://github.com/xtensor-stack/xsimd.git
