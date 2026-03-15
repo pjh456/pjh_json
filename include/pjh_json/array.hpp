@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <algorithm>
+#include <initializer_list>
 
 #include "json_fwd.hpp"
 
@@ -20,6 +21,7 @@ namespace pjh::json
     public:
         Array() = default;
         Array(Vec vec) : m_data(std::move(vec)) {}
+        Array(std::initializer_list<Json> vec) : m_data(vec) {}
 
         ~Array() = default;
 
@@ -41,6 +43,9 @@ namespace pjh::json
                        val) !=
                    m_data.end();
         }
+
+        void resize(size_t val) { m_data.resize(val); }
+        void reserve(size_t val) { m_data.reserve(val); }
 
         Vec &data() noexcept { return m_data; }
         const Vec &data() const noexcept { return m_data; }

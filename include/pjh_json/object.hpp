@@ -24,6 +24,7 @@ namespace pjh::json
     public:
         Object() = default;
         Object(Vec val) : m_data(std::move(val)) {}
+        Object(std::initializer_list<Entry> items) : m_data(items) {}
 
         ~Object() = default;
 
