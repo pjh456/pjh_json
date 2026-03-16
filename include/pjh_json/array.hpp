@@ -1,4 +1,5 @@
-#pragma once
+#ifndef INCLUDE_PJH_JSON_ARRAY_HPP
+#define INCLUDE_PJH_JSON_ARRAY_HPP
 
 #include <vector>
 #include <algorithm>
@@ -66,3 +67,5 @@ namespace pjh::json
     };
 
 }
+
+#endif // INCLUDE_PJH_JSON_ARRAY_HPP
