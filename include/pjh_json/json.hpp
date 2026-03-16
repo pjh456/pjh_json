@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <variant>
 #include <initializer_list>
+#include <fstream>
 #include <xsimd/xsimd.hpp>
 
 #include "array.hpp"
@@ -655,6 +656,35 @@ namespace pjh::json
         }
 
         return result;
+    }
+
+    // ---------------------------------------------------------
+    // File I/O Interface
+    // ---------------------------------------------------------
+
+    inline Json parse_file(const std::string &filepath)
+    {
+        std::ifstream file(filepath, std::ios::binary | std::ios::ate);
+        if (!file.is_open())
+        {
+            throw std::runtime_error("Failed to open file: " + filepath);
+        }
+
+        std::streamsize size = file.tellg();
+        file.seekg(0, std::ios::beg);
+
+        // 将文件内容一次性读入 buffer，以便让 SIMD Parser 在连续内存上极速狂飙
+        std::string buffer;
+        buffer.resize(size);
+
+        if (!file.read(buffer.data(), size))
+        {
+            throw std::runtime_error("Failed to read file: " + filepath);
+        }
+
+        // 调用刚才写的解析器
+        Parser p(buffer);
+        return p.parse();
     }
 }
 
