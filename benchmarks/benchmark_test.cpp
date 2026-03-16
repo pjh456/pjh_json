@@ -77,21 +77,29 @@ nlohmann::json random_json_gen(int depth = 0, int max_depth = 5)
 
 void generate_json_file(const std::string &path, size_t target_size, int max_depth = 5)
 {
-    nlohmann::json root = random_json_gen(0, max_depth);
-    std::string json_str = root.dump();
+    std::ofstream ofs(path);
+    ofs << "[";
 
-    // 如果太小，不断往数组里加元素直到接近目标大小
-    while (json_str.size() < target_size)
+    size_t size = 1;
+    bool first = true;
+
+    while (size < target_size)
     {
-        nlohmann::json arr = nlohmann::json::array();
-        arr.push_back(root);
-        arr.push_back(random_json_gen(0, max_depth));
-        root = arr;
-        json_str = root.dump();
+        auto obj = random_json_gen(0, max_depth).dump();
+
+        if (!first)
+        {
+            ofs << ",";
+            size++;
+        }
+
+        ofs << obj;
+        size += obj.size();
+
+        first = false;
     }
 
-    std::ofstream ofs(path);
-    ofs << json_str;
+    ofs << "]";
 }
 
 inline std::string read_file(const std::string &path_str)
