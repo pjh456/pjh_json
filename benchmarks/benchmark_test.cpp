@@ -157,11 +157,11 @@ void RegisterBenchmarks()
 {
     // 定义要测试的数据档位
     std::vector<std::pair<std::string, size_t>> sizes = {
-        // {"1mb.json", 1 * 1024 * 1024},
-        // {"10mb.json", 10 * 1024 * 1024},
-        {"40mb.json", 40 * 1024 * 1024},
-        // {"50mb.json", 50 * 1024 * 1024}
-        {"500mb.json", 500 * 1024 * 1024},
+        {"1mb.json", 1 * 1024 * 1024},
+        {"10mb.json", 10 * 1024 * 1024},
+        {"30mb.json", 30 * 1024 * 1024},
+        {"50mb.json", 50 * 1024 * 1024},
+        {"100mb.json", 100 * 1024 * 1024},
     };
 
     for (auto &[fname, target_size] : sizes)
