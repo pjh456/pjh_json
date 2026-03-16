@@ -4,9 +4,11 @@
 #include <cstdint>
 #include <variant>
 #include <initializer_list>
+#include <xsimd/xsimd.hpp>
 
 #include "array.hpp"
 #include "object.hpp"
+#include "parser.hpp"
 
 namespace pjh::json
 {
@@ -242,6 +244,418 @@ namespace pjh::json
     inline Json make_str(const char *str) { return Json(std::string(str)); }
     inline Json make_array(std::initializer_list<Json> vec) { return Json(vec); }
     inline Json make_object(std::initializer_list<Object::Entry> items) { return Json(items); }
+
+    // ---------------------------------------------------------
+    // Parser Implementation (SIMD Accelerated)
+    // ---------------------------------------------------------
+
+    inline void Parser::skip_whitespace()
+    {
+        using batch_type = xsimd::batch<char>;
+        std::size_t batch_size = batch_type::size;
+        static_assert(batch_type::size <= 64, "batch_size too large for uint64_t mask");
+
+        auto space = xsimd::broadcast<char>(' ');
+        auto tab = xsimd::broadcast<char>('\t');
+        auto cr = xsimd::broadcast<char>('\r');
+        auto lf = xsimd::broadcast<char>('\n');
+
+        // 使用 SIMD 并行跳过大量空白字符
+        while (m_curr + batch_size <= m_end)
+        {
+            auto b = batch_type::load_unaligned(m_curr);
+            auto is_ws = (b == space) | (b == tab) | (b == cr) | (b == lf);
+
+            uint64_t mask = is_ws.mask();
+            uint64_t non_ws_mask = ~mask;
+            if constexpr (batch_type::size < 64)
+            {
+                non_ws_mask &= (1ULL << batch_size) - 1;
+            }
+
+            // 如果发现了非空白字符，快速定位到它的位置并返回
+            if (non_ws_mask != 0)
+            {
+                m_curr += std::countr_zero(non_ws_mask);
+                return;
+            }
+            m_curr += batch_size;
+        }
+
+        // 处理尾部剩余数据
+        while (m_curr < m_end && (*m_curr == ' ' || *m_curr == '\t' || *m_curr == '\r' || *m_curr == '\n'))
+        {
+            ++m_curr;
+        }
+    }
+
+    inline uint32_t Parser::parse_hex4()
+    {
+        if (m_end - m_curr < 4)
+            error("Incomplete unicode escape");
+        uint32_t code = 0;
+        for (int i = 0; i < 4; ++i)
+        {
+            char c = *m_curr++;
+            code <<= 4;
+            if (c >= '0' && c <= '9')
+                code |= (c - '0');
+            else if (c >= 'a' && c <= 'f')
+                code |= (c - 'a' + 10);
+            else if (c >= 'A' && c <= 'F')
+                code |= (c - 'A' + 10);
+            else
+                error("Invalid hex digit in unicode escape");
+        }
+        return code;
+    }
+
+    inline void Parser::encode_utf8(uint32_t cp, std::string &out) const
+    {
+        if (cp <= 0x7F)
+        {
+            out += static_cast<char>(cp);
+        }
+        else if (cp <= 0x7FF)
+        {
+            out += static_cast<char>(0xC0 | ((cp >> 6) & 0x1F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+        else if (cp <= 0xFFFF)
+        {
+            out += static_cast<char>(0xE0 | ((cp >> 12) & 0x0F));
+            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+        else if (cp <= 0x10FFFF)
+        {
+            out += static_cast<char>(0xF0 | ((cp >> 18) & 0x07));
+            out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            out += static_cast<char>(0x80 | (cp & 0x3F));
+        }
+        else
+        {
+            error("Invalid unicode codepoint");
+        }
+    }
+
+    inline void Parser::handle_escape(std::string &out, const char *&start)
+    {
+        ++m_curr; // 跳过 '\\'
+        if (m_curr >= m_end)
+            error("Unexpected end of string after escape");
+        switch (*m_curr)
+        {
+        case '"':
+            out += '"';
+            break;
+        case '\\':
+            out += '\\';
+            break;
+        case '/':
+            out += '/';
+            break;
+        case 'b':
+            out += '\b';
+            break;
+        case 'f':
+            out += '\f';
+            break;
+        case 'n':
+            out += '\n';
+            break;
+        case 'r':
+            out += '\r';
+            break;
+        case 't':
+            out += '\t';
+            break;
+        case 'u':
+        {
+            ++m_curr;
+            uint32_t cp = parse_hex4();
+            // 代理对处理 (Surrogate pair)
+            if (cp >= 0xD800 && cp <= 0xDBFF)
+            {
+                if (m_end - m_curr >= 6 && m_curr[0] == '\\' && m_curr[1] == 'u')
+                {
+                    m_curr += 2;
+                    uint32_t cp2 = parse_hex4();
+                    if (cp2 >= 0xDC00 && cp2 <= 0xDFFF)
+                    {
+                        cp = 0x10000 + (((cp - 0xD800) << 10) | (cp2 - 0xDC00));
+                    }
+                    else
+                        error("Invalid surrogate pair");
+                }
+                else
+                    error("Expected low surrogate");
+            }
+            encode_utf8(cp, out);
+            start = m_curr;
+            return;
+        }
+        default:
+            error("Invalid escape character");
+        }
+        ++m_curr;
+        start = m_curr;
+    }
+
+    inline std::string Parser::parse_string()
+    {
+        if (m_curr >= m_end || *m_curr != '"')
+            error("Expected '\"'");
+        ++m_curr; // skip '"'
+
+        std::string out;
+        const char *start = m_curr;
+
+        using batch_type = xsimd::batch<char>;
+        std::size_t batch_size = batch_type::size;
+        auto quote = xsimd::broadcast<char>('"');
+        auto escape = xsimd::broadcast<char>('\\');
+
+        // 使用 SIMD 极速推测查找字符串边界 (" 或 \)
+        while (m_curr < m_end)
+        {
+            if (m_curr + batch_size <= m_end)
+            {
+                auto b = batch_type::load_unaligned(m_curr);
+                auto matches = (b == quote) | (b == escape);
+                uint64_t mask = matches.mask();
+
+                if (mask != 0)
+                {
+                    // 直接获取首个匹配项的索引偏移值
+                    int skip = std::countr_zero(mask);
+                    out.append(start, m_curr + skip - start);
+                    m_curr += skip;
+                    if (*m_curr == '"')
+                    {
+                        ++m_curr;
+                        return out;
+                    }
+                    handle_escape(out, start);
+                }
+                else
+                {
+                    m_curr += batch_size;
+                }
+            }
+            else
+            {
+                // 尾部降级为标量处理
+                if (*m_curr == '"')
+                {
+                    out.append(start, m_curr - start);
+                    ++m_curr;
+                    return out;
+                }
+                if (*m_curr == '\\')
+                {
+                    out.append(start, m_curr - start);
+                    handle_escape(out, start);
+                    continue;
+                }
+                ++m_curr;
+            }
+        }
+        error("Unterminated string");
+    }
+
+    inline Json Parser::parse_number()
+    {
+        const char *start = m_curr;
+        bool is_float = false;
+
+        if (m_curr < m_end && *m_curr == '-')
+            ++m_curr;
+        while (m_curr < m_end && *m_curr >= '0' && *m_curr <= '9')
+            ++m_curr;
+
+        if (m_curr < m_end && *m_curr == '.')
+        {
+            is_float = true;
+            ++m_curr;
+            while (m_curr < m_end && *m_curr >= '0' && *m_curr <= '9')
+                ++m_curr;
+        }
+        if (m_curr < m_end && (*m_curr == 'e' || *m_curr == 'E'))
+        {
+            is_float = true;
+            ++m_curr;
+            if (m_curr < m_end && (*m_curr == '+' || *m_curr == '-'))
+                ++m_curr;
+            while (m_curr < m_end && *m_curr >= '0' && *m_curr <= '9')
+                ++m_curr;
+        }
+
+        // 使用 C++17 的无内存分配轻量级 `from_chars` 解析数字
+        if (is_float)
+        {
+            double val = 0.0;
+            auto [ptr, ec] = std::from_chars(start, m_curr, val);
+            if (ec != std::errc())
+                error("Invalid float format");
+            return make_float(val);
+        }
+        else
+        {
+            int64_t val = 0;
+            auto [ptr, ec] = std::from_chars(start, m_curr, val);
+            if (ec != std::errc())
+                error("Invalid integer format");
+            return make_int(val);
+        }
+    }
+
+    inline Json Parser::parse_literal()
+    {
+        if (m_end - m_curr >= 4 && std::string_view(m_curr, 4) == "true")
+        {
+            m_curr += 4;
+            return make_boolean(true);
+        }
+        if (m_end - m_curr >= 5 && std::string_view(m_curr, 5) == "false")
+        {
+            m_curr += 5;
+            return make_boolean(false);
+        }
+        if (m_end - m_curr >= 4 && std::string_view(m_curr, 4) == "null")
+        {
+            m_curr += 4;
+            return make_null(nullptr);
+        }
+        error("Invalid literal");
+    }
+
+    inline Json Parser::parse_object()
+    {
+        ++m_curr; // skip '{'
+        Object obj;
+        skip_whitespace();
+        if (m_curr < m_end && *m_curr == '}')
+        {
+            ++m_curr;
+            return Json(std::move(obj));
+        }
+
+        while (m_curr < m_end)
+        {
+            skip_whitespace();
+            if (m_curr >= m_end || *m_curr != '"')
+                error("Expected string key in object");
+            std::string key = parse_string();
+
+            skip_whitespace();
+            if (m_curr >= m_end || *m_curr != ':')
+                error("Expected ':' in object");
+            ++m_curr;
+
+            Json val = parse_value();
+            obj.insert(key, std::move(val));
+
+            skip_whitespace();
+            if (m_curr >= m_end)
+                error("Unexpected end of object");
+            if (*m_curr == '}')
+            {
+                ++m_curr;
+                return Json(std::move(obj));
+            }
+            if (*m_curr == ',')
+                ++m_curr;
+            else
+                error("Expected ',' or '}' in object");
+        }
+        error("Unterminated object");
+    }
+
+    inline Json Parser::parse_array()
+    {
+        ++m_curr; // skip '['
+        Array arr;
+        skip_whitespace();
+        if (m_curr < m_end && *m_curr == ']')
+        {
+            ++m_curr;
+            return Json(std::move(arr));
+        }
+
+        while (m_curr < m_end)
+        {
+            arr.push_back(parse_value());
+
+            skip_whitespace();
+            if (m_curr >= m_end)
+                error("Unexpected end of array");
+            if (*m_curr == ']')
+            {
+                ++m_curr;
+                return Json(std::move(arr));
+            }
+            if (*m_curr == ',')
+                ++m_curr;
+            else
+                error("Expected ',' or ']' in array");
+        }
+        error("Unterminated array");
+    }
+
+    inline Json Parser::parse_value()
+    {
+        skip_whitespace();
+        if (m_curr >= m_end)
+            error("Unexpected end of input");
+
+        switch (*m_curr)
+        {
+        case '{':
+            return parse_object();
+        case '[':
+            return parse_array();
+        case '"':
+            return Json(parse_string());
+        case 't':
+        case 'f':
+        case 'n':
+            return parse_literal();
+        case '-':
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+            return parse_number();
+        default:
+            error("Unexpected character parsing value");
+        }
+        return Json(nullptr);
+    }
+
+    inline Json Parser::parse()
+    {
+        // 1. 从根节点开始递归下降解析
+        Json result = parse_value();
+
+        // 2. 消费掉末尾可能存在的剩余空白字符
+        skip_whitespace();
+
+        // 3. 检查是否完全解析（防范 "{} {}" 这种非法带有额外数据的 JSON）
+        if (m_curr < m_end)
+        {
+            error("Extra characters after complete JSON value");
+        }
+
+        return result;
+    }
 }
 
 #endif // INCLUDE_PJH_JSON_HPP
