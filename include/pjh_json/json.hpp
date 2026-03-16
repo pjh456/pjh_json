@@ -23,11 +23,11 @@ namespace pjh::json
             bool,
             int64_t,
             double,
-            std::string,
+            std::string_view,
             Array,
             Object>;
 
-    private:
+    protected:
         variant_t m_data;
 
     public:
@@ -36,8 +36,8 @@ namespace pjh::json
         Json(bool val) : m_data(val) {}
         Json(int64_t val) : m_data(val) {}
         Json(double val) : m_data(val) {}
-        Json(std::string str) : m_data(std::move(str)) {}
-        Json(const char *str) : m_data(std::string(str)) {}
+        Json(std::string_view str) : m_data(str) {}
+        Json(const char *str) : m_data(std::string_view(str)) {}
         Json(Array arr) : m_data(std::move(arr)) {}
         Json(Object obj) : m_data(std::move(obj)) {}
         Json(std::initializer_list<Json> vec)
@@ -130,7 +130,7 @@ namespace pjh::json
         bool is_int() const noexcept { return std::holds_alternative<std::int64_t>(m_data); }
         bool is_float() const noexcept { return std::holds_alternative<double>(m_data); }
         bool is_number() const noexcept { return is_int() || is_float(); }
-        bool is_string() const noexcept { return std::holds_alternative<std::string>(m_data); }
+        bool is_string() const noexcept { return std::holds_alternative<std::string_view>(m_data); }
         bool is_array() const noexcept { return std::holds_alternative<Array>(m_data); }
         bool is_object() const noexcept { return std::holds_alternative<Object>(m_data); }
 
@@ -146,8 +146,8 @@ namespace pjh::json
         double &as_float() { return std::get<double>(m_data); }
         const double &as_float() const { return std::get<double>(m_data); }
 
-        std::string &as_string() { return std::get<std::string>(m_data); }
-        const std::string &as_string() const { return std::get<std::string>(m_data); }
+        std::string_view as_string() { return std::get<std::string_view>(m_data); }
+        const std::string_view as_string() const { return std::get<std::string_view>(m_data); }
 
         Array &as_array() { return std::get<Array>(m_data); }
         const Array &as_array() const { return std::get<Array>(m_data); }
@@ -247,6 +247,26 @@ namespace pjh::json
     inline Json make_object(std::initializer_list<Object::Entry> items) { return Json(items); }
 
     // ---------------------------------------------------------
+    // Document Wrapper (Takes ownership of the In-Situ buffer)
+    // ---------------------------------------------------------
+    class Document : public Json
+    {
+    public:
+        std::string buffer;
+
+    public:
+        Document() = default;
+
+        Document(Json &&js, std::string &&buf)
+            : Json(std::move(js)), buffer(std::move(buf)) {}
+
+        Document(const Document &) = delete;
+        Document &operator=(const Document &) = delete;
+        Document(Document &&) noexcept = default;
+        Document &operator=(Document &&) noexcept = default;
+    };
+
+    // ---------------------------------------------------------
     // Parser Implementation (SIMD Accelerated)
     // ---------------------------------------------------------
 
@@ -309,99 +329,101 @@ namespace pjh::json
         return code;
     }
 
-    inline void Parser::encode_utf8(uint32_t cp, std::string &out) const
+    inline void encode_utf8(uint32_t cp, char *&dst)
     {
         if (cp <= 0x7F)
-            out += static_cast<char>(cp);
+        {
+            *dst++ = static_cast<char>(cp);
+        }
         else if (cp <= 0x7FF)
         {
-            out += static_cast<char>(0xC0 | ((cp >> 6) & 0x1F));
-            out += static_cast<char>(0x80 | (cp & 0x3F));
+            *dst++ = static_cast<char>(0xC0 | ((cp >> 6) & 0x1F));
+            *dst++ = static_cast<char>(0x80 | (cp & 0x3F));
         }
         else if (cp <= 0xFFFF)
         {
-            out += static_cast<char>(0xE0 | ((cp >> 12) & 0x0F));
-            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-            out += static_cast<char>(0x80 | (cp & 0x3F));
+            *dst++ = static_cast<char>(0xE0 | ((cp >> 12) & 0x0F));
+            *dst++ = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            *dst++ = static_cast<char>(0x80 | (cp & 0x3F));
         }
         else if (cp <= 0x10FFFF)
         {
-            out += static_cast<char>(0xF0 | ((cp >> 18) & 0x07));
-            out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
-            out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
-            out += static_cast<char>(0x80 | (cp & 0x3F));
+            *dst++ = static_cast<char>(0xF0 | ((cp >> 18) & 0x07));
+            *dst++ = static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+            *dst++ = static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+            *dst++ = static_cast<char>(0x80 | (cp & 0x3F));
         }
         else
-            error("Invalid unicode codepoint");
+        {
+            throw std::runtime_error("Invalid unicode codepoint");
+        }
     }
 
-    inline void Parser::handle_escape(std::string &out, const char *&start)
+    inline void handle_escape(char *&dst, const char *&m_curr, Parser *parser)
     {
         ++m_curr; // 跳过 '\\'
         switch (*m_curr)
         {
         case '"':
-            out += '"';
+            *dst++ = '"';
             break;
         case '\\':
-            out += '\\';
+            *dst++ = '\\';
             break;
         case '/':
-            out += '/';
+            *dst++ = '/';
             break;
         case 'b':
-            out += '\b';
+            *dst++ = '\b';
             break;
         case 'f':
-            out += '\f';
+            *dst++ = '\f';
             break;
         case 'n':
-            out += '\n';
+            *dst++ = '\n';
             break;
         case 'r':
-            out += '\r';
+            *dst++ = '\r';
             break;
         case 't':
-            out += '\t';
+            *dst++ = '\t';
             break;
         case 'u':
         {
             ++m_curr;
-            uint32_t cp = parse_hex4();
+            uint32_t cp = parser->parse_hex4();
 
             if (cp >= 0xD800 && cp <= 0xDBFF)
             {
                 if (m_curr[0] == '\\' && m_curr[1] == 'u')
                 {
                     m_curr += 2;
-                    uint32_t cp2 = parse_hex4();
+                    uint32_t cp2 = parser->parse_hex4();
                     if (cp2 >= 0xDC00 && cp2 <= 0xDFFF)
                         cp = 0x10000 + (((cp - 0xD800) << 10) | (cp2 - 0xDC00));
                     else
-                        error("Invalid surrogate pair");
+                        throw std::runtime_error("Invalid surrogate pair");
                 }
                 else
-                    error("Expected low surrogate");
+                    throw std::runtime_error("Expected low surrogate");
             }
-            encode_utf8(cp, out);
-            start = m_curr;
+            encode_utf8(cp, dst);
             return;
         }
         default:
-            error("Invalid escape character");
+            throw std::runtime_error("Invalid escape character");
         }
         ++m_curr;
-        start = m_curr;
     }
 
-    inline std::string Parser::parse_string()
+    inline std::string_view Parser::parse_string()
     {
         if (m_curr >= m_end || *m_curr != '"')
             error("Expected '\"'");
         ++m_curr; // skip '"'
 
-        std::string out;
         const char *start = m_curr;
+        char *dst = nullptr;
 
         // 使用 uint8_t 替代 char，防止把合法的 UTF-8 汉字（高位为1的负数）当成控制字符
         using batch_type = xsimd::batch<uint8_t>;
@@ -431,14 +453,14 @@ namespace pjh::json
 
                 if (*m_curr == '"')
                 {
-                    out.append(start, m_curr - start);
+                    std::string_view res(start, m_curr - start);
                     ++m_curr;
-                    return out;
+                    return res;
                 }
                 else if (*m_curr == '\\')
                 {
-                    out.append(start, m_curr - start);
-                    handle_escape(out, start);
+                    dst = const_cast<char *>(start) + (m_curr - start);
+                    goto insitu_fallback;
                 }
                 else
                 {
@@ -452,7 +474,30 @@ namespace pjh::json
             else
                 m_curr += batch_size;
         }
-        error("Unterminated string");
+
+    insitu_fallback:
+        // 原地修改循环：此时 dst 是写入指针，m_curr 是读取指针
+        while (true)
+        {
+            if (*m_curr == '"')
+            {
+                ++m_curr;
+                // 返回从 start 开始，到被覆写的 dst 结束的精确长度
+                return std::string_view(start, dst - start);
+            }
+            else if (*m_curr == '\\')
+            {
+                handle_escape(dst, m_curr, this);
+            }
+            else if (static_cast<uint8_t>(*m_curr) < 0x20)
+            {
+                error("Unescaped control character in string");
+            }
+            else
+            {
+                *dst++ = *m_curr++;
+            }
+        }
     }
 
     inline Json Parser::parse_number()
@@ -546,7 +591,7 @@ namespace pjh::json
             skip_whitespace();
             if (*m_curr != '"')
                 error("Expected string key in object");
-            std::string key = parse_string();
+            auto key = parse_string();
 
             skip_whitespace();
             if (*m_curr != ':')
@@ -651,7 +696,7 @@ namespace pjh::json
     // File I/O Interface
     // ---------------------------------------------------------
 
-    inline Json parse_file(const std::string &filepath)
+    inline Document parse_file(const std::string &filepath)
     {
         std::ifstream file(filepath, std::ios::binary | std::ios::ate);
         if (!file.is_open())
@@ -675,7 +720,10 @@ namespace pjh::json
 
         // 调用刚才写的解析器，传入准确的逻辑大小
         Parser p(std::string_view(buffer.data(), size));
-        return p.parse();
+        Json root = p.parse();
+
+        // 将 DOM 与背后的数据 Buffer 打包在一起交还
+        return Document(std::move(root), std::move(buffer));
     }
 }
 

@@ -32,15 +32,12 @@ namespace pjh::json
         Json parse_value();
         Json parse_object();
         Json parse_array();
-        std::string parse_string();
+        std::string_view parse_string();
         Json parse_number();
         Json parse_literal();
 
-    private:
-        // 辅助转义解码函数
-        void handle_escape(std::string &out, const char *&start);
+    public:
         uint32_t parse_hex4();
-        void encode_utf8(uint32_t cp, std::string &out) const;
 
         [[noreturn]] void error(const std::string &msg) const
         {
