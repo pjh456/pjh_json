@@ -5,6 +5,9 @@ project(
     LANGUAGES CXX
 )
 
+# export cmake compile commands
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # -------------------------
 # option
 # -------------------------
@@ -14,7 +17,8 @@ option(PJH_JSON_BUILD_EXAMPLES "Build examples" OFF)
 # -------------------------
 # dependency
 # -------------------------
-add_subdirectory(include/xsimd)
+set(XSIMD_SKIP_INSTALL ON CACHE BOOL "Skip xsimd install" FORCE)
+add_subdirectory(thirdparty/xsimd)
 
 # -------------------------
 # source files
@@ -34,6 +38,7 @@ add_library(pjh::json ALIAS pjh_json)
 target_include_directories(pjh_json
     PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/xsimd/include>
     $<INSTALL_INTERFACE:include>
 )
 
