@@ -273,6 +273,11 @@ namespace pjh::json
 
     inline void Parser::skip_whitespace()
     {
+        // 任何合法的 JSON 结构字符（双引号, 括号, 字母, 数字）ASCII 全都大于 0x20，
+        // 只有 4 个空白符（空格:32, 回车:13, 换行:10, Tab:9）是 <= 0x20 的。
+        if (static_cast<uint8_t>(*m_curr) > 0x20)
+            return;
+
         using batch_type = xsimd::batch<char>;
         std::size_t batch_size = batch_type::size;
         static_assert(batch_type::size <= 64, "batch_size too large for uint64_t mask");
@@ -597,15 +602,15 @@ namespace pjh::json
     {
         ++m_curr; // skip '{'
         Object obj(m_resource);
-        // 避免 Object 的早期扩容
-        obj.data().reserve(4);
-
         skip_whitespace();
         if (*m_curr == '}')
         {
             ++m_curr;
             return Json(std::move(obj));
         }
+
+        // 避免 Object 的早期扩容
+        obj.data().reserve(4);
 
         while (true)
         {
@@ -619,8 +624,7 @@ namespace pjh::json
                 error("Expected ':' in object");
             ++m_curr;
 
-            Json val = parse_value();
-            obj.data().emplace_back(key, std::move(val));
+            obj.data().emplace_back(key, parse_value());
 
             skip_whitespace();
             if (m_curr >= m_end)
@@ -641,9 +645,6 @@ namespace pjh::json
     {
         ++m_curr; // skip '['
         Array arr(m_resource);
-        // 避免 Array 的早期扩容
-        arr.data().reserve(4);
-
         skip_whitespace();
         if (m_curr < m_end && *m_curr == ']')
         {
@@ -651,9 +652,16 @@ namespace pjh::json
             return Json(std::move(arr));
         }
 
+        // 避免 Array 的早期扩容
+        arr.data().reserve(4);
+
         while (true)
         {
-            arr.data().emplace_back(parse_value());
+            // 先在底层数组里占一个坑位（默认构造一个 null 的 Json）
+            arr.data().emplace_back(nullptr);
+
+            // 把最后这个坑位的引用，直接传给 parse_value 去覆盖写
+            parse_value_inplace(arr.data().back());
 
             skip_whitespace();
             if (*m_curr == ']')
@@ -665,6 +673,43 @@ namespace pjh::json
                 ++m_curr;
             else
                 error("Expected ',' or ']' in array");
+        }
+    }
+
+    inline void Parser::parse_value_inplace(Json &out)
+    {
+        skip_whitespace();
+        switch (*m_curr)
+        {
+        case '{':
+            out = parse_object();
+            return;
+        case '[':
+            out = parse_array();
+            return;
+        case '"':
+            out = parse_string();
+            return;
+        case 't':
+        case 'f':
+        case 'n':
+            out = parse_literal();
+            return;
+        case '-':
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+            out = parse_number();
+            return;
+        default:
+            error("Unexpected character");
         }
     }
 

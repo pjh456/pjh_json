@@ -18,17 +18,16 @@ namespace pjh::json
     private:
         const char *m_curr;
         const char *m_end;
-        std::pmr::memory_resource* m_resource; 
+        std::pmr::memory_resource *m_resource;
 
     public:
         // 初始化并接收一段 JSON 文本
         explicit Parser(
-            std::string_view json, 
-            std::pmr::memory_resource* res 
-            = std::pmr::get_default_resource())
-            : m_curr(json.data()), 
-            m_end(json.data() + json.size()), 
-            m_resource(res) {}
+            std::string_view json,
+            std::pmr::memory_resource *res = std::pmr::get_default_resource())
+            : m_curr(json.data()),
+              m_end(json.data() + json.size()),
+              m_resource(res) {}
 
         // 主入口
         Json parse();
@@ -37,6 +36,7 @@ namespace pjh::json
         // 核心解析器函数
         void skip_whitespace();
         Json parse_value();
+        void parse_value_inplace(Json &out);
         Json parse_object();
         Json parse_array();
         std::string_view parse_string();
