@@ -504,75 +504,92 @@ namespace pjh::json
     inline Json Parser::parse_number()
     {
         const char *start = m_curr;
-        bool is_float = false;
+        bool is_negative = false;
 
-        if (m_curr < m_end && *m_curr == '-')
+        if (*m_curr == '-')
+        {
+            is_negative = true;
             ++m_curr;
+        }
+
+        uint64_t uval = 0;
+        uint32_t digits = 0;
+
+        // 快路径：一遍循环直接算出整数，彻底跳过 from_chars 的初始化开销！
         while (*m_curr >= '0' && *m_curr <= '9')
-            ++m_curr;
-
-        if (*m_curr == '.')
         {
-            is_float = true;
+            uval = uval * 10 + (*m_curr - '0');
             ++m_curr;
-            while (*m_curr >= '0' && *m_curr <= '9')
-                ++m_curr;
-        }
-        if (*m_curr == 'e' || *m_curr == 'E')
-        {
-            is_float = true;
-            ++m_curr;
-            if (*m_curr == '+' || *m_curr == '-')
-                ++m_curr;
-            while (*m_curr >= '0' && *m_curr <= '9')
-                ++m_curr;
+            ++digits;
         }
 
-        if (is_float)
+        // 如果碰到了小数点/指数，或者整数过长（防止 uint64_t 溢出），安全降级给 from_chars
+        if (*m_curr == '.' || *m_curr == 'e' || *m_curr == 'E' || digits > 18)
         {
+            if (*m_curr == '.')
+            {
+                ++m_curr;
+                while (*m_curr >= '0' && *m_curr <= '9')
+                    ++m_curr;
+            }
+            if (*m_curr == 'e' || *m_curr == 'E')
+            {
+                ++m_curr;
+                if (*m_curr == '+' || *m_curr == '-')
+                    ++m_curr;
+                while (*m_curr >= '0' && *m_curr <= '9')
+                    ++m_curr;
+            }
             double val = 0.0;
-            auto [ptr, ec] = std::from_chars(start, m_curr, val);
-            if (ec != std::errc() || ptr != m_curr)
-                error("Invalid float format");
+            std::from_chars(start, m_curr, val);
             return make_float(val);
         }
-        else
-        {
-            int64_t val = 0;
-            auto [ptr, ec] = std::from_chars(start, m_curr, val);
-            if (ec != std::errc() || ptr != m_curr)
-                error("Invalid integer format");
-            return make_int(val);
-        }
+
+        int64_t val = is_negative ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
+        return make_int(val);
     }
 
     inline Json Parser::parse_literal()
     {
-        if (m_curr[0] == 't' &&
-            m_curr[1] == 'r' &&
-            m_curr[2] == 'u' &&
-            m_curr[3] == 'e')
+        // 借助 C++20 std::bit_cast，在编译期动态生成完美贴合当前架构端序的 Magic Number 和 Mask
+        struct UChar4
+        {
+            uint8_t c[4];
+        };
+        constexpr uint32_t true_magic = std::bit_cast<uint32_t>(UChar4{'t', 'r', 'u', 'e'});
+        constexpr uint32_t null_magic = std::bit_cast<uint32_t>(UChar4{'n', 'u', 'l', 'l'});
+
+        struct UChar8
+        {
+            uint8_t c[8];
+        };
+        constexpr uint64_t false_magic = std::bit_cast<uint64_t>(UChar8{'f', 'a', 'l', 's', 'e', 0, 0, 0});
+        constexpr uint64_t false_mask = std::bit_cast<uint64_t>(UChar8{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0});
+
+        // 借助末尾的安全 Padding，直接强读 4/8 字节，将四五次字符比较压缩成 1 次 CPU 寄存器比较
+        uint32_t val32;
+        std::memcpy(&val32, m_curr, 4);
+
+        if (val32 == true_magic)
         {
             m_curr += 4;
             return make_boolean(true);
         }
-        if (m_curr[0] == 'f' &&
-            m_curr[1] == 'a' &&
-            m_curr[2] == 'l' &&
-            m_curr[3] == 's' &&
-            m_curr[4] == 'e')
-        {
-            m_curr += 5;
-            return make_boolean(false);
-        }
-        if (m_curr[0] == 'n' &&
-            m_curr[1] == 'u' &&
-            m_curr[2] == 'l' &&
-            m_curr[3] == 'l')
+        if (val32 == null_magic)
         {
             m_curr += 4;
             return make_null(nullptr);
         }
+
+        uint64_t val64;
+        std::memcpy(&val64, m_curr, 8);
+        // 使用端序安全的掩码消除后续填充字符的干扰
+        if ((val64 & false_mask) == false_magic)
+        {
+            m_curr += 5;
+            return make_boolean(false);
+        }
+
         error("Invalid literal");
     }
 
@@ -580,6 +597,9 @@ namespace pjh::json
     {
         ++m_curr; // skip '{'
         Object obj(m_resource);
+        // 避免 Object 的早期扩容
+        obj.data().reserve(4);
+
         skip_whitespace();
         if (*m_curr == '}')
         {
@@ -621,6 +641,9 @@ namespace pjh::json
     {
         ++m_curr; // skip '['
         Array arr(m_resource);
+        // 避免 Array 的早期扩容
+        arr.data().reserve(4);
+
         skip_whitespace();
         if (m_curr < m_end && *m_curr == ']')
         {
