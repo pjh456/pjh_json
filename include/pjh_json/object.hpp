@@ -16,8 +16,7 @@ namespace pjh::json
     class Object
     {
     public:
-        using string_type = std::pmr::string; 
-        using Entry = std::pair<string_type, Json>;
+        using Entry = std::pair<std::string_view, Json>;
         using Vec = std::pmr::vector<Entry>;
 
     private:
@@ -25,8 +24,7 @@ namespace pjh::json
 
     public:
         Object(
-            std::pmr::memory_resource* res 
-            = std::pmr::get_default_resource()) 
+            std::pmr::memory_resource *res = std::pmr::get_default_resource())
             : m_data(res) {}
         Object(Vec val) : m_data(std::move(val)) {}
         Object(std::initializer_list<Entry> items) : m_data(items) {}

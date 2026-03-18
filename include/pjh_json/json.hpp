@@ -253,12 +253,12 @@ namespace pjh::json
     class Document : public Json
     {
     public:
-        std::pmr::string buffer; 
+        std::pmr::string buffer;
 
     public:
         Document() = default;
 
-        Document(Json &&js, std::pmr::string &&buf) 
+        Document(Json &&js, std::pmr::string &&buf)
             : Json(std::move(js)), buffer(std::move(buf)) {}
 
         Document(const Document &) = delete;
@@ -600,7 +600,7 @@ namespace pjh::json
             ++m_curr;
 
             Json val = parse_value();
-            obj.insert(key, std::move(val));
+            obj.data().emplace_back(key, std::move(val));
 
             skip_whitespace();
             if (m_curr >= m_end)
@@ -630,7 +630,7 @@ namespace pjh::json
 
         while (true)
         {
-            arr.push_back(parse_value());
+            arr.data().emplace_back(parse_value());
 
             skip_whitespace();
             if (*m_curr == ']')
@@ -698,9 +698,9 @@ namespace pjh::json
     // ---------------------------------------------------------
 
     inline Document parse_file(
-        const std::string &filepath, 
-        std::pmr::memory_resource* res =
-         std::pmr::get_default_resource())
+        const std::string &filepath,
+        std::pmr::memory_resource *res =
+            std::pmr::get_default_resource())
     {
         std::ifstream file(filepath, std::ios::binary | std::ios::ate);
         if (!file.is_open())
@@ -710,7 +710,7 @@ namespace pjh::json
         file.seekg(0, std::ios::beg);
 
         // 将文件内容一次性读入 buffer，以便让 SIMD Parser 在连续内存上极速狂飙
-         std::pmr::string buffer(res);
+        std::pmr::string buffer(res);
         // 在末尾安全填充 64 字节的 '\0' (SIMD Padding)
         // 保证底层的 Parser 在做无界(SIMD)读取时绝对不会越界发生段错误。
         buffer.resize(size + 64, '\0');

@@ -152,10 +152,11 @@ static void BM_PJH_Json_Parse(benchmark::State &state, const std::string &conten
     {
         // 每次迭代重新初始化 monotonic_buffer_resource，这会瞬间重置指针，O(1) 释放全部内存
         std::pmr::monotonic_buffer_resource
-            pool(
+            mono_pool(
                 memory_buffer.data(),
-                memory_buffer.size(),
-                std::pmr::new_delete_resource());
+                memory_buffer.size());
+        // 上层套一个内存池，用于完美回收 vector 扩容时的历史碎片！
+        std::pmr::unsynchronized_pool_resource pool(&mono_pool);
 
         // 传入 pool，让 Parser、Array、Object 全部在这个连续 buffer 上极速分配
         pjh::json::Parser parser(content, &pool);
