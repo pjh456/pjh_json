@@ -4,6 +4,7 @@
 #include <vector>
 #include <algorithm>
 #include <initializer_list>
+#include <memory_resource>
 
 #include "json_fwd.hpp"
 
@@ -14,13 +15,16 @@ namespace pjh::json
     class Array
     {
     public:
-        using Vec = std::vector<Json>;
+        using Vec = std::pmr::vector<Json>;
 
     private:
         Vec m_data;
 
     public:
-        Array() = default;
+        Array(
+            std::pmr::memory_resource* res 
+            = std::pmr::get_default_resource()) 
+            : m_data(res) {}
         Array(Vec vec) : m_data(std::move(vec)) {}
         Array(std::initializer_list<Json> vec) : m_data(vec) {}
 

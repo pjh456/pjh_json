@@ -144,10 +144,23 @@ static void BM_Rapid_Json_Parse(benchmark::State &state, const std::string &cont
 // pjh::json
 static void BM_PJH_Json_Parse(benchmark::State &state, const std::string &content)
 {
+    // 预分配一块足够大的连续内存作为后备 Buffer
+    // 经验值：DOM 树在内存中的大小通常是 JSON 文本长度的 3 ~ 4 倍，给 5 倍绝对安全
+    std::vector<std::byte> memory_buffer(content.size() * 5);
+
     for (auto _ : state)
     {
-        pjh::json::Parser parser(content);
+        // 每次迭代重新初始化 monotonic_buffer_resource，这会瞬间重置指针，O(1) 释放全部内存
+        std::pmr::monotonic_buffer_resource
+            pool(
+                memory_buffer.data(),
+                memory_buffer.size(),
+                std::pmr::new_delete_resource());
+
+        // 传入 pool，让 Parser、Array、Object 全部在这个连续 buffer 上极速分配
+        pjh::json::Parser parser(content, &pool);
         pjh::json::Json root = std::move(parser.parse());
+
         benchmark::DoNotOptimize(root);
     }
 }

@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <ranges>
+#include <memory_resource>
 
 #include "json_fwd.hpp"
 
@@ -15,14 +16,18 @@ namespace pjh::json
     class Object
     {
     public:
-        using Entry = std::pair<std::string, Json>;
-        using Vec = std::vector<Entry>;
+        using string_type = std::pmr::string; 
+        using Entry = std::pair<string_type, Json>;
+        using Vec = std::pmr::vector<Entry>;
 
     private:
         Vec m_data;
 
     public:
-        Object() = default;
+        Object(
+            std::pmr::memory_resource* res 
+            = std::pmr::get_default_resource()) 
+            : m_data(res) {}
         Object(Vec val) : m_data(std::move(val)) {}
         Object(std::initializer_list<Entry> items) : m_data(items) {}
 

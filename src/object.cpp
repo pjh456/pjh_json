@@ -71,7 +71,7 @@ namespace pjh::json
 
     void Object::insert(std::string_view key, Json val)
     {
-        insert(std::make_pair(std::string(key), val));
+        insert(std::make_pair(std::pmr::string(key), val));
     }
 
     void Object::insert(Entry entry)

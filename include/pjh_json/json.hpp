@@ -5,6 +5,7 @@
 #include <variant>
 #include <initializer_list>
 #include <fstream>
+#include <memory_resource>
 #include <xsimd/xsimd.hpp>
 
 #include "array.hpp"
@@ -252,12 +253,12 @@ namespace pjh::json
     class Document : public Json
     {
     public:
-        std::string buffer;
+        std::pmr::string buffer; 
 
     public:
         Document() = default;
 
-        Document(Json &&js, std::string &&buf)
+        Document(Json &&js, std::pmr::string &&buf) 
             : Json(std::move(js)), buffer(std::move(buf)) {}
 
         Document(const Document &) = delete;
@@ -578,7 +579,7 @@ namespace pjh::json
     inline Json Parser::parse_object()
     {
         ++m_curr; // skip '{'
-        Object obj;
+        Object obj(m_resource);
         skip_whitespace();
         if (*m_curr == '}')
         {
@@ -619,7 +620,7 @@ namespace pjh::json
     inline Json Parser::parse_array()
     {
         ++m_curr; // skip '['
-        Array arr;
+        Array arr(m_resource);
         skip_whitespace();
         if (m_curr < m_end && *m_curr == ']')
         {
@@ -696,30 +697,29 @@ namespace pjh::json
     // File I/O Interface
     // ---------------------------------------------------------
 
-    inline Document parse_file(const std::string &filepath)
+    inline Document parse_file(
+        const std::string &filepath, 
+        std::pmr::memory_resource* res =
+         std::pmr::get_default_resource())
     {
         std::ifstream file(filepath, std::ios::binary | std::ios::ate);
         if (!file.is_open())
-        {
             throw std::runtime_error("Failed to open file: " + filepath);
-        }
 
         std::streamsize size = file.tellg();
         file.seekg(0, std::ios::beg);
 
         // 将文件内容一次性读入 buffer，以便让 SIMD Parser 在连续内存上极速狂飙
-        std::string buffer;
+         std::pmr::string buffer(res);
         // 在末尾安全填充 64 字节的 '\0' (SIMD Padding)
         // 保证底层的 Parser 在做无界(SIMD)读取时绝对不会越界发生段错误。
         buffer.resize(size + 64, '\0');
 
         if (!file.read(buffer.data(), size))
-        {
             throw std::runtime_error("Failed to read file: " + filepath);
-        }
 
         // 调用刚才写的解析器，传入准确的逻辑大小
-        Parser p(std::string_view(buffer.data(), size));
+        Parser p(std::string_view(buffer.data(), size), res);
         Json root = p.parse();
 
         // 将 DOM 与背后的数据 Buffer 打包在一起交还
