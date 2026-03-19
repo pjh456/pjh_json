@@ -278,20 +278,21 @@ namespace pjh::json
         if (static_cast<uint8_t>(*m_curr) > 0x20)
             return;
 
-        using batch_type = xsimd::batch<char>;
+        using batch_type = xsimd::batch<uint8_t>;
         std::size_t batch_size = batch_type::size;
-        static_assert(batch_type::size <= 64, "batch_size too large for uint64_t mask");
+        static_assert(
+            batch_type::size <= 64,
+            "batch_size too large for uint64_t mask");
 
-        auto space = xsimd::broadcast<char>(' ');
-        auto tab = xsimd::broadcast<char>('\t');
-        auto cr = xsimd::broadcast<char>('\r');
-        auto lf = xsimd::broadcast<char>('\n');
+        auto ctrl_space = xsimd::broadcast<uint8_t>(0x20);
+        auto zero = xsimd::broadcast<uint8_t>(0);
 
         // 使用 SIMD 并行跳过大量空白字符
         while (true)
         {
-            auto b = batch_type::load_unaligned(m_curr);
-            auto is_ws = (b == space) | (b == tab) | (b == cr) | (b == lf);
+            auto b = batch_type::load_unaligned(
+                reinterpret_cast<const uint8_t *>(m_curr));
+            auto is_ws = (b <= ctrl_space) & (b != zero);
 
             uint64_t mask = is_ws.mask();
             uint64_t non_ws_mask = ~mask;
