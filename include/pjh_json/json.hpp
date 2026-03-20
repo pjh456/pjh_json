@@ -77,21 +77,9 @@ namespace pjh::json
             return *this;
         }
 
-        Json &operator=(const std::string &val)
-        {
-            m_data = val;
-            return *this;
-        }
-
-        Json &operator=(std::string &&val) noexcept
-        {
-            m_data = std::move(val);
-            return *this;
-        }
-
         Json &operator=(std::string_view val)
         {
-            m_data = std::string(val);
+            m_data = val;
             return *this;
         }
 
@@ -241,9 +229,8 @@ namespace pjh::json
     inline Json make_boolean(bool val) { return Json(val); }
     inline Json make_int(int64_t val) { return Json(val); }
     inline Json make_float(double val) { return Json(val); }
-    inline Json make_str(std::string str) { return Json(std::move(str)); }
-    inline Json make_str(std::string_view str) { return Json(std::string(str)); }
-    inline Json make_str(const char *str) { return Json(std::string(str)); }
+    inline Json make_str(std::string_view str) { return Json(str); }
+    inline Json make_str(const char *str) { return Json(str); }
     inline Json make_array(std::initializer_list<Json> vec) { return Json(vec); }
     inline Json make_object(std::initializer_list<Object::Entry> items) { return Json(items); }
 
