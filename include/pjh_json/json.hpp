@@ -612,7 +612,8 @@ namespace pjh::json
                 error("Expected ':' in object");
             ++m_curr;
 
-            obj.data().emplace_back(key, parse_value());
+            obj.data().emplace_back(key, Json(nullptr));
+            parse_value_inplace(obj.data().back().second);
 
             skip_whitespace();
             if (m_curr >= m_end)
@@ -664,16 +665,94 @@ namespace pjh::json
         }
     }
 
+    inline void Parser::parse_object_inplace(Json &out)
+    {
+        ++m_curr; // skip '{'
+        Object obj(m_resource);
+        skip_whitespace();
+        if (*m_curr == '}')
+        {
+            ++m_curr;
+            out = std::move(obj);
+            return;
+        }
+
+        obj.data().reserve(4);
+
+        while (true)
+        {
+            skip_whitespace();
+            if (*m_curr != '"')
+                error("Expected string key in object");
+            auto key = parse_string();
+
+            skip_whitespace();
+            if (*m_curr != ':')
+                error("Expected ':' in object");
+            ++m_curr;
+
+            obj.data().emplace_back(key, Json(nullptr));
+            parse_value_inplace(obj.data().back().second);
+
+            skip_whitespace();
+            if (m_curr >= m_end)
+                error("Unexpected end of object");
+            if (*m_curr == '}')
+            {
+                ++m_curr;
+                out = std::move(obj);
+                return;
+            }
+            if (*m_curr == ',')
+                ++m_curr;
+            else
+                error("Expected ',' or '}' in object");
+        }
+    }
+
+    inline void Parser::parse_array_inplace(Json &out)
+    {
+        ++m_curr; // skip '['
+        Array arr(m_resource);
+        skip_whitespace();
+        if (m_curr < m_end && *m_curr == ']')
+        {
+            ++m_curr;
+            out = std::move(arr);
+            return;
+        }
+
+        arr.data().reserve(4);
+
+        while (true)
+        {
+            arr.data().emplace_back(nullptr);
+            parse_value_inplace(arr.data().back());
+
+            skip_whitespace();
+            if (*m_curr == ']')
+            {
+                ++m_curr;
+                out = std::move(arr);
+                return;
+            }
+            if (*m_curr == ',')
+                ++m_curr;
+            else
+                error("Expected ',' or ']' in array");
+        }
+    }
+
     inline void Parser::parse_value_inplace(Json &out)
     {
         skip_whitespace();
         switch (*m_curr)
         {
         case '{':
-            out = parse_object();
+            parse_object_inplace(out);
             return;
         case '[':
-            out = parse_array();
+            parse_array_inplace(out);
             return;
         case '"':
             out = parse_string();
