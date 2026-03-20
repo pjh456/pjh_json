@@ -2,10 +2,11 @@
 #define INCLUDE_PJH_JSON_OBJECT_HPP
 
 #include <stdexcept>
-#include <vector>
 #include <string>
+#include <memory>
 #include <ranges>
 #include <memory_resource>
+#include <vector>
 
 #include "json_fwd.hpp"
 
@@ -20,31 +21,38 @@ namespace pjh::json
         using Vec = std::pmr::vector<Entry>;
 
     private:
-        Vec m_data;
+        struct Impl;
+        struct ImplDeleter
+        {
+            std::pmr::memory_resource *res{nullptr};
+            void operator()(Impl *ptr) const noexcept;
+        };
+        std::unique_ptr<Impl, ImplDeleter> m_impl;
+        std::pmr::memory_resource *m_resource{nullptr};
 
     public:
         Object(
             std::pmr::memory_resource *res = std::pmr::get_default_resource())
-            : m_data(res) {}
-        Object(Vec val) : m_data(std::move(val)) {}
-        Object(std::initializer_list<Entry> items) : m_data(items) {}
+            ;
+        Object(Vec val);
+        Object(std::initializer_list<Entry> items);
 
-        ~Object() = default;
+        ~Object();
 
-        Object(const Object &) = default;
-        Object &operator=(const Object &) = default;
+        Object(const Object &);
+        Object &operator=(const Object &);
 
-        Object(Object &&) noexcept = default;
-        Object &operator=(Object &&) noexcept = default;
+        Object(Object &&) noexcept;
+        Object &operator=(Object &&) noexcept;
 
     public:
-        size_t size() const noexcept { return m_data.size(); }
-        bool empty() const noexcept { return m_data.empty(); }
-        void clear() noexcept { m_data.clear(); }
+        size_t size() const noexcept;
+        bool empty() const noexcept;
+        void clear() noexcept;
         bool contains(const Json &val) const noexcept;
 
-        Vec &data() noexcept { return m_data; }
-        const Vec &data() const noexcept { return m_data; }
+        Vec &data() noexcept;
+        const Vec &data() const noexcept;
 
     public:
         Json &operator[](std::string_view key);

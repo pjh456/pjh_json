@@ -1,10 +1,11 @@
 #ifndef INCLUDE_PJH_JSON_ARRAY_HPP
 #define INCLUDE_PJH_JSON_ARRAY_HPP
 
-#include <vector>
 #include <algorithm>
 #include <initializer_list>
+#include <memory>
 #include <memory_resource>
+#include <vector>
 
 #include "json_fwd.hpp"
 
@@ -18,52 +19,51 @@ namespace pjh::json
         using Vec = std::pmr::vector<Json>;
 
     private:
-        Vec m_data;
+        struct Impl;
+        struct ImplDeleter
+        {
+            std::pmr::memory_resource *res{nullptr};
+            void operator()(Impl *ptr) const noexcept;
+        };
+        std::unique_ptr<Impl, ImplDeleter> m_impl;
+        std::pmr::memory_resource *m_resource{nullptr};
 
     public:
         Array(
-            std::pmr::memory_resource* res 
-            = std::pmr::get_default_resource()) 
-            : m_data(res) {}
-        Array(Vec vec) : m_data(std::move(vec)) {}
-        Array(std::initializer_list<Json> vec) : m_data(vec) {}
+            std::pmr::memory_resource *res
+            = std::pmr::get_default_resource());
+        Array(Vec vec);
+        Array(std::initializer_list<Json> vec);
 
-        ~Array() = default;
+        ~Array();
 
-        Array(const Array &) = default;
-        Array &operator=(const Array &) = default;
+        Array(const Array &);
+        Array &operator=(const Array &);
 
-        Array(Array &&) noexcept = default;
-        Array &operator=(Array &&) noexcept = default;
-
-    public:
-        size_t size() const noexcept { return m_data.size(); }
-        bool empty() const noexcept { return m_data.empty(); }
-        void clear() noexcept { return m_data.clear(); }
-        bool contains(const Json &val) const noexcept
-        {
-            return std::find(
-                       m_data.begin(),
-                       m_data.end(),
-                       val) !=
-                   m_data.end();
-        }
-
-        void resize(size_t val) { m_data.resize(val); }
-        void reserve(size_t val) { m_data.reserve(val); }
-
-        Vec &data() noexcept { return m_data; }
-        const Vec &data() const noexcept { return m_data; }
+        Array(Array &&) noexcept;
+        Array &operator=(Array &&) noexcept;
 
     public:
-        Json &operator[](size_t idx) noexcept { return m_data[idx]; }
-        const Json &operator[](size_t idx) const noexcept { return m_data[idx]; }
+        size_t size() const noexcept;
+        bool empty() const noexcept;
+        void clear() noexcept;
+        bool contains(const Json &val) const noexcept;
 
-        Json &at(size_t idx) { return m_data.at(idx); }
-        const Json &at(size_t idx) const { return m_data.at(idx); }
+        void resize(size_t val);
+        void reserve(size_t val);
+
+        Vec &data() noexcept;
+        const Vec &data() const noexcept;
+
+    public:
+        Json &operator[](size_t idx) noexcept;
+        const Json &operator[](size_t idx) const noexcept;
+
+        Json &at(size_t idx);
+        const Json &at(size_t idx) const;
 
         void push_back(Json v);
-        void erase(size_t idx, size_t len = 1) { m_data.erase(m_data.begin() + idx, m_data.begin() + idx + len); }
+        void erase(size_t idx, size_t len = 1);
 
     public:
         bool operator==(const Array &other) const noexcept;
