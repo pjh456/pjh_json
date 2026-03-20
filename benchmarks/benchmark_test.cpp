@@ -77,7 +77,7 @@ nlohmann::json random_json_gen(int depth = 0, int max_depth = 5)
 
 void generate_json_file(const std::string &path, size_t target_size, int max_depth = 5)
 {
-    std::ofstream ofs(path);
+    std::ofstream ofs(path, std::ios::binary);
     ofs << "[";
 
     size_t size = 1;
@@ -110,7 +110,7 @@ inline std::string read_file(const std::string &path_str)
         std::cerr << "Error: File not found at " << path << std::endl;
         return "";
     }
-    std::ifstream ifs(path);
+    std::ifstream ifs(path, std::ios::binary);
     std::ostringstream oss;
     oss << ifs.rdbuf();
     return oss.str();
@@ -159,16 +159,22 @@ static void BM_PJH_Json_Parse(benchmark::State &state, const std::string &conten
         std::pmr::unsynchronized_pool_resource pool(&mono_pool);
 
         // 传入 pool，让 Parser、Array、Object 全部在这个连续 buffer 上极速分配
-        pjh::json::Parser parser(content, &pool);
-        pjh::json::Json root = std::move(parser.parse());
+        auto doc = pjh::json::parse_copy(content, &pool);
 
-        benchmark::DoNotOptimize(root);
+        benchmark::DoNotOptimize(doc);
     }
 }
 
 // 动态注册 Benchmarks
 void RegisterBenchmarks()
 {
+    std::filesystem::path base_dir =
+#ifdef PJH_JSON_BENCH_DATA_DIR
+        PJH_JSON_BENCH_DATA_DIR;
+#else
+        ".";
+#endif
+
     // 定义要测试的数据档位
     std::vector<std::pair<std::string, size_t>> sizes = {
         {"1mb.json", 1 * 1024 * 1024},
@@ -180,16 +186,17 @@ void RegisterBenchmarks()
 
     for (auto &[fname, target_size] : sizes)
     {
-        std::string path = fname;
+        std::filesystem::path path = base_dir / fname;
 
         // 自动生成测试文件，保证开箱即用
-        if (!std::filesystem::exists(path))
+        if (!std::filesystem::exists(path) ||
+            std::filesystem::file_size(path) < target_size)
         {
-            std::cout << "Generating test file " << path << " (" << target_size << " bytes)...\n";
-            generate_json_file(path, target_size);
+            std::cout << "Generating test file " << path.string() << " (" << target_size << " bytes)...\n";
+            generate_json_file(path.string(), target_size);
         }
 
-        std::string json_data = read_file(path);
+        std::string json_data = read_file(path.string());
 
         std::string bm_pjh = "PJH/" + fname;
         std::string bm_nlohmann = "Nlohmann/" + fname;

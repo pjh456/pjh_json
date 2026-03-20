@@ -6,6 +6,7 @@
 #include <initializer_list>
 #include <fstream>
 #include <memory_resource>
+#include <cstring>
 #include <xsimd/xsimd.hpp>
 
 #include "array.hpp"
@@ -832,6 +833,34 @@ namespace pjh::json
     // File I/O Interface
     // ---------------------------------------------------------
 
+    inline Document parse_in_situ(
+        std::pmr::string &&buffer,
+        std::pmr::memory_resource *res =
+            std::pmr::get_default_resource())
+    {
+        // buffer 必须可写，且末尾至少有 64 字节 '\0' Padding
+        if (buffer.size() < 64)
+            throw std::runtime_error("Buffer too small for in-situ parse");
+
+        size_t size = buffer.size() - 64;
+        Parser p(std::string_view(buffer.data(), size), res);
+        Json root = p.parse();
+        return Document(std::move(root), std::move(buffer));
+    }
+
+    inline Document parse_copy(
+        std::string_view json,
+        std::pmr::memory_resource *res =
+            std::pmr::get_default_resource())
+    {
+        std::pmr::string buffer(res);
+        buffer.resize(json.size() + 64, '\0');
+        std::memcpy(buffer.data(), json.data(), json.size());
+        Parser p(std::string_view(buffer.data(), json.size()), res);
+        Json root = p.parse();
+        return Document(std::move(root), std::move(buffer));
+    }
+
     inline Document parse_file(
         const std::string &filepath,
         std::pmr::memory_resource *res =
@@ -844,21 +873,13 @@ namespace pjh::json
         std::streamsize size = file.tellg();
         file.seekg(0, std::ios::beg);
 
-        // 将文件内容一次性读入 buffer，以便让 SIMD Parser 在连续内存上极速狂飙
         std::pmr::string buffer(res);
-        // 在末尾安全填充 64 字节的 '\0' (SIMD Padding)
-        // 保证底层的 Parser 在做无界(SIMD)读取时绝对不会越界发生段错误。
         buffer.resize(size + 64, '\0');
 
         if (!file.read(buffer.data(), size))
             throw std::runtime_error("Failed to read file: " + filepath);
 
-        // 调用刚才写的解析器，传入准确的逻辑大小
-        Parser p(std::string_view(buffer.data(), size), res);
-        Json root = p.parse();
-
-        // 将 DOM 与背后的数据 Buffer 打包在一起交还
-        return Document(std::move(root), std::move(buffer));
+        return parse_in_situ(std::move(buffer), res);
     }
 }
 

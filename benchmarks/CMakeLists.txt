@@ -46,3 +46,10 @@ target_link_libraries(pjh_json_benchmark
 
 # rapidjson 没有现代的 cmake target，通过源码目录引入
 target_include_directories(pjh_json_benchmark PRIVATE ${rapidjson_SOURCE_DIR}/include)
+
+# Benchmark data directory (project root)
+target_compile_definitions(
+    pjh_json_benchmark
+    PRIVATE
+    PJH_JSON_BENCH_DATA_DIR="${CMAKE_SOURCE_DIR}"
+)
