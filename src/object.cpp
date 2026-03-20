@@ -23,7 +23,7 @@ namespace pjh::json
 
         if (it == m_data.end())
         {
-            m_data.emplace_back(std::string(key), Json());
+            m_data.emplace_back(key, Json());
             return m_data.back().second;
         }
 
@@ -71,7 +71,7 @@ namespace pjh::json
 
     void Object::insert(std::string_view key, Json val)
     {
-        insert(std::make_pair(std::pmr::string(key), val));
+        insert(std::make_pair(key, val));
     }
 
     void Object::insert(Entry entry)
