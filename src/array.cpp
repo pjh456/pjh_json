@@ -2,6 +2,7 @@
 #include "pjh_json/json.hpp"
 
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 namespace pjh::json
@@ -113,6 +114,8 @@ namespace pjh::json
     void Array::push_back(Json v) { return m_impl->data.push_back(std::move(v)); }
     void Array::erase(size_t idx, size_t len)
     {
+        if (idx > m_impl->data.size() || len > m_impl->data.size() - idx)
+            throw std::out_of_range("array erase out of range");
         m_impl->data.erase(m_impl->data.begin() + idx, m_impl->data.begin() + idx + len);
     }
 
