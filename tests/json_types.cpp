@@ -58,6 +58,10 @@ void array_value()
     assert(arr2.size() == 2);
     assert(arr2[0] == "pjh" && arr2[1] == (int64_t)123);
 
+    // 不同长度的 Array 比较应当为 false
+    auto arr3 = std::move(make_array({make_int(1)}));
+    assert(arr2 != arr3);
+
     // erase 越界应当抛异常
     try
     {
@@ -85,6 +89,10 @@ void object_value()
     assert(obj2.is_object());
     assert(obj2.size() == 2);
     assert(obj2["pjh"] == (int64_t)123 && obj2["123"] == "pjh");
+
+    // 不同长度的 Object 比较应当为 false
+    auto obj3 = std::move(make_object({{"only", make_int(1)}}));
+    assert(obj2 != obj3);
 
     std::cout << "Json Object test passed." << std::endl;
 }
