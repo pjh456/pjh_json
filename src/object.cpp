@@ -176,6 +176,8 @@ namespace pjh::json
 
     bool Object::operator==(const Object &other) const noexcept
     {
+        if (m_impl->data.size() != other.m_impl->data.size())
+            return false;
         return std::equal(
             m_impl->data.begin(),
             m_impl->data.end(),
