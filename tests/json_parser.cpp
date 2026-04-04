@@ -12,24 +12,20 @@ void test_parse_literal()
 {
     std::cout << "Parser Literal test started." << std::endl;
 
-    Parser p1("null");
-    Json j1 = p1.parse();
-    assert(j1.is_null());
+    auto doc1 = parse_copy("null");
+    assert(doc1.is_null());
 
-    Parser p2("true");
-    Json j2 = p2.parse();
-    assert(j2.is_boolean());
-    assert(j2.as_boolean() == true);
+    auto doc2 = parse_copy("true");
+    assert(doc2.is_boolean());
+    assert(doc2.as_boolean() == true);
 
-    Parser p3("false");
-    Json j3 = p3.parse();
-    assert(j3.is_boolean());
-    assert(j3.as_boolean() == false);
+    auto doc3 = parse_copy("false");
+    assert(doc3.is_boolean());
+    assert(doc3.as_boolean() == false);
 
     // 测试 SIMD 对大段空白字符的跳过能力
-    Parser p4(" \t\r\n   true \n\t ");
-    Json j4 = p4.parse();
-    assert(j4.is_boolean() && j4.as_boolean() == true);
+    auto doc4 = parse_copy(" \t\r\n   true \n\t ");
+    assert(doc4.is_boolean() && doc4.as_boolean() == true);
 
     std::cout << "Parser Literal test passed." << std::endl;
 }
@@ -38,21 +34,19 @@ void test_parse_number()
 {
     std::cout << "Parser Number test started." << std::endl;
 
-    Parser p1("42");
-    assert(p1.parse().as_int() == (int64_t)42);
+    auto doc1 = parse_copy("42");
+    assert(doc1.as_int() == (int64_t)42);
 
-    Parser p2("-12345");
-    assert(p2.parse().as_int() == (int64_t)-12345);
+    auto doc2 = parse_copy("-12345");
+    assert(doc2.as_int() == (int64_t)-12345);
 
-    Parser p3("3.14159");
-    Json j3 = p3.parse();
-    assert(j3.is_float());
-    assert(std::abs(j3.as_float() - 3.14159) < 1e-6);
+    auto doc3 = parse_copy("3.14159");
+    assert(doc3.is_float());
+    assert(std::abs(doc3.as_float() - 3.14159) < 1e-6);
 
-    Parser p4("-0.05e2");
-    Json j4 = p4.parse();
-    assert(j4.is_float());
-    assert(std::abs(j4.as_float() - (-5.0)) < 1e-6);
+    auto doc4 = parse_copy("-0.05e2");
+    assert(doc4.is_float());
+    assert(std::abs(doc4.as_float() - (-5.0)) < 1e-6);
 
     std::cout << "Parser Number test passed." << std::endl;
 }
@@ -61,20 +55,20 @@ void test_parse_string()
 {
     std::cout << "Parser String test started." << std::endl;
 
-    Parser p1("\"hello world\"");
-    assert(p1.parse().as_string() == "hello world");
+    auto doc1 = parse_copy("\"hello world\"");
+    assert(doc1.as_string() == "hello world");
 
     // 测试转义符 \n, \t, \" 等
-    Parser p2("\"line1\\nline2\\t\\\"quote\\\"\"");
-    assert(p2.parse().as_string() == "line1\nline2\t\"quote\"");
+    auto doc2 = parse_copy("\"line1\\nline2\\t\\\"quote\\\"\"");
+    assert(doc2.as_string() == "line1\nline2\t\"quote\"");
 
     // 测试 Unicode 代理对解析 (emoji: 😀 -> U+1F600)
-    Parser p3("\"\\uD83D\\uDE00\"");
-    assert(p3.parse().as_string() == "\xF0\x9F\x98\x80");
+    auto doc3 = parse_copy("\"\\uD83D\\uDE00\"");
+    assert(doc3.as_string() == "\xF0\x9F\x98\x80");
 
     // 测试包含大量普通字符的 SIMD 快速跳过
-    Parser p4("\"this is a very long string without any escape characters to test simd acceleration speed\"");
-    assert(p4.parse().as_string() == "this is a very long string without any escape characters to test simd acceleration speed");
+    auto doc4 = parse_copy("\"this is a very long string without any escape characters to test simd acceleration speed\"");
+    assert(doc4.as_string() == "this is a very long string without any escape characters to test simd acceleration speed");
 
     std::cout << "Parser String test passed." << std::endl;
 }
@@ -83,26 +77,23 @@ void test_parse_array()
 {
     std::cout << "Parser Array test started." << std::endl;
 
-    Parser p1("[]");
-    Json j1 = p1.parse();
-    assert(j1.is_array());
-    assert(j1.size() == 0);
+    auto doc1 = parse_copy("[]");
+    assert(doc1.is_array());
+    assert(doc1.size() == 0);
 
-    Parser p2("[1, 2, 3]");
-    Json j2 = p2.parse();
-    assert(j2.is_array());
-    assert(j2.size() == 3);
-    assert(j2[0] == (int64_t)1);
-    assert(j2[1] == (int64_t)2);
-    assert(j2[2] == (int64_t)3);
+    auto doc2 = parse_copy("[1, 2, 3]");
+    assert(doc2.is_array());
+    assert(doc2.size() == 3);
+    assert(doc2[0] == (int64_t)1);
+    assert(doc2[1] == (int64_t)2);
+    assert(doc2[2] == (int64_t)3);
 
     // 测试嵌套数组
-    Parser p3("[[1, 2], [3, 4]]");
-    Json j3 = p3.parse();
-    assert(j3.is_array());
-    assert(j3.size() == 2);
-    assert(j3[0][1] == (int64_t)2);
-    assert(j3[1][0] == (int64_t)3);
+    auto doc3 = parse_copy("[[1, 2], [3, 4]]");
+    assert(doc3.is_array());
+    assert(doc3.size() == 2);
+    assert(doc3[0][1] == (int64_t)2);
+    assert(doc3[1][0] == (int64_t)3);
 
     std::cout << "Parser Array test passed." << std::endl;
 }
@@ -111,24 +102,21 @@ void test_parse_object()
 {
     std::cout << "Parser Object test started." << std::endl;
 
-    Parser p1("{}");
-    Json j1 = p1.parse();
-    assert(j1.is_object());
-    assert(j1.size() == 0);
+    auto doc1 = parse_copy("{}");
+    assert(doc1.is_object());
+    assert(doc1.size() == 0);
 
-    Parser p2("{\"name\": \"pjh\", \"version\": 1}");
-    Json j2 = p2.parse();
-    assert(j2.is_object());
-    assert(j2.size() == 2);
-    assert(j2["name"] == "pjh");
-    assert(j2["version"] == (int64_t)1);
+    auto doc2 = parse_copy("{\"name\": \"pjh\", \"version\": 1}");
+    assert(doc2.is_object());
+    assert(doc2.size() == 2);
+    assert(doc2["name"] == "pjh");
+    assert(doc2["version"] == (int64_t)1);
 
     // 测试嵌套对象
-    Parser p3("{\"user\": {\"id\": 100, \"active\": true}}");
-    Json j3 = p3.parse();
-    assert(j3["user"].is_object());
-    assert(j3["user"]["id"] == (int64_t)100);
-    assert(j3["user"]["active"] == true);
+    auto doc3 = parse_copy("{\"user\": {\"id\": 100, \"active\": true}}");
+    assert(doc3["user"].is_object());
+    assert(doc3["user"]["id"] == (int64_t)100);
+    assert(doc3["user"]["active"] == true);
 
     std::cout << "Parser Object test passed." << std::endl;
 }
@@ -149,20 +137,19 @@ void test_parse_complex()
         }
     })";
 
-    Parser p(complex_json);
-    Json j = p.parse();
+    auto doc = parse_copy(complex_json);
 
-    assert(j.is_object());
-    assert(j["project"] == "pjh_json");
-    assert(j["is_fast"] == true);
+    assert(doc.is_object());
+    assert(doc["project"] == "pjh_json");
+    assert(doc["is_fast"] == true);
 
-    assert(j["features"].is_array());
-    assert(j["features"].size() == 3);
-    assert(j["features"][0] == "simd");
+    assert(doc["features"].is_array());
+    assert(doc["features"].size() == 3);
+    assert(doc["features"][0] == "simd");
 
-    assert(j["metadata"].is_object());
-    assert(j["metadata"]["version"].is_float());
-    assert(j["metadata"]["author"].is_null());
+    assert(doc["metadata"].is_object());
+    assert(doc["metadata"]["version"].is_float());
+    assert(doc["metadata"]["author"].is_null());
 
     std::cout << "Parser Complex test passed." << std::endl;
 }
@@ -176,8 +163,7 @@ void test_parse_errors()
     {
         try
         {
-            Parser p(invalid_json);
-            p.parse();
+            parse_copy(invalid_json);
             assert(false && "Should have thrown an exception");
         }
         catch (const std::runtime_error &)
