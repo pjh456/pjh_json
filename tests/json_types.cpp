@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cassert>
+#include <stdexcept>
 #include <pjh_json/json.hpp>
 
 using namespace pjh::json;
@@ -56,6 +57,16 @@ void array_value()
     assert(arr1.is_array());
     assert(arr2.size() == 2);
     assert(arr2[0] == "pjh" && arr2[1] == (int64_t)123);
+
+    // erase 越界应当抛异常
+    try
+    {
+        arr2.as_array().erase(5);
+        assert(false);
+    }
+    catch (const std::out_of_range &)
+    {
+    }
 
     std::cout << "Json Array test passed." << std::endl;
 }
