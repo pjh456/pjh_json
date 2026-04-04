@@ -172,6 +172,18 @@ void test_parse_errors()
         }
     };
 
+    // parse_in_situ 要求可写缓冲且末尾有 64 字节 padding
+    try
+    {
+        std::string buf = "null";
+        parse_in_situ(std::pmr::string(buf.begin(), buf.end()));
+        assert(false && "parse_in_situ should require 64-byte padding");
+    }
+    catch (const std::runtime_error &)
+    {
+        // Expected behavior
+    }
+
     // Parser 直接使用未 padded 输入应当报错
     try
     {
