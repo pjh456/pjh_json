@@ -172,6 +172,18 @@ void test_parse_errors()
         }
     };
 
+    // Parser 直接使用未 padded 输入应当报错
+    try
+    {
+        Parser p("null");
+        p.parse();
+        assert(false && "Parser should require padded input");
+    }
+    catch (const std::runtime_error &)
+    {
+        // Expected behavior
+    }
+
     expect_throw("");               // 空输入
     expect_throw("{");              // 未闭合的对象
     expect_throw("[");              // 未闭合的数组
