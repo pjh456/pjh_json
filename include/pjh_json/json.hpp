@@ -871,6 +871,8 @@ namespace pjh::json
             throw std::runtime_error("Failed to open file: " + filepath);
 
         std::streamsize size = file.tellg();
+        if (size < 0)
+            throw std::runtime_error("Failed to get file size: " + filepath);
         file.seekg(0, std::ios::beg);
 
         std::pmr::string buffer(res);
