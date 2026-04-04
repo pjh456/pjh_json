@@ -25,17 +25,17 @@ void test_file_parsing_success()
         })";
     }
 
-    // 2. 调用咱们新写的 parse_file 接口
-    Json j = parse_file(temp_filename);
+    // 2. 调用 parse_file 接口
+    Document doc = parse_file(temp_filename);
 
     // 3. 验证解析结果
-    assert(j.is_object());
-    assert(j["engine"] == "xsimd");
-    assert(j["version"].is_float());
-    assert(j["supported_types"].is_array());
-    assert(j["supported_types"].size() == 6);
-    assert(j["supported_types"][1] == "array");
-    assert(j["is_header_only"] == true);
+    assert(doc.is_object());
+    assert(doc["engine"] == "xsimd");
+    assert(doc["version"].is_float());
+    assert(doc["supported_types"].is_array());
+    assert(doc["supported_types"].size() == 6);
+    assert(doc["supported_types"][1] == "array");
+    assert(doc["is_header_only"] == true);
 
     // 4. 清理临时文件
     std::remove(temp_filename.c_str());
