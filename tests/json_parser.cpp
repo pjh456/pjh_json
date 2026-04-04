@@ -203,6 +203,12 @@ void test_parse_errors()
     expect_throw("{\"key\": }");    // 缺少 value
     expect_throw("[1, 2,]");        // 数组末尾多余的逗号
     expect_throw("true false");     // 多余的符号
+    expect_throw("01");             // 前导 0
+    expect_throw("1.");             // 缺少小数位
+    expect_throw("1e");             // 缺少指数
+    expect_throw("1e+");            // 缺少指数值
+    expect_throw("-");              // 只有负号
+    expect_throw("-.1");            // 缺少整数部分
 
     std::cout << "Parser Error Handling test passed." << std::endl;
 }
