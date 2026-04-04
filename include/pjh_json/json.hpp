@@ -822,6 +822,8 @@ namespace pjh::json
 
     inline Json Parser::parse()
     {
+        if (!m_assume_padded)
+            error("Parser requires 64-byte '\\0' padding; use parse_copy/parse_file/parse_in_situ");
         Json result = parse_value();
         skip_whitespace();
         if (m_curr < m_end)
@@ -843,7 +845,7 @@ namespace pjh::json
             throw std::runtime_error("Buffer too small for in-situ parse");
 
         size_t size = buffer.size() - 64;
-        Parser p(std::string_view(buffer.data(), size), res);
+        Parser p(std::string_view(buffer.data(), size), res, true);
         Json root = p.parse();
         return Document(std::move(root), std::move(buffer));
     }
@@ -856,7 +858,7 @@ namespace pjh::json
         std::pmr::string buffer(res);
         buffer.resize(json.size() + 64, '\0');
         std::memcpy(buffer.data(), json.data(), json.size());
-        Parser p(std::string_view(buffer.data(), json.size()), res);
+        Parser p(std::string_view(buffer.data(), json.size()), res, true);
         Json root = p.parse();
         return Document(std::move(root), std::move(buffer));
     }

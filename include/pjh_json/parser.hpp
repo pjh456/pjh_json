@@ -19,15 +19,18 @@ namespace pjh::json
         const char *m_curr;
         const char *m_end;
         std::pmr::memory_resource *m_resource;
+        bool m_assume_padded;
 
     public:
         // 初始化并接收一段 JSON 文本
         explicit Parser(
             std::string_view json,
-            std::pmr::memory_resource *res = std::pmr::get_default_resource())
+            std::pmr::memory_resource *res = std::pmr::get_default_resource(),
+            bool assume_padded = false)
             : m_curr(json.data()),
               m_end(json.data() + json.size()),
-              m_resource(res) {}
+              m_resource(res),
+              m_assume_padded(assume_padded) {}
 
         // 主入口
         Json parse();
