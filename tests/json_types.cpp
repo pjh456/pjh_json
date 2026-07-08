@@ -97,9 +97,97 @@ void object_value()
     std::cout << "Json Object test passed." << std::endl;
 }
 
+void test_object_upsert()
+{
+    std::cout << "Object upsert test started." << std::endl;
+
+    Object obj;
+    obj.insert("k", make_int(1));
+    assert(obj.size() == 1);
+    obj.insert("k", make_int(2));
+    assert(obj.size() == 1);
+    assert(obj["k"] == (int64_t)2);
+
+    std::cout << "Object upsert test passed." << std::endl;
+}
+
+void test_object_remove_bool()
+{
+    std::cout << "Object remove bool test started." << std::endl;
+
+    Object obj;
+    obj.insert("k", make_int(1));
+    assert(obj.remove("k") == true);
+    assert(obj.remove("k") == false);
+    assert(obj.size() == 0);
+
+    std::cout << "Object remove bool test passed." << std::endl;
+}
+
+void test_object_content_equality()
+{
+    std::cout << "Object content equality test started." << std::endl;
+
+    Object a;
+    a.insert("a", make_int(1));
+    a.insert("b", make_int(2));
+
+    Object b;
+    b.insert("b", make_int(2));
+    b.insert("a", make_int(1));
+    assert(a == b);
+
+    Object c;
+    c.insert("a", make_int(1));
+    c.insert("b", make_int(99));
+    assert(a != c);
+
+    std::cout << "Object content equality test passed." << std::endl;
+}
+
+void test_try_as()
+{
+    std::cout << "try_as test started." << std::endl;
+
+    Json i = make_int(42);
+    assert(i.try_as_int().has_value() && *i.try_as_int() == 42);
+    assert(!i.try_as_float().has_value());
+    assert(!i.try_as_boolean().has_value());
+    assert(!i.try_as_string().has_value());
+    assert(i.try_as_array() == nullptr);
+    assert(i.try_as_object() == nullptr);
+
+    Json arr = make_array({make_int(1)});
+    assert(arr.try_as_array() != nullptr);
+    assert(arr.try_as_array()->size() == 1);
+    assert(arr.try_as_object() == nullptr);
+
+    Json obj = make_object({{"x", make_int(0)}});
+    assert(obj.try_as_object() != nullptr);
+    assert(obj.try_as_array() == nullptr);
+
+    Json s = make_str("hi");
+    assert(s.try_as_string().has_value() && *s.try_as_string() == "hi");
+    assert(!s.try_as_int().has_value());
+
+    Json b = make_boolean(true);
+    assert(b.try_as_boolean().has_value() && *b.try_as_boolean() == true);
+
+    Json f = make_float(3.14);
+    assert(f.try_as_float().has_value() && *f.try_as_float() == 3.14);
+
+    Json n = make_null(nullptr);
+    assert(!n.try_as_int().has_value());
+
+    std::cout << "try_as test passed." << std::endl;
+}
 int main()
 {
     simple_value();
     array_value();
     object_value();
+    test_object_upsert();
+    test_object_remove_bool();
+    test_object_content_equality();
+    test_try_as();
 }

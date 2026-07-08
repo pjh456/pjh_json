@@ -210,6 +210,7 @@ void test_parse_errors()
     expect_throw("1e+");            // 缺少指数值
     expect_throw("-");              // 只有负号
     expect_throw("-.1");            // 缺少整数部分
+    expect_throw("{\"a\":1,\"a\":2}"); // 重复 key
 
     std::cout << "Parser Error Handling test passed." << std::endl;
 }
