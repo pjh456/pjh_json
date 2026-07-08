@@ -72,9 +72,8 @@ namespace pjh::json
 
     Array::Array(Array &&other) noexcept
         : m_impl(std::move(other.m_impl)),
-          m_resource(other.m_resource)
+          m_resource(std::exchange(other.m_resource, nullptr))
     {
-        other.m_resource = std::pmr::get_default_resource();
     }
 
     Array &Array::operator=(Array &&other) noexcept
@@ -82,8 +81,7 @@ namespace pjh::json
         if (this == &other)
             return *this;
         m_impl = std::move(other.m_impl);
-        m_resource = other.m_resource;
-        other.m_resource = std::pmr::get_default_resource();
+        m_resource = std::exchange(other.m_resource, nullptr);
         return *this;
     }
 
