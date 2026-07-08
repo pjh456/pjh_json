@@ -205,8 +205,18 @@ namespace pjh::json
         }
 
     public:
-        Json &operator[](size_t idx) { return as_array()[idx]; }
-        const Json &operator[](size_t idx) const { return as_array()[idx]; }
+        Json &operator[](size_t idx)
+        {
+            if (!is_array())
+                throw std::runtime_error("Type error: expected array");
+            return as_array()[idx];
+        }
+        const Json &operator[](size_t idx) const
+        {
+            if (!is_array())
+                throw std::runtime_error("Type error: expected array");
+            return as_array()[idx];
+        }
 
         Json &at(size_t idx)
         {
@@ -221,8 +231,18 @@ namespace pjh::json
             return as_array().at(idx);
         }
 
-        Json &operator[](std::string_view key) { return as_object()[key]; }
-        const Json &operator[](std::string_view key) const { return as_object()[key]; }
+        Json &operator[](std::string_view key)
+        {
+            if (!is_object())
+                throw std::runtime_error("Type error: expected object");
+            return as_object()[key];
+        }
+        const Json &operator[](std::string_view key) const
+        {
+            if (!is_object())
+                throw std::runtime_error("Type error: expected object");
+            return as_object()[key];
+        }
 
         Json &at(std::string_view key)
         {
