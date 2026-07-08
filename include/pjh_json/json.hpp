@@ -236,23 +236,25 @@ namespace pjh::json
     // ---------------------------------------------------------
     // Document Wrapper (Takes ownership of the In-Situ buffer)
     // ---------------------------------------------------------
-    class Document : public Json
+    class Document
     {
+        Json m_root;
         std::pmr::string m_buffer;
-
-    public:
-        const std::pmr::string &buffer() const noexcept { return m_buffer; }
 
     public:
         Document() = default;
 
         Document(Json &&js, std::pmr::string &&buf)
-            : Json(std::move(js)), m_buffer(std::move(buf)) {}
+            : m_root(std::move(js)), m_buffer(std::move(buf)) {}
 
         Document(const Document &) = delete;
         Document &operator=(const Document &) = delete;
         Document(Document &&) noexcept = default;
         Document &operator=(Document &&) noexcept = default;
+
+        const std::pmr::string &buffer() const noexcept { return m_buffer; }
+        Json &root() noexcept { return m_root; }
+        const Json &root() const noexcept { return m_root; }
     };
 
     Document parse_in_situ(
