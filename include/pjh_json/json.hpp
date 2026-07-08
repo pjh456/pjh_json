@@ -238,14 +238,16 @@ namespace pjh::json
     // ---------------------------------------------------------
     class Document : public Json
     {
+        std::pmr::string m_buffer;
+
     public:
-        std::pmr::string buffer;
+        const std::pmr::string &buffer() const noexcept { return m_buffer; }
 
     public:
         Document() = default;
 
         Document(Json &&js, std::pmr::string &&buf)
-            : Json(std::move(js)), buffer(std::move(buf)) {}
+            : Json(std::move(js)), m_buffer(std::move(buf)) {}
 
         Document(const Document &) = delete;
         Document &operator=(const Document &) = delete;
