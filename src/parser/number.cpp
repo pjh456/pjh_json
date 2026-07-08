@@ -45,7 +45,9 @@ namespace pjh::json
                     ++m_curr;
             }
             double val = 0.0;
-            std::from_chars(start, m_curr, val);
+            auto [end, ec] = std::from_chars(start, m_curr, val);
+            if (ec != std::errc{} || end != m_curr)
+                error("Invalid number format");
             return make_float(val);
         }
 
