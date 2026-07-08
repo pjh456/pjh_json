@@ -517,7 +517,9 @@ namespace pjh::json
             ++digits;
         }
 
-        // 如果碰到了小数点/指数，或者整数过长（防止 uint64_t 溢出），安全降级给 from_chars
+        if (digits == 0)
+            error("Invalid number: no digits after '-'");
+
         if (*m_curr == '.' || *m_curr == 'e' || *m_curr == 'E' || digits > 18)
         {
             if (*m_curr == '.')
