@@ -27,6 +27,8 @@ namespace pjh::json
 
         if (digits == 0)
             error("Invalid number: no digits after '-'");
+        if (digits > 1 && (is_negative ? start[1] : start[0]) == '0')
+            error("Invalid number: leading zeros are not allowed");
 
         if (*m_curr == '.' || *m_curr == 'e' || *m_curr == 'E' || digits > 18)
         {
