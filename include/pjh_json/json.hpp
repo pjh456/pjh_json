@@ -815,9 +815,7 @@ namespace pjh::json
             [[fallthrough]];
         default:
             error("Unexpected character parsing value");
-            error("Unexpected character parsing value");
         }
-        return Json(nullptr);
     }
 
     inline Json Parser::parse()
