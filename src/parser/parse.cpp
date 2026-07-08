@@ -42,23 +42,24 @@ namespace pjh::json
     }
 
     Document parse_file(
-        const std::string &filepath,
+        std::string_view filepath,
         std::pmr::memory_resource *res)
     {
-        std::ifstream file(filepath, std::ios::binary | std::ios::ate);
+        std::string path(filepath);
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (!file.is_open())
-            throw std::runtime_error("Failed to open file: " + filepath);
+            throw std::runtime_error("Failed to open file: " + path);
 
         std::streamsize size = file.tellg();
         if (size < 0)
-            throw std::runtime_error("Failed to get file size: " + filepath);
+            throw std::runtime_error("Failed to get file size: " + path);
         file.seekg(0, std::ios::beg);
 
         std::pmr::string buffer(res);
         buffer.resize(size + 64, '\0');
 
         if (!file.read(buffer.data(), size))
-            throw std::runtime_error("Failed to read file: " + filepath);
+            throw std::runtime_error("Failed to read file: " + path);
 
         return parse_in_situ(std::move(buffer), res);
     }

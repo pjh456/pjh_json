@@ -266,7 +266,7 @@ namespace pjh::json
         std::pmr::memory_resource *res = std::pmr::get_default_resource());
 
     Document parse_file(
-        const std::string &filepath,
+        std::string_view filepath,
         std::pmr::memory_resource *res = std::pmr::get_default_resource());
 }
 
