@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <variant>
+#include <optional>
 #include <initializer_list>
 #include <string_view>
 #include <stdexcept>
@@ -142,6 +143,48 @@ namespace pjh::json
 
         Object &as_object() { return std::get<Object>(m_data); }
         const Object &as_object() const { return std::get<Object>(m_data); }
+
+    public:
+        std::optional<bool> try_as_boolean() const noexcept
+        {
+            if (!is_boolean()) return std::nullopt;
+            return as_boolean();
+        }
+        std::optional<std::int64_t> try_as_int() const noexcept
+        {
+            if (!is_int()) return std::nullopt;
+            return as_int();
+        }
+        std::optional<double> try_as_float() const noexcept
+        {
+            if (!is_float()) return std::nullopt;
+            return as_float();
+        }
+        std::optional<std::string_view> try_as_string() const noexcept
+        {
+            if (!is_string()) return std::nullopt;
+            return as_string();
+        }
+        Array *try_as_array() noexcept
+        {
+            if (!is_array()) return nullptr;
+            return &as_array();
+        }
+        const Array *try_as_array() const noexcept
+        {
+            if (!is_array()) return nullptr;
+            return &as_array();
+        }
+        Object *try_as_object() noexcept
+        {
+            if (!is_object()) return nullptr;
+            return &as_object();
+        }
+        const Object *try_as_object() const noexcept
+        {
+            if (!is_object()) return nullptr;
+            return &as_object();
+        }
 
     public:
         size_t size() const noexcept
