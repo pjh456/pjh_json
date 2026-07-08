@@ -168,13 +168,13 @@ namespace pjh::json
         Json &at(size_t idx)
         {
             if (!is_array())
-                throw std::runtime_error("Type error: excepted array");
+                throw std::runtime_error("Type error: expected array");
             return as_array().at(idx);
         }
         const Json &at(size_t idx) const
         {
             if (!is_array())
-                throw std::runtime_error("Type error: excepted array");
+                throw std::runtime_error("Type error: expected array");
             return as_array().at(idx);
         }
 
@@ -184,14 +184,14 @@ namespace pjh::json
         Json &at(std::string_view key)
         {
             if (!is_object())
-                throw std::runtime_error("Type error: excepted object");
+                throw std::runtime_error("Type error: expected object");
             return as_object().at(key);
         }
 
         const Json &at(std::string_view key) const
         {
             if (!is_object())
-                throw std::runtime_error("Type error: excepted object");
+                throw std::runtime_error("Type error: expected object");
             return as_object().at(key);
         }
 
