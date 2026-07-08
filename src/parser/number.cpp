@@ -35,16 +35,28 @@ namespace pjh::json
             if (*m_curr == '.')
             {
                 ++m_curr;
+                uint32_t frac = 0;
                 while (*m_curr >= '0' && *m_curr <= '9')
+                {
                     ++m_curr;
+                    ++frac;
+                }
+                if (frac == 0)
+                    error("Invalid number: no digits after decimal point");
             }
             if (*m_curr == 'e' || *m_curr == 'E')
             {
                 ++m_curr;
                 if (*m_curr == '+' || *m_curr == '-')
                     ++m_curr;
+                uint32_t exp = 0;
                 while (*m_curr >= '0' && *m_curr <= '9')
+                {
                     ++m_curr;
+                    ++exp;
+                }
+                if (exp == 0)
+                    error("Invalid number: no digits in exponent");
             }
             double val = 0.0;
             auto [end, ec] = std::from_chars(start, m_curr, val);
