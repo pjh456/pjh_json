@@ -86,7 +86,7 @@ namespace pjh::json
 
         Json &operator=(const char *val)
         {
-            m_data = std::string(val);
+            m_data = std::string_view(val);
             return *this;
         }
 
