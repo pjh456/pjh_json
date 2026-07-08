@@ -87,12 +87,12 @@ namespace pjh::json
         return *this;
     }
 
-    bool Object::contains(const Json &val) const noexcept
+    bool Object::contains(std::string_view key) const noexcept
     {
         return std::ranges::find_if(
                    m_impl->data,
                    [&](const auto &kv)
-                   { return kv.second == val; }) !=
+                   { return kv.first == key; }) !=
                m_impl->data.end();
     }
 

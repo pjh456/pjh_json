@@ -3,6 +3,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <memory>
 #include <ranges>
 #include <memory_resource>
@@ -49,7 +50,7 @@ namespace pjh::json
         size_t size() const noexcept;
         bool empty() const noexcept;
         void clear() noexcept;
-        bool contains(const Json &val) const noexcept;
+        bool contains(std::string_view key) const noexcept;
 
         Vec &data() noexcept;
         const Vec &data() const noexcept;
