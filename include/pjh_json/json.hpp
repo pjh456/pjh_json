@@ -158,7 +158,7 @@ namespace pjh::json
                 return as_array().empty();
             if (is_object())
                 return as_object().empty();
-            return !is_null();
+            return false;
         }
 
     public:
