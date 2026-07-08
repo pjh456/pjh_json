@@ -40,7 +40,7 @@ add_library(pjh::json ALIAS pjh_json)
 target_include_directories(pjh_json
     PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/xsimd/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/xsimd/include>
     $<INSTALL_INTERFACE:include>
 )
 
@@ -63,7 +63,7 @@ if(MSVC)
         /MP
         /Zc:char8_t-
     )
-else()
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     add_link_options(
         -static-libgcc
         -static-libstdc++
