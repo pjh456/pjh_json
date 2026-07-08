@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include <pjh_json/json.hpp>
+#include <pjh_json/parser.hpp>
 
 using namespace pjh::json;
 
