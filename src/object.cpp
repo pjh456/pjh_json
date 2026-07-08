@@ -151,37 +151,49 @@ namespace pjh::json
 
     void Object::insert(std::string_view key, Json val)
     {
-        insert(std::make_pair(key, val));
+        auto it = std::ranges::find_if(
+            m_impl->data,
+            [&](auto &kv) { return kv.first == key; });
+
+        if (it != m_impl->data.end())
+        {
+            it->second = std::move(val);
+            return;
+        }
+        m_impl->data.emplace_back(key, std::move(val));
     }
 
     void Object::insert(Entry entry)
     {
-        m_impl->data.push_back(std::move(entry));
+        insert(entry.first, std::move(entry.second));
     }
 
-    void Object::remove(std::string_view key)
+    bool Object::remove(std::string_view key)
     {
         auto it = std::ranges::find_if(
-            m_impl->data.begin(), m_impl->data.end(),
-            [&](auto &kv)
-            { return kv.first == key; });
+            m_impl->data,
+            [&](auto &kv) { return kv.first == key; });
 
         if (it == m_impl->data.end())
-            return;
+            return false;
 
         m_impl->data.erase(it);
+        return true;
     }
 
     bool Object::operator==(const Object &other) const noexcept
     {
-        if (m_impl->data.size() != other.m_impl->data.size())
+        if (size() != other.size())
             return false;
-        return std::equal(
-            m_impl->data.begin(),
-            m_impl->data.end(),
-            other.m_impl->data.begin(),
-            [](const Entry &x, const Entry &y)
-            { return x.first == y.first && x.second == y.second; });
+        for (const auto &[key, val] : m_impl->data)
+        {
+            auto it = std::ranges::find_if(
+                other.m_impl->data,
+                [&](const auto &kv) { return kv.first == key; });
+            if (it == other.m_impl->data.end() || it->second != val)
+                return false;
+        }
+        return true;
     }
 
     size_t Object::size() const noexcept { return m_impl->data.size(); }

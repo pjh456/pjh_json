@@ -68,7 +68,7 @@ namespace pjh::json
         void insert(std::string_view key, Json val);
         void insert(Entry entry);
 
-        void remove(std::string_view key);
+        bool remove(std::string_view key);
 
     public:
         bool operator==(const Object &other) const noexcept;

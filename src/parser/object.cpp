@@ -23,6 +23,10 @@ namespace pjh::json
                 error("Expected string key in object");
             auto key = parse_string();
 
+            for (const auto &kv : obj.data())
+                if (kv.first == key)
+                    error("Duplicate key in object");
+
             skip_whitespace();
             if (*m_curr != ':')
                 error("Expected ':' in object");
@@ -66,6 +70,10 @@ namespace pjh::json
             if (*m_curr != '"')
                 error("Expected string key in object");
             auto key = parse_string();
+
+            for (const auto &kv : obj.data())
+                if (kv.first == key)
+                    error("Duplicate key in object");
 
             skip_whitespace();
             if (*m_curr != ':')
