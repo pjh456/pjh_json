@@ -147,43 +147,39 @@ namespace pjh::json
     public:
         std::optional<bool> try_as_boolean() const noexcept
         {
-            if (!is_boolean()) return std::nullopt;
-            return as_boolean();
+            auto *p = std::get_if<bool>(&m_data);
+            return p ? std::optional(*p) : std::nullopt;
         }
         std::optional<std::int64_t> try_as_int() const noexcept
         {
-            if (!is_int()) return std::nullopt;
-            return as_int();
+            auto *p = std::get_if<std::int64_t>(&m_data);
+            return p ? std::optional(*p) : std::nullopt;
         }
         std::optional<double> try_as_float() const noexcept
         {
-            if (!is_float()) return std::nullopt;
-            return as_float();
+            auto *p = std::get_if<double>(&m_data);
+            return p ? std::optional(*p) : std::nullopt;
         }
         std::optional<std::string_view> try_as_string() const noexcept
         {
-            if (!is_string()) return std::nullopt;
-            return as_string();
+            auto *p = std::get_if<std::string_view>(&m_data);
+            return p ? std::optional(*p) : std::nullopt;
         }
         Array *try_as_array() noexcept
         {
-            if (!is_array()) return nullptr;
-            return &as_array();
+            return std::get_if<Array>(&m_data);
         }
         const Array *try_as_array() const noexcept
         {
-            if (!is_array()) return nullptr;
-            return &as_array();
+            return std::get_if<Array>(&m_data);
         }
         Object *try_as_object() noexcept
         {
-            if (!is_object()) return nullptr;
-            return &as_object();
+            return std::get_if<Object>(&m_data);
         }
         const Object *try_as_object() const noexcept
         {
-            if (!is_object()) return nullptr;
-            return &as_object();
+            return std::get_if<Object>(&m_data);
         }
 
     public:
