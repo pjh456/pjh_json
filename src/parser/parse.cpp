@@ -50,6 +50,54 @@ namespace pjh::json
         return Document(std::move(root));
     }
 
+    Document parse_jsonl(std::string_view input, std::pmr::memory_resource *res)
+    {
+        // One padded buffer owned by the Document; every line's borrowed
+        // strings point into it, so nothing dangles.
+        std::pmr::string buffer(res);
+        buffer.resize(input.size() + 64, '\0');
+        std::memcpy(buffer.data(), input.data(), input.size());
+
+        Array arr(res);
+        const char *base = buffer.data();
+        size_t i = 0;
+        const size_t n = input.size();
+
+        while (i < n)
+        {
+            size_t nl = i;
+            while (nl < n && base[nl] != '\n')
+                ++nl;
+
+            size_t len = nl - i;
+            // trim trailing '\r' (CRLF)
+            if (len > 0 && base[i + len - 1] == '\r')
+                --len;
+
+            // skip blank lines
+            bool blank = true;
+            for (size_t k = 0; k < len; ++k)
+            {
+                char c = base[i + k];
+                if (c != ' ' && c != '\t')
+                {
+                    blank = false;
+                    break;
+                }
+            }
+
+            if (!blank)
+            {
+                Parser p(std::string_view(base + i, len), res, true);
+                arr.push_back(p.parse());
+            }
+
+            i = (nl < n) ? nl + 1 : n;
+        }
+
+        return Document(Json(std::move(arr)), std::move(buffer));
+    }
+
     Document parse_file(
         std::string_view filepath,
         std::pmr::memory_resource *res)

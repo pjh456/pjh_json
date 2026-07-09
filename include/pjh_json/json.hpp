@@ -338,6 +338,10 @@ namespace pjh::json
         const char *data, size_t content_len,
         std::pmr::memory_resource *res = Config::instance().resource());
 
+    [[nodiscard]] Document parse_jsonl(
+        std::string_view input,
+        std::pmr::memory_resource *res = Config::instance().resource());
+
     [[nodiscard]] Document parse_file(
         std::string_view filepath,
         std::pmr::memory_resource *res = Config::instance().resource());
