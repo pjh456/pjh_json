@@ -8,6 +8,8 @@
 #include <ranges>
 #include <memory_resource>
 #include <vector>
+#include <concepts>
+#include <utility>
 
 #include "config.hpp"
 
@@ -49,6 +51,11 @@ namespace pjh::json
         // 显式深拷贝
         [[nodiscard]] Object clone(
             std::pmr::memory_resource *into = Config::instance().resource()) const;
+
+        // 可变参构建器；每个实参须可转为 Entry
+        template <class... Es>
+            requires(std::convertible_to<Es, Object::Entry> && ...)
+        [[nodiscard]] static Object of(Es &&...entries);
 
     public:
         [[nodiscard]] size_t size() const noexcept;

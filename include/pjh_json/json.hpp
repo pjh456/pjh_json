@@ -353,6 +353,15 @@ namespace pjh::json
         (a.push_back(Json(std::forward<Ts>(vals))), ...);
         return a;
     }
+
+    template <class... Es>
+        requires(std::convertible_to<Es, Object::Entry> && ...)
+    inline Object Object::of(Es &&...entries)
+    {
+        Object o;
+        (o.insert(Object::Entry(std::forward<Es>(entries))), ...);
+        return o;
+    }
 }
 
 #endif // INCLUDE_PJH_JSON_HPP

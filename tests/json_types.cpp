@@ -84,20 +84,19 @@ void object_value()
     assert(obj1.is_object());
     assert(obj1.size() == 0);
 
-    Object o2;
-    o2.insert("pjh", Json((int64_t)123));
-    o2.insert("123", Json("pjh"));
-    auto obj2 = Json(std::move(o2));
+    using E = Object::Entry;
+    auto obj2 = Json(Object::of(E{"pjh", Json((int64_t)123)}, E{"123", Json("pjh")}));
     assert(!obj2.empty());
     assert(obj2.is_object());
     assert(obj2.size() == 2);
     assert(obj2["pjh"] == (int64_t)123 && obj2["123"] == "pjh");
 
     // 不同长度的 Object 比较应当为 false
-    Object o3;
-    o3.insert("only", Json((int64_t)1));
-    auto obj3 = Json(std::move(o3));
+    auto obj3 = Json(Object::of(E{"only", Json((int64_t)1)}));
     assert(obj2 != obj3);
+
+    static_assert(std::convertible_to<Object::Entry, Object::Entry>);
+    static_assert(!std::convertible_to<int, Object::Entry>);
 
     std::cout << "Json Object test passed." << std::endl;
 }
