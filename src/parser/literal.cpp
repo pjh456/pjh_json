@@ -27,12 +27,12 @@ namespace pjh::json
         if (val32 == true_magic)
         {
             m_curr += 4;
-            return make_boolean(true);
+            return Json(true);
         }
         if (val32 == null_magic)
         {
             m_curr += 4;
-            return make_null(nullptr);
+            return Json(nullptr);
         }
 
         uint64_t val64;
@@ -40,7 +40,7 @@ namespace pjh::json
         if ((val64 & false_mask) == false_magic)
         {
             m_curr += 5;
-            return make_boolean(false);
+            return Json(false);
         }
 
         error("Invalid literal");

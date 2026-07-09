@@ -287,15 +287,6 @@ namespace pjh::json
         bool operator!=(const Object &val) const noexcept { return !(this->operator==(val)); }
     };
 
-    inline Json make_null(std::nullptr_t) { return Json(nullptr); }
-    inline Json make_boolean(bool val) { return Json(val); }
-    inline Json make_int(int64_t val) { return Json(val); }
-    inline Json make_float(double val) { return Json(val); }
-    inline Json make_str(std::string_view str) { return Json(str); }
-    inline Json make_str(const char *str) { return Json(str); }
-    inline Json make_array(std::initializer_list<Json> vec) { return Json(vec); }
-    inline Json make_object(std::initializer_list<Object::Entry> items) { return Json(items); }
-
     // ---------------------------------------------------------
     // Document Wrapper (Takes ownership of the In-Situ buffer)
     // ---------------------------------------------------------

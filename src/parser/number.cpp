@@ -69,11 +69,11 @@ namespace pjh::json
             auto [end, ec] = std::from_chars(start, m_curr, val);
             if (ec != std::errc{} || end != m_curr)
                 error("Invalid number format");
-            return make_float(val);
+            return Json(val);
         }
 
         uint64_t uval = parse_u64(int_start, digits);
         int64_t val = is_negative ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
-        return make_int(val);
+        return Json(val);
     }
 }
