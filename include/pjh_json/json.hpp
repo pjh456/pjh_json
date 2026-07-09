@@ -7,6 +7,7 @@
 #include <initializer_list>
 #include <string_view>
 #include <stdexcept>
+#include <memory>
 #include <memory_resource>
 
 #include "array.hpp"
@@ -297,30 +298,44 @@ namespace pjh::json
     };
 
     // ---------------------------------------------------------
-    // Document — Zero-copy + Owning JSON root
+    // Document — 自持 arena 的 JSON 根（拥有内存所有权）
     // ---------------------------------------------------------
     class Document
     {
+        std::unique_ptr<std::pmr::memory_resource> m_arena;
         Json m_root;
-        std::pmr::string m_buffer;          // null/empty = view mode
+        std::pmr::string m_buffer; // 拥有原始文本(in-situ/copy)，view 模式为空
+        bool m_is_view = false;
+        Storage m_storage = Storage::Pooled; // 记住重建 arena 所需参数
+        size_t m_block = 4096;
 
     public:
-        Document() = default;
+        // arena 工厂：Pooled→(un)synchronized_pool, Arena→monotonic, SystemDefault→nullptr
+        [[nodiscard]] static std::unique_ptr<std::pmr::memory_resource>
+        make_arena(Storage storage, size_t block, bool thread_safe);
 
-        // Owned mode: buffer is owned (parse_in_situ, parse_copy, parse_file)
-        Document(Json &&js, std::pmr::string &&buf)
-            : m_root(std::move(js)), m_buffer(std::move(buf)) {}
+        explicit Document(Storage storage = Config::instance().storage(),
+                          size_t block = 4096);
 
-        // View mode: caller keeps the backing buffer alive (parse_view)
-        explicit Document(Json &&js)
-            : m_root(std::move(js)) {}
+        // 接管式构造：buffer 用 move 构造窃取（任意 allocator 安全），tree 用 arena
+        Document(std::unique_ptr<std::pmr::memory_resource> arena,
+                 Json &&root, std::pmr::string &&buffer, bool is_view,
+                 Storage storage, size_t block);
 
         Document(const Document &) = delete;
         Document &operator=(const Document &) = delete;
         Document(Document &&) noexcept = default;
-        Document &operator=(Document &&) noexcept = default;
+        // 自定义 move 赋值：默认按声明序会先释放 arena，导致 root/buffer 悬垂。
+        // 用 swap 让旧资源随临时对象按正确逆序析构（buffer/root 先于 arena）。
+        Document &operator=(Document &&other) noexcept;
 
-        [[nodiscard]] bool is_view() const noexcept { return m_buffer.empty(); }
+        // arena 拥有的资源；SystemDefault 时回退到 new_delete_resource
+        [[nodiscard]] std::pmr::memory_resource *resource() noexcept;
+
+        // 重建 arena → 释放本 Document 拥有的全部内存
+        void reset();
+
+        [[nodiscard]] bool is_view() const noexcept { return m_is_view; }
         [[nodiscard]] const std::pmr::string &buffer() const noexcept { return m_buffer; }
         [[nodiscard]] Json &root() noexcept { return m_root; }
         [[nodiscard]] const Json &root() const noexcept { return m_root; }
@@ -328,23 +343,23 @@ namespace pjh::json
 
     [[nodiscard]] Document parse_in_situ(
         std::pmr::string &&buffer,
-        std::pmr::memory_resource *res = Config::instance().resource());
+        Storage storage = Config::instance().storage());
 
     [[nodiscard]] Document parse_copy(
         std::string_view json,
-        std::pmr::memory_resource *res = Config::instance().resource());
+        Storage storage = Config::instance().storage());
 
     [[nodiscard]] Document parse_view(
         const char *data, size_t content_len,
-        std::pmr::memory_resource *res = Config::instance().resource());
+        Storage storage = Config::instance().storage());
 
     [[nodiscard]] Document parse_jsonl(
         std::string_view input,
-        std::pmr::memory_resource *res = Config::instance().resource());
+        Storage storage = Config::instance().storage());
 
     [[nodiscard]] Document parse_file(
         std::string_view filepath,
-        std::pmr::memory_resource *res = Config::instance().resource());
+        Storage storage = Config::instance().storage());
 }
 
 #endif // INCLUDE_PJH_JSON_HPP

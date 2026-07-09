@@ -178,7 +178,7 @@ namespace pjh::json
     std::pmr::string prettify(std::string_view json, uint8_t indent,
                               std::pmr::memory_resource *res)
     {
-        Document doc = parse_copy(json, res);
+        Document doc = parse_copy(json);
         return dump(doc.root(), DumpOptions{.pretty = true, .indent = indent}, res);
     }
 }

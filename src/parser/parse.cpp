@@ -5,6 +5,17 @@
 
 namespace pjh::json
 {
+    namespace
+    {
+        constexpr size_t kBlock = 4096;
+
+        std::pmr::memory_resource *arena_res(
+            const std::unique_ptr<std::pmr::memory_resource> &arena) noexcept
+        {
+            return arena ? arena.get() : std::pmr::new_delete_resource();
+        }
+    }
+
     Json Parser::parse()
     {
         if (!m_assume_padded)
@@ -16,44 +27,49 @@ namespace pjh::json
         return result;
     }
 
-    Document parse_in_situ(
-        std::pmr::string &&buffer,
-        std::pmr::memory_resource *res)
+    Document parse_in_situ(std::pmr::string &&buffer, Storage storage)
     {
         if (buffer.size() < 64)
             throw ParseError("Buffer too small for in-situ parse");
 
         size_t size = buffer.size() - 64;
-        Parser p(std::string_view(buffer.data(), size), res, true);
+        auto arena = Document::make_arena(storage, kBlock, false);
+        Parser p(std::string_view(buffer.data(), size), arena_res(arena), true);
         Json root = p.parse();
-        return Document(std::move(root), std::move(buffer));
+        return Document(std::move(arena), std::move(root), std::move(buffer),
+                        false, storage, kBlock);
     }
 
-    Document parse_copy(
-        std::string_view json,
-        std::pmr::memory_resource *res)
+    Document parse_copy(std::string_view json, Storage storage)
     {
+        auto arena = Document::make_arena(storage, kBlock, false);
+        std::pmr::memory_resource *res = arena_res(arena);
+
         std::pmr::string buffer(res);
         buffer.resize(json.size() + 64, '\0');
         std::memcpy(buffer.data(), json.data(), json.size());
+
         Parser p(std::string_view(buffer.data(), json.size()), res, true);
         Json root = p.parse();
-        return Document(std::move(root), std::move(buffer));
+        return Document(std::move(arena), std::move(root), std::move(buffer),
+                        false, storage, kBlock);
     }
 
-    Document parse_view(
-        const char *data, size_t content_len,
-        std::pmr::memory_resource *res)
+    Document parse_view(const char *data, size_t content_len, Storage storage)
     {
-        Parser p(std::string_view(data, content_len), res, true);
+        auto arena = Document::make_arena(storage, kBlock, false);
+        Parser p(std::string_view(data, content_len), arena_res(arena), true);
         Json root = p.parse();
-        return Document(std::move(root));
+        return Document(std::move(arena), std::move(root), std::pmr::string{},
+                        true, storage, kBlock);
     }
 
-    Document parse_jsonl(std::string_view input, std::pmr::memory_resource *res)
+    Document parse_jsonl(std::string_view input, Storage storage)
     {
-        // One padded buffer owned by the Document; every line's borrowed
-        // strings point into it, so nothing dangles.
+        auto arena = Document::make_arena(storage, kBlock, false);
+        std::pmr::memory_resource *res = arena_res(arena);
+
+        // 单个 padded buffer 归 Document 所有；每行借用的字符串都指向它，不会悬垂。
         std::pmr::string buffer(res);
         buffer.resize(input.size() + 64, '\0');
         std::memcpy(buffer.data(), input.data(), input.size());
@@ -70,11 +86,9 @@ namespace pjh::json
                 ++nl;
 
             size_t len = nl - i;
-            // trim trailing '\r' (CRLF)
             if (len > 0 && base[i + len - 1] == '\r')
                 --len;
 
-            // skip blank lines
             bool blank = true;
             for (size_t k = 0; k < len; ++k)
             {
@@ -95,12 +109,11 @@ namespace pjh::json
             i = (nl < n) ? nl + 1 : n;
         }
 
-        return Document(Json(std::move(arr)), std::move(buffer));
+        return Document(std::move(arena), Json(std::move(arr)), std::move(buffer),
+                        false, storage, kBlock);
     }
 
-    Document parse_file(
-        std::string_view filepath,
-        std::pmr::memory_resource *res)
+    Document parse_file(std::string_view filepath, Storage storage)
     {
         std::string path(filepath);
         std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -112,12 +125,12 @@ namespace pjh::json
             throw ParseError("Failed to get file size: " + path);
         file.seekg(0, std::ios::beg);
 
-        std::pmr::string buffer(res);
+        std::pmr::string buffer;
         buffer.resize(size + 64, '\0');
 
         if (!file.read(buffer.data(), size))
             throw ParseError("Failed to read file: " + path);
 
-        return parse_in_situ(std::move(buffer), res);
+        return parse_in_situ(std::move(buffer), storage);
     }
 }
