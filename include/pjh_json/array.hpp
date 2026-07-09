@@ -6,6 +6,7 @@
 #include <memory_resource>
 #include <utility>
 #include <vector>
+#include <concepts>
 
 #include "json_fwd.hpp"
 #include "config.hpp"
@@ -46,8 +47,8 @@ namespace pjh::json
         [[nodiscard]] Array clone(
             std::pmr::memory_resource *into = Config::instance().resource()) const;
 
-        // 可变参构建器；定义见 json.hpp 尾部
         template <class... Ts>
+            requires(std::constructible_from<Json, Ts> && ...)
         [[nodiscard]] static Array of(Ts &&...vals);
 
     public:

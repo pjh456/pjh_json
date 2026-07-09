@@ -9,6 +9,7 @@
 #include <memory>
 #include <memory_resource>
 #include <utility>
+#include <concepts>
 
 #include "array.hpp"
 #include "object.hpp"
@@ -58,8 +59,14 @@ namespace pjh::json
         Json() = default;
         Json(std::nullptr_t) : m_data(nullptr) {}
         Json(bool val) : m_data(val) {}
-        Json(int64_t val) : m_data(val) {}
-        Json(double val) : m_data(val) {}
+
+        template <std::integral T>
+            requires(!std::same_as<T, bool>)
+        Json(T val) : m_data(static_cast<int64_t>(val)) {}
+
+        template <std::floating_point T>
+        Json(T val) : m_data(static_cast<double>(val)) {}
+
         Json(std::string_view str) : m_data(str) {}
         Json(const char *str) : m_data(std::string_view(str)) {}
         Json(Array arr) : m_data(std::move(arr)) {}
@@ -88,15 +95,18 @@ namespace pjh::json
             return *this;
         }
 
-        Json &operator=(int64_t val)
+        template <std::integral T>
+            requires(!std::same_as<T, bool>)
+        Json &operator=(T val)
         {
-            m_data = val;
+            m_data = static_cast<int64_t>(val);
             return *this;
         }
 
-        Json &operator=(double val)
+        template <std::floating_point T>
+        Json &operator=(T val)
         {
-            m_data = val;
+            m_data = static_cast<double>(val);
             return *this;
         }
 
@@ -346,6 +356,7 @@ namespace pjh::json
         Storage storage = Config::instance().storage());
 
     template <class... Ts>
+        requires(std::constructible_from<Json, Ts> && ...)
     inline Array Array::of(Ts &&...vals)
     {
         Array a;

@@ -52,7 +52,6 @@ namespace pjh::json
         [[nodiscard]] Object clone(
             std::pmr::memory_resource *into = Config::instance().resource()) const;
 
-        // 可变参构建器；每个实参须可转为 Entry
         template <class... Es>
             requires(std::convertible_to<Es, Object::Entry> && ...)
         [[nodiscard]] static Object of(Es &&...entries);
