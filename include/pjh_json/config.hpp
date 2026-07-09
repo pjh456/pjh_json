@@ -7,10 +7,11 @@
 
 namespace pjh::json
 {
+    enum class Storage { Pooled, Arena, SystemDefault };
+
     class Config
     {
     public:
-        enum class Storage { Pooled, Arena, SystemDefault };
         enum class Strings { Owning, BorrowWhenPossible };
 
         static Config &instance();
@@ -22,6 +23,7 @@ namespace pjh::json
         void configure_strings(Strings s) noexcept;
 
         [[nodiscard]] std::pmr::memory_resource *resource() noexcept;
+        [[nodiscard]] Storage storage() const noexcept;
         [[nodiscard]] Strings strings_mode() const noexcept;
 
         void release();

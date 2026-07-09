@@ -33,6 +33,11 @@ namespace pjh::json
         return m_resource;
     }
 
+    Storage Config::storage() const noexcept
+    {
+        return m_storage;
+    }
+
     Config::Strings Config::strings_mode() const noexcept
     {
         return m_strings;
