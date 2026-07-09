@@ -1,8 +1,17 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
+#include <unordered_set>
 
 namespace pjh::json
 {
+    static void check_duplicate_key(
+        std::string_view key,
+        std::pmr::unordered_set<std::string_view> &seen)
+    {
+        if (!seen.insert(key).second)
+            throw std::runtime_error("JSON Parse Error: Duplicate key in object");
+    }
+
     Json Parser::parse_object()
     {
         ++m_curr;
@@ -15,6 +24,8 @@ namespace pjh::json
         }
 
         obj.data().reserve(4);
+        std::pmr::unordered_set<std::string_view> seen(m_resource);
+        seen.reserve(8);
 
         while (true)
         {
@@ -22,10 +33,7 @@ namespace pjh::json
             if (*m_curr != '"')
                 error("Expected string key in object");
             auto key = parse_string();
-
-            for (const auto &kv : obj.data())
-                if (kv.first == key)
-                    error("Duplicate key in object");
+            check_duplicate_key(key, seen);
 
             skip_whitespace();
             if (*m_curr != ':')
@@ -63,6 +71,8 @@ namespace pjh::json
         }
 
         obj.data().reserve(4);
+        std::pmr::unordered_set<std::string_view> seen(m_resource);
+        seen.reserve(8);
 
         while (true)
         {
@@ -70,10 +80,7 @@ namespace pjh::json
             if (*m_curr != '"')
                 error("Expected string key in object");
             auto key = parse_string();
-
-            for (const auto &kv : obj.data())
-                if (kv.first == key)
-                    error("Duplicate key in object");
+            check_duplicate_key(key, seen);
 
             skip_whitespace();
             if (*m_curr != ':')
