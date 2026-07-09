@@ -98,20 +98,23 @@ namespace pjh::json
 
             if (opts.sort_keys)
             {
-                std::pmr::vector<Object::Entry> sorted(obj->begin(), obj->end(), obj->data().get_allocator());
+                std::pmr::vector<const Object::Entry *> sorted(obj->data().get_allocator());
+                sorted.reserve(obj->size());
+                for (const auto &e : *obj)
+                    sorted.push_back(&e);
                 std::sort(sorted.begin(), sorted.end(),
-                          [](const Object::Entry &a, const Object::Entry &b)
-                          { return static_cast<std::string_view>(a.first) < static_cast<std::string_view>(b.first); });
-                for (const auto &[key, val] : sorted)
+                          [](const Object::Entry *a, const Object::Entry *b)
+                          { return static_cast<std::string_view>(a->first) < static_cast<std::string_view>(b->first); });
+                for (const auto *e : sorted)
                 {
                     if (!first)
                         sink.push_back(',');
                     first = false;
                     if (opts.pretty)
                         write_indent(sink, opts, depth + 1);
-                    write_escaped(sink, key, opts.ascii);
+                    write_escaped(sink, e->first, opts.ascii);
                     sink.append(opts.pretty ? ": " : ":");
-                    write_value(sink, val, opts, depth + 1);
+                    write_value(sink, e->second, opts, depth + 1);
                 }
             }
             else

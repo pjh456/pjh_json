@@ -4,11 +4,11 @@
 #include <cstdint>
 #include <variant>
 #include <optional>
-#include <initializer_list>
 #include <string_view>
 #include <stdexcept>
 #include <memory>
 #include <memory_resource>
+#include <utility>
 
 #include "array.hpp"
 #include "object.hpp"
@@ -64,17 +64,17 @@ namespace pjh::json
         Json(const char *str) : m_data(std::string_view(str)) {}
         Json(Array arr) : m_data(std::move(arr)) {}
         Json(Object obj) : m_data(std::move(obj)) {}
-        Json(std::initializer_list<Json> vec)
-            : m_data(Array(vec)) {}
-        Json(std::initializer_list<Object::Entry> items)
-            : m_data(Object(items)) {}
 
     public:
-        Json(const Json &) = default;
-        Json &operator=(const Json &) = default;
+        Json(const Json &) = delete;
+        Json &operator=(const Json &) = delete;
 
         Json(Json &&) noexcept = default;
         Json &operator=(Json &&) noexcept = default;
+
+        // 显式深拷贝
+        [[nodiscard]] Json clone(
+            std::pmr::memory_resource *into = Config::instance().resource()) const;
 
         Json &operator=(std::nullptr_t)
         {
@@ -112,21 +112,9 @@ namespace pjh::json
             return *this;
         }
 
-        Json &operator=(const Array &arr)
-        {
-            m_data = arr;
-            return *this;
-        }
-
         Json &operator=(Array &&arr) noexcept
         {
             m_data = std::move(arr);
-            return *this;
-        }
-
-        Json &operator=(const Object &obj)
-        {
-            m_data = obj;
             return *this;
         }
 
@@ -356,6 +344,15 @@ namespace pjh::json
     [[nodiscard]] Document parse_file(
         std::string_view filepath,
         Storage storage = Config::instance().storage());
+
+    template <class... Ts>
+    inline Array Array::of(Ts &&...vals)
+    {
+        Array a;
+        a.reserve(sizeof...(vals));
+        (a.push_back(Json(std::forward<Ts>(vals))), ...);
+        return a;
+    }
 }
 
 #endif // INCLUDE_PJH_JSON_HPP

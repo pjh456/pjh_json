@@ -47,33 +47,15 @@ namespace pjh::json
         m_impl->data = std::move(vec);
     }
 
-    Array::Array(std::initializer_list<Json> vec)
-        : Array(Config::instance().resource())
-    {
-        m_impl->data = Vec(vec, m_resource);
-    }
-
     Array::~Array() = default;
 
-    Array::Array(const Array &other)
-        : Array(other.m_resource)
+    Array Array::clone(std::pmr::memory_resource *into) const
     {
-        m_impl->data = other.m_impl->data;
-    }
-
-    Array &Array::operator=(const Array &other)
-    {
-        if (this == &other)
-            return *this;
-        Array tmp(other);
-        *this = std::move(tmp);
-        return *this;
-    }
-
-    Array::Array(Array &&other) noexcept
-        : m_impl(std::move(other.m_impl)),
-          m_resource(std::exchange(other.m_resource, nullptr))
-    {
+        Array out(into);
+        out.reserve(m_impl->data.size());
+        for (const Json &e : m_impl->data)
+            out.push_back(e.clone(into));
+        return out;
     }
 
     Array &Array::operator=(Array &&other) noexcept
@@ -83,6 +65,12 @@ namespace pjh::json
         m_impl = std::move(other.m_impl);
         m_resource = std::exchange(other.m_resource, nullptr);
         return *this;
+    }
+
+    Array::Array(Array &&other) noexcept
+        : m_impl(std::move(other.m_impl)),
+          m_resource(std::exchange(other.m_resource, nullptr))
+    {
     }
 
     size_t Array::size() const noexcept { return m_impl->data.size(); }

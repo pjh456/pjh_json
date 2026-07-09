@@ -37,15 +37,18 @@ namespace pjh::json
         Object(
             std::pmr::memory_resource *res = Config::instance().resource());
         Object(Vec val);
-        Object(std::initializer_list<Entry> items);
 
         ~Object();
 
-        Object(const Object &);
-        Object &operator=(const Object &);
+        Object(const Object &) = delete;
+        Object &operator=(const Object &) = delete;
 
         Object(Object &&) noexcept;
         Object &operator=(Object &&) noexcept;
+
+        // 显式深拷贝
+        [[nodiscard]] Object clone(
+            std::pmr::memory_resource *into = Config::instance().resource()) const;
 
     public:
         [[nodiscard]] size_t size() const noexcept;

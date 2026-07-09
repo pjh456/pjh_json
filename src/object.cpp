@@ -47,27 +47,19 @@ namespace pjh::json
         m_impl->data = std::move(val);
     }
 
-    Object::Object(std::initializer_list<Entry> items)
-        : Object(Config::instance().resource())
-    {
-        m_impl->data = Vec(items, m_resource);
-    }
-
     Object::~Object() = default;
 
-    Object::Object(const Object &other)
-        : Object(other.m_resource)
+    Object Object::clone(std::pmr::memory_resource *into) const
     {
-        m_impl->data = other.m_impl->data;
-    }
-
-    Object &Object::operator=(const Object &other)
-    {
-        if (this == &other)
-            return *this;
-        Object tmp(other);
-        *this = std::move(tmp);
-        return *this;
+        Object out(into);
+        out.m_impl->data.reserve(m_impl->data.size());
+        for (const auto &[key, val] : m_impl->data)
+        {
+            String k{static_cast<std::string_view>(key)};
+            k.own(into);
+            out.m_impl->data.emplace_back(std::move(k), val.clone(into));
+        }
+        return out;
     }
 
     Object::Object(Object &&other) noexcept
@@ -165,7 +157,16 @@ namespace pjh::json
 
     void Object::insert(Entry entry)
     {
-        insert(entry.first, std::move(entry.second));
+        auto it = std::ranges::find_if(
+            m_impl->data,
+            [&](auto &kv) { return kv.first == entry.first; });
+
+        if (it != m_impl->data.end())
+        {
+            it->second = std::move(entry.second);
+            return;
+        }
+        m_impl->data.push_back(std::move(entry));
     }
 
     bool Object::remove(std::string_view key)

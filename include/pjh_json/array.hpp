@@ -2,9 +2,9 @@
 #define INCLUDE_PJH_JSON_ARRAY_HPP
 
 #include <algorithm>
-#include <initializer_list>
 #include <memory>
 #include <memory_resource>
+#include <utility>
 #include <vector>
 
 #include "json_fwd.hpp"
@@ -33,15 +33,22 @@ namespace pjh::json
         Array(
             std::pmr::memory_resource *res = Config::instance().resource());
         Array(Vec vec);
-        Array(std::initializer_list<Json> vec);
 
         ~Array();
 
-        Array(const Array &);
-        Array &operator=(const Array &);
+        Array(const Array &) = delete;
+        Array &operator=(const Array &) = delete;
 
         Array(Array &&) noexcept;
         Array &operator=(Array &&) noexcept;
+
+        // 显式深拷贝
+        [[nodiscard]] Array clone(
+            std::pmr::memory_resource *into = Config::instance().resource()) const;
+
+        // 可变参构建器；定义见 json.hpp 尾部
+        template <class... Ts>
+        [[nodiscard]] static Array of(Ts &&...vals);
 
     public:
         [[nodiscard]] size_t size() const noexcept;

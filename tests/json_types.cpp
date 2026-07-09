@@ -45,21 +45,21 @@ void array_value()
     assert(arr1.size() == 0);
     try
     {
-        auto val = arr1.at(0);
+        (void)arr1.at(0);
         assert(false);
     }
     catch (...)
     {
     }
 
-    auto arr2 = std::move(Json({Json("pjh"), Json((int64_t)123)}));
+    auto arr2 = std::move(Json(Array::of(Json("pjh"), Json((int64_t)123))));
     assert(!arr2.empty());
     assert(arr1.is_array());
     assert(arr2.size() == 2);
     assert(arr2[0] == "pjh" && arr2[1] == (int64_t)123);
 
     // 不同长度的 Array 比较应当为 false
-    auto arr3 = std::move(Json({Json((int64_t)1)}));
+    auto arr3 = std::move(Json(Array::of(Json((int64_t)1))));
     assert(arr2 != arr3);
 
     // erase 越界应当抛异常
@@ -84,14 +84,19 @@ void object_value()
     assert(obj1.is_object());
     assert(obj1.size() == 0);
 
-    auto obj2 = std::move(Json(Object({{"pjh", Json((int64_t)123)}, {"123", Json("pjh")}})));
+    Object o2;
+    o2.insert("pjh", Json((int64_t)123));
+    o2.insert("123", Json("pjh"));
+    auto obj2 = Json(std::move(o2));
     assert(!obj2.empty());
     assert(obj2.is_object());
     assert(obj2.size() == 2);
     assert(obj2["pjh"] == (int64_t)123 && obj2["123"] == "pjh");
 
     // 不同长度的 Object 比较应当为 false
-    auto obj3 = std::move(Json(Object({{"only", Json((int64_t)1)}})));
+    Object o3;
+    o3.insert("only", Json((int64_t)1));
+    auto obj3 = Json(std::move(o3));
     assert(obj2 != obj3);
 
     std::cout << "Json Object test passed." << std::endl;
@@ -157,12 +162,14 @@ void test_try_as()
     assert(i.try_as_array() == nullptr);
     assert(i.try_as_object() == nullptr);
 
-    Json arr = Json({Json((int64_t)1)});
+    Json arr = Json(Array::of(Json((int64_t)1)));
     assert(arr.try_as_array() != nullptr);
     assert(arr.try_as_array()->size() == 1);
     assert(arr.try_as_object() == nullptr);
 
-    Json obj = Json(Object({{"x", Json((int64_t)0)}}));
+    Object ox;
+    ox.insert("x", Json((int64_t)0));
+    Json obj = Json(std::move(ox));
     assert(obj.try_as_object() != nullptr);
     assert(obj.try_as_array() == nullptr);
 
@@ -181,6 +188,25 @@ void test_try_as()
 
     std::cout << "try_as test passed." << std::endl;
 }
+
+void test_clone()
+{
+    std::cout << "clone test started." << std::endl;
+
+    Json cloned;
+    {
+        auto doc = parse_copy(R"({"name":"pjh","nums":[1,2,3]})");
+        cloned = doc.root().clone();
+        assert(cloned["name"] == "pjh");
+    }
+
+    assert(cloned.is_object());
+    assert(cloned["name"] == "pjh");
+    assert(cloned["nums"].size() == 3);
+    assert(cloned["nums"][2] == (int64_t)3);
+
+    std::cout << "clone test passed." << std::endl;
+}
 int main()
 {
     simple_value();
@@ -190,4 +216,5 @@ int main()
     test_object_remove_bool();
     test_object_content_equality();
     test_try_as();
+    test_clone();
 }
