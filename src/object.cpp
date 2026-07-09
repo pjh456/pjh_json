@@ -199,6 +199,11 @@ namespace pjh::json
     size_t Object::size() const noexcept { return m_impl->data.size(); }
     bool Object::empty() const noexcept { return m_impl->data.empty(); }
     void Object::clear() noexcept { m_impl->data.clear(); }
+    Object::Vec::iterator Object::begin() noexcept { return m_impl->data.begin(); }
+    Object::Vec::iterator Object::end() noexcept { return m_impl->data.end(); }
+    Object::Vec::const_iterator Object::begin() const noexcept { return m_impl->data.begin(); }
+    Object::Vec::const_iterator Object::end() const noexcept { return m_impl->data.end(); }
+
     Object::Vec &Object::data() noexcept { return m_impl->data; }
     const Object::Vec &Object::data() const noexcept { return m_impl->data; }
 }

@@ -53,6 +53,11 @@ namespace pjh::json
         void clear() noexcept;
         [[nodiscard]] bool contains(std::string_view key) const noexcept;
 
+        [[nodiscard]] Vec::iterator begin() noexcept;
+        [[nodiscard]] Vec::iterator end() noexcept;
+        [[nodiscard]] Vec::const_iterator begin() const noexcept;
+        [[nodiscard]] Vec::const_iterator end() const noexcept;
+
         [[nodiscard]] Vec &data() noexcept;
         [[nodiscard]] const Vec &data() const noexcept;
 

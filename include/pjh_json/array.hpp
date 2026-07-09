@@ -51,6 +51,11 @@ namespace pjh::json
         void resize(size_t val);
         void reserve(size_t val);
 
+        [[nodiscard]] Vec::iterator begin() noexcept;
+        [[nodiscard]] Vec::iterator end() noexcept;
+        [[nodiscard]] Vec::const_iterator begin() const noexcept;
+        [[nodiscard]] Vec::const_iterator end() const noexcept;
+
         [[nodiscard]] Vec &data() noexcept;
         [[nodiscard]] const Vec &data() const noexcept;
 

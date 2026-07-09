@@ -100,6 +100,11 @@ namespace pjh::json
     void Array::resize(size_t val) { m_impl->data.resize(val); }
     void Array::reserve(size_t val) { m_impl->data.reserve(val); }
 
+    Array::Vec::iterator Array::begin() noexcept { return m_impl->data.begin(); }
+    Array::Vec::iterator Array::end() noexcept { return m_impl->data.end(); }
+    Array::Vec::const_iterator Array::begin() const noexcept { return m_impl->data.begin(); }
+    Array::Vec::const_iterator Array::end() const noexcept { return m_impl->data.end(); }
+
     Array::Vec &Array::data() noexcept { return m_impl->data; }
     const Array::Vec &Array::data() const noexcept { return m_impl->data; }
 
