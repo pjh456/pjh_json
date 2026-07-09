@@ -69,7 +69,7 @@ namespace pjh::json
         auto arena = Document::make_arena(storage, kBlock, false);
         std::pmr::memory_resource *res = arena_res(arena);
 
-        // 单个 padded buffer 归 Document 所有；每行借用的字符串都指向它，不会悬垂。
+        // 单块 padded buffer 归 Document 所有，每行借用的字符串都指向它
         std::pmr::string buffer(res);
         buffer.resize(input.size() + 64, '\0');
         std::memcpy(buffer.data(), input.data(), input.size());

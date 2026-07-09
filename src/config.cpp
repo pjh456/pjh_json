@@ -1,16 +1,26 @@
 #include "pjh_json/config.hpp"
+#include "pjh_json/json.hpp"
+#include "counting_resource.hpp"
+
+#include <cassert>
 
 namespace pjh::json
 {
+    namespace
+    {
+        constexpr size_t kBlock = 4096;
+    }
+
     Config &Config::instance()
     {
         static Config cfg;
         return cfg;
     }
 
-    Config::Config() noexcept
-        : m_resource(&m_pool)
-    {}
+    Config::Config()
+        : m_global(std::make_unique<Document>(Storage::Pooled, kBlock, true, true))
+    {
+    }
 
     Config::~Config() = default;
 
@@ -18,19 +28,12 @@ namespace pjh::json
     {
         std::lock_guard lock(m_mutex);
         m_storage = storage;
-        m_block_size = block_size;
-        rebuild();
-    }
-
-    void Config::configure_strings(Strings s) noexcept
-    {
-        std::lock_guard lock(m_mutex);
-        m_strings = s;
+        m_block = block_size;
     }
 
     std::pmr::memory_resource *Config::resource() noexcept
     {
-        return m_resource;
+        return m_global->resource();
     }
 
     Storage Config::storage() const noexcept
@@ -38,49 +41,27 @@ namespace pjh::json
         return m_storage;
     }
 
-    Config::Strings Config::strings_mode() const noexcept
-    {
-        return m_strings;
-    }
-
     void Config::release()
     {
         std::lock_guard lock(m_mutex);
-        m_pool.release();
-        m_arena.release();
+        release_locked();
     }
 
     void Config::reset()
     {
         std::lock_guard lock(m_mutex);
-        m_arena.release();
-        m_pool.release();
-        m_block_size = 4096;
-        rebuild();
+        m_storage = Storage::Pooled;
+        m_block = 4096;
+        release_locked();
     }
 
-    void Config::rebuild()
+    void Config::release_locked()
     {
-        // Reconstruct arena with new block size
-        m_arena.~monotonic_buffer_resource();
-        new (&m_arena) std::pmr::monotonic_buffer_resource(m_block_size);
-
-        m_pool.~synchronized_pool_resource();
-        new (&m_pool) std::pmr::synchronized_pool_resource(
-            std::pmr::pool_options{0, m_block_size},
-            std::pmr::new_delete_resource());
-
-        switch (m_storage)
-        {
-        case Storage::Arena:
-            m_resource = &m_arena;
-            break;
-        case Storage::Pooled:
-            m_resource = &m_pool;
-            break;
-        case Storage::SystemDefault:
-            m_resource = std::pmr::new_delete_resource();
-            break;
-        }
+#ifndef NDEBUG
+        if (auto *cr = dynamic_cast<CountingResource *>(m_global->resource()))
+            assert(cr->outstanding() == 0 &&
+                   "Config::release()/reset(): 仍有从全局资源分配的存活对象");
+#endif
+        m_global->reset();
     }
 }

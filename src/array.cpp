@@ -18,14 +18,14 @@ namespace pjh::json
     {
         if (!ptr)
             return;
-        std::pmr::polymorphic_allocator<Impl> alloc(res ? res : std::pmr::get_default_resource());
+        std::pmr::polymorphic_allocator<Impl> alloc(res ? res : Config::instance().resource());
         std::destroy_at(ptr);
         alloc.deallocate(ptr, 1);
     }
 
     Array::Array(std::pmr::memory_resource *res)
-        : m_impl(nullptr, ImplDeleter{res ? res : std::pmr::get_default_resource()}),
-          m_resource(res ? res : std::pmr::get_default_resource())
+        : m_impl(nullptr, ImplDeleter{res ? res : Config::instance().resource()}),
+          m_resource(res ? res : Config::instance().resource())
     {
         std::pmr::polymorphic_allocator<Impl> alloc(m_resource);
         Impl *ptr = alloc.allocate(1);
@@ -48,7 +48,7 @@ namespace pjh::json
     }
 
     Array::Array(std::initializer_list<Json> vec)
-        : Array(std::pmr::get_default_resource())
+        : Array(Config::instance().resource())
     {
         m_impl->data = Vec(vec, m_resource);
     }
