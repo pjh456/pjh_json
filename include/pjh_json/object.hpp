@@ -71,7 +71,6 @@ namespace pjh::json
 
     public:
         [[nodiscard]] bool operator==(const Object &other) const noexcept;
-        [[nodiscard]] bool operator!=(const Object &other) const noexcept { return !(this->operator==(other)); }
     };
 
 }

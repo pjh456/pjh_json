@@ -256,31 +256,22 @@ namespace pjh::json
 
     public:
         [[nodiscard]] bool operator==(const Json &other) const noexcept { return m_data == other.m_data; }
-        [[nodiscard]] bool operator!=(const Json &other) const noexcept { return !(this->operator==(other)); }
 
         [[nodiscard]] bool operator==(std::nullptr_t) const noexcept { return is_null(); }
-        [[nodiscard]] bool operator!=(std::nullptr_t) const noexcept { return !(this->operator==(nullptr)); }
 
         [[nodiscard]] bool operator==(bool val) const noexcept { return is_boolean() && (as_boolean() == val); }
-        [[nodiscard]] bool operator!=(bool val) const noexcept { return !(this->operator==(val)); }
 
         [[nodiscard]] bool operator==(int64_t val) const noexcept { return is_int() && (as_int() == val); }
-        [[nodiscard]] bool operator!=(int64_t val) const noexcept { return !(this->operator==(val)); }
 
         [[nodiscard]] bool operator==(double val) const noexcept { return is_float() && (as_float() == val); }
-        [[nodiscard]] bool operator!=(double val) const noexcept { return !(this->operator==(val)); }
 
         [[nodiscard]] bool operator==(std::string_view val) const noexcept { return is_string() && (as_string() == val); }
-        [[nodiscard]] bool operator!=(std::string_view val) const noexcept { return !(this->operator==(val)); }
 
         [[nodiscard]] bool operator==(const char *val) const noexcept { return operator==(std::string_view(val)); }
-        [[nodiscard]] bool operator!=(const char *val) const noexcept { return !(this->operator==(val)); }
 
         [[nodiscard]] bool operator==(const Array &val) const noexcept { return is_array() && (as_array() == val); }
-        [[nodiscard]] bool operator!=(const Array &val) const noexcept { return !(this->operator==(val)); }
 
         [[nodiscard]] bool operator==(const Object &val) const noexcept { return is_object() && (as_object() == val); }
-        [[nodiscard]] bool operator!=(const Object &val) const noexcept { return !(this->operator==(val)); }
     };
 
     // ---------------------------------------------------------
