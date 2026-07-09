@@ -57,11 +57,9 @@ namespace pjh::json
     void Config::rebuild()
     {
         // Reconstruct arena with new block size
-        // ponytail: placement new over existing storage; old allocs stay valid
         m_arena.~monotonic_buffer_resource();
         new (&m_arena) std::pmr::monotonic_buffer_resource(m_block_size);
 
-        // ponytail: pooled always uses default upstream; per-config upstream if needed later
         m_pool.~synchronized_pool_resource();
         new (&m_pool) std::pmr::synchronized_pool_resource(
             std::pmr::pool_options{0, m_block_size},
