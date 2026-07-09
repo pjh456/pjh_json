@@ -44,10 +44,78 @@ namespace pjh::json
         }
     }
 
+    static void append_u4(std::pmr::string &sink, uint16_t v)
+    {
+        char buf[6] = {'\\', 'u', 0, 0, 0, 0};
+        buf[2] = HEX[(v >> 12) & 0xF];
+        buf[3] = HEX[(v >> 8) & 0xF];
+        buf[4] = HEX[(v >> 4) & 0xF];
+        buf[5] = HEX[v & 0xF];
+        sink.append(buf, 6);
+    }
+
+    static void write_escaped_ascii(std::pmr::string &sink, std::string_view s)
+    {
+        const auto *p = reinterpret_cast<const uint8_t *>(s.data());
+        const auto *end = p + s.size();
+        while (p < end)
+        {
+            uint8_t c = *p;
+            if (c < 0x20 || c == '"' || c == '\\')
+            {
+                append_escape(sink, static_cast<char>(c));
+                ++p;
+            }
+            else if (c < 0x80)
+            {
+                sink.push_back(static_cast<char>(c));
+                ++p;
+            }
+            else
+            {
+                // decode a UTF-8 sequence to a codepoint
+                uint32_t cp;
+                int len;
+                if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; len = 2; }
+                else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; len = 3; }
+                else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; len = 4; }
+                else throw JsonError("Invalid UTF-8 lead byte in string");
+
+                if (p + len > end)
+                    throw JsonError("Truncated UTF-8 sequence in string");
+                for (int i = 1; i < len; ++i)
+                {
+                    if ((p[i] & 0xC0) != 0x80)
+                        throw JsonError("Invalid UTF-8 continuation byte in string");
+                    cp = (cp << 6) | (p[i] & 0x3F);
+                }
+                p += len;
+
+                if (cp <= 0xFFFF)
+                {
+                    append_u4(sink, static_cast<uint16_t>(cp));
+                }
+                else
+                {
+                    cp -= 0x10000;
+                    append_u4(sink, static_cast<uint16_t>(0xD800 + (cp >> 10)));
+                    append_u4(sink, static_cast<uint16_t>(0xDC00 + (cp & 0x3FF)));
+                }
+            }
+        }
+    }
+
     // Escape and append s to sink, wrapped in double quotes.
-    void write_escaped(std::pmr::string &sink, std::string_view s)
+    void write_escaped(std::pmr::string &sink, std::string_view s, bool ascii)
     {
         sink.push_back('"');
+
+        if (ascii)
+        {
+            write_escaped_ascii(sink, s);
+            sink.push_back('"');
+            return;
+        }
 
         const char *curr = s.data();
         const char *end = s.data() + s.size();

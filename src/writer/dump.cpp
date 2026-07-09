@@ -1,7 +1,9 @@
 #include "pjh_json/writer.hpp"
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <fstream>
+#include <ostream>
 
 namespace pjh::json
 {
@@ -60,7 +62,7 @@ namespace pjh::json
         }
         else if (auto s = value.try_as_string())
         {
-            write_escaped(sink, *s);
+            write_escaped(sink, *s, opts.ascii);
         }
         else if (auto *arr = value.try_as_array())
         {
@@ -93,16 +95,38 @@ namespace pjh::json
             }
             sink.push_back('{');
             bool first = true;
-            for (const auto &[key, val] : *obj)
+
+            if (opts.sort_keys)
             {
-                if (!first)
-                    sink.push_back(',');
-                first = false;
-                if (opts.pretty)
-                    write_indent(sink, opts, depth + 1);
-                write_escaped(sink, key);
-                sink.append(opts.pretty ? ": " : ":");
-                write_value(sink, val, opts, depth + 1);
+                std::pmr::vector<Object::Entry> sorted(obj->begin(), obj->end(), obj->data().get_allocator());
+                std::sort(sorted.begin(), sorted.end(),
+                          [](const Object::Entry &a, const Object::Entry &b)
+                          { return static_cast<std::string_view>(a.first) < static_cast<std::string_view>(b.first); });
+                for (const auto &[key, val] : sorted)
+                {
+                    if (!first)
+                        sink.push_back(',');
+                    first = false;
+                    if (opts.pretty)
+                        write_indent(sink, opts, depth + 1);
+                    write_escaped(sink, key, opts.ascii);
+                    sink.append(opts.pretty ? ": " : ":");
+                    write_value(sink, val, opts, depth + 1);
+                }
+            }
+            else
+            {
+                for (const auto &[key, val] : *obj)
+                {
+                    if (!first)
+                        sink.push_back(',');
+                    first = false;
+                    if (opts.pretty)
+                        write_indent(sink, opts, depth + 1);
+                    write_escaped(sink, key, opts.ascii);
+                    sink.append(opts.pretty ? ": " : ":");
+                    write_value(sink, val, opts, depth + 1);
+                }
             }
             if (opts.pretty)
                 write_indent(sink, opts, depth);
@@ -113,6 +137,12 @@ namespace pjh::json
     void dump_to(std::pmr::string &sink, const Json &value, const DumpOptions &opts)
     {
         write_value(sink, value, opts, 0);
+    }
+
+    void dump_to(std::ostream &os, const Json &value, const DumpOptions &opts)
+    {
+        std::pmr::string out = dump(value, opts);
+        os.write(out.data(), static_cast<std::streamsize>(out.size()));
     }
 
     std::pmr::string dump(const Json &value, const DumpOptions &opts,

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string_view>
 #include <memory_resource>
+#include <iosfwd>
 
 #include "json.hpp"
 
@@ -14,6 +15,8 @@ namespace pjh::json
         bool pretty = false;      // false = compact
         uint8_t indent = 2;       // spaces per level when pretty
         char indent_char = ' ';   // ' ' or '\t'
+        bool ascii = false;       // true = escape non-ASCII as \uXXXX
+        bool sort_keys = false;   // true = emit object keys sorted
     };
 
     // ---- value dump ----
@@ -28,6 +31,7 @@ namespace pjh::json
         std::pmr::memory_resource *res = Config::instance().resource());
 
     void dump_to(std::pmr::string &sink, const Json &value, const DumpOptions &opts = {});
+    void dump_to(std::ostream &os, const Json &value, const DumpOptions &opts = {});
     void dump_file(std::string_view path, const Json &value, const DumpOptions &opts = {});
 
     // ---- jsonl (root is an Array, one element per line, always compact) ----
@@ -45,7 +49,7 @@ namespace pjh::json
         std::pmr::memory_resource *res = Config::instance().resource());
 
     // ---- internal (shared by writer TUs) ----
-    void write_escaped(std::pmr::string &sink, std::string_view s);
+    void write_escaped(std::pmr::string &sink, std::string_view s, bool ascii = false);
     void write_file(std::string_view path, std::string_view data);
 }
 

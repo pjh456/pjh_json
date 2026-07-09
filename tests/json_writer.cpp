@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <cstring>
 #include <limits>
+#include <sstream>
 
 #include <pjh_json/json.hpp>
 #include <pjh_json/writer.hpp>
@@ -155,6 +156,49 @@ void test_jsonl()
     std::cout << "JSONL test passed." << std::endl;
 }
 
+void test_dump_ascii()
+{
+    std::cout << "Dump Ascii test started." << std::endl;
+
+    // BMP codepoint (é = U+00E9) and emoji (U+1F600, needs surrogate pair)
+    auto d = parse_copy("\"caf\xC3\xA9 \xF0\x9F\x98\x80\"");
+    auto out = dump(d.root(), DumpOptions{.ascii = true});
+    assert(sv(out) == R"("caf\u00e9 \ud83d\ude00")");
+
+    // default (ascii=false) passes UTF-8 through
+    auto out2 = dump(d.root());
+    assert(sv(out2) == "\"caf\xC3\xA9 \xF0\x9F\x98\x80\"");
+
+    // escapes still applied in ascii mode
+    auto d3 = parse_copy(R"("a\tb")");
+    assert(sv(dump(d3.root(), DumpOptions{.ascii = true})) == R"("a\tb")");
+
+    std::cout << "Dump Ascii test passed." << std::endl;
+}
+
+void test_dump_sort_keys()
+{
+    std::cout << "Dump SortKeys test started." << std::endl;
+
+    auto d = parse_copy(R"({"c":1,"a":2,"b":{"z":9,"y":8}})");
+    auto out = dump(d.root(), DumpOptions{.sort_keys = true});
+    assert(sv(out) == R"({"a":2,"b":{"y":8,"z":9},"c":1})");
+
+    std::cout << "Dump SortKeys test passed." << std::endl;
+}
+
+void test_dump_ostream()
+{
+    std::cout << "Dump Ostream test started." << std::endl;
+
+    auto d = parse_copy(R"({"a":1})");
+    std::ostringstream os;
+    dump_to(os, d.root());
+    assert(os.str() == R"({"a":1})");
+
+    std::cout << "Dump Ostream test passed." << std::endl;
+}
+
 int main()
 {
     std::cout << "--- Starting JSON Writer Tests ---" << std::endl;
@@ -163,6 +207,9 @@ int main()
     test_dump_pretty();
     test_dump_escaping();
     test_dump_numbers();
+    test_dump_ascii();
+    test_dump_sort_keys();
+    test_dump_ostream();
     test_prettify();
     test_jsonl();
 
