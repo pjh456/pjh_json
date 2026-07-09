@@ -33,7 +33,7 @@ namespace pjh::json
               m_assume_padded(assume_padded) {}
 
         // 主入口
-        Json parse();
+        [[nodiscard]] Json parse();
 
     private:
         // 核心解析器函数
@@ -49,7 +49,7 @@ namespace pjh::json
         Json parse_literal();
 
     public:
-        uint32_t parse_hex4();
+        [[nodiscard]] uint32_t parse_hex4();
 
         [[noreturn]] void error(const std::string &msg) const
         {

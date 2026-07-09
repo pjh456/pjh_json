@@ -35,8 +35,7 @@ namespace pjh::json
 
     public:
         Object(
-            std::pmr::memory_resource *res = std::pmr::get_default_resource())
-            ;
+            std::pmr::memory_resource *res = std::pmr::get_default_resource());
         Object(Vec val);
         Object(std::initializer_list<Entry> items);
 
@@ -49,13 +48,13 @@ namespace pjh::json
         Object &operator=(Object &&) noexcept;
 
     public:
-        size_t size() const noexcept;
-        bool empty() const noexcept;
+        [[nodiscard]] size_t size() const noexcept;
+        [[nodiscard]] bool empty() const noexcept;
         void clear() noexcept;
-        bool contains(std::string_view key) const noexcept;
+        [[nodiscard]] bool contains(std::string_view key) const noexcept;
 
-        Vec &data() noexcept;
-        const Vec &data() const noexcept;
+        [[nodiscard]] Vec &data() noexcept;
+        [[nodiscard]] const Vec &data() const noexcept;
 
     public:
         Json &operator[](std::string_view key);
@@ -71,8 +70,8 @@ namespace pjh::json
         bool remove(std::string_view key);
 
     public:
-        bool operator==(const Object &other) const noexcept;
-        bool operator!=(const Object &other) const noexcept { return !(this->operator==(other)); }
+        [[nodiscard]] bool operator==(const Object &other) const noexcept;
+        [[nodiscard]] bool operator!=(const Object &other) const noexcept { return !(this->operator==(other)); }
     };
 
 }

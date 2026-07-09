@@ -164,7 +164,7 @@ void test_parse_errors()
     {
         try
         {
-            parse_copy(invalid_json);
+            (void)parse_copy(invalid_json);
             assert(false && "Should have thrown an exception");
         }
         catch (const std::runtime_error &)
@@ -177,7 +177,7 @@ void test_parse_errors()
     try
     {
         std::string buf = "null";
-        parse_in_situ(std::pmr::string(buf.begin(), buf.end()));
+        (void)parse_in_situ(std::pmr::string(buf.begin(), buf.end()));
         assert(false && "parse_in_situ should require 64-byte padding");
     }
     catch (const std::runtime_error &)
@@ -189,7 +189,7 @@ void test_parse_errors()
     try
     {
         Parser p("null");
-        p.parse();
+        (void)p.parse();
         assert(false && "Parser should require padded input");
     }
     catch (const std::runtime_error &)
@@ -197,19 +197,19 @@ void test_parse_errors()
         // Expected behavior
     }
 
-    expect_throw("");               // 空输入
-    expect_throw("{");              // 未闭合的对象
-    expect_throw("[");              // 未闭合的数组
-    expect_throw("\"unterminated"); // 未闭合的字符串
-    expect_throw("{\"key\": }");    // 缺少 value
-    expect_throw("[1, 2,]");        // 数组末尾多余的逗号
-    expect_throw("true false");     // 多余的符号
-    expect_throw("01");             // 前导 0
-    expect_throw("1.");             // 缺少小数位
-    expect_throw("1e");             // 缺少指数
-    expect_throw("1e+");            // 缺少指数值
-    expect_throw("-");              // 只有负号
-    expect_throw("-.1");            // 缺少整数部分
+    expect_throw("");                  // 空输入
+    expect_throw("{");                 // 未闭合的对象
+    expect_throw("[");                 // 未闭合的数组
+    expect_throw("\"unterminated");    // 未闭合的字符串
+    expect_throw("{\"key\": }");       // 缺少 value
+    expect_throw("[1, 2,]");           // 数组末尾多余的逗号
+    expect_throw("true false");        // 多余的符号
+    expect_throw("01");                // 前导 0
+    expect_throw("1.");                // 缺少小数位
+    expect_throw("1e");                // 缺少指数
+    expect_throw("1e+");               // 缺少指数值
+    expect_throw("-");                 // 只有负号
+    expect_throw("-.1");               // 缺少整数部分
     expect_throw("{\"a\":1,\"a\":2}"); // 重复 key
 
     std::cout << "Parser Error Handling test passed." << std::endl;

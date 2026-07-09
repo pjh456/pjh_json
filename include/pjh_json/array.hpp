@@ -30,8 +30,7 @@ namespace pjh::json
 
     public:
         Array(
-            std::pmr::memory_resource *res
-            = std::pmr::get_default_resource());
+            std::pmr::memory_resource *res = std::pmr::get_default_resource());
         Array(Vec vec);
         Array(std::initializer_list<Json> vec);
 
@@ -44,16 +43,16 @@ namespace pjh::json
         Array &operator=(Array &&) noexcept;
 
     public:
-        size_t size() const noexcept;
-        bool empty() const noexcept;
+        [[nodiscard]] size_t size() const noexcept;
+        [[nodiscard]] bool empty() const noexcept;
         void clear() noexcept;
-        bool contains(const Json &val) const noexcept;
+        [[nodiscard]] bool contains(const Json &val) const noexcept;
 
         void resize(size_t val);
         void reserve(size_t val);
 
-        Vec &data() noexcept;
-        const Vec &data() const noexcept;
+        [[nodiscard]] Vec &data() noexcept;
+        [[nodiscard]] const Vec &data() const noexcept;
 
     public:
         Json &operator[](size_t idx) noexcept;
@@ -66,8 +65,8 @@ namespace pjh::json
         void erase(size_t idx, size_t len = 1);
 
     public:
-        bool operator==(const Array &other) const noexcept;
-        bool operator!=(const Array &other) const noexcept { return !(this->operator==(other)); }
+        [[nodiscard]] bool operator==(const Array &other) const noexcept;
+        [[nodiscard]] bool operator!=(const Array &other) const noexcept { return !(this->operator==(other)); }
     };
 
 }
