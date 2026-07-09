@@ -18,9 +18,7 @@ namespace pjh::json
     class Object
     {
     public:
-        // `Entry.first` is a `string_view` borrowing the Document buffer.
-        // Must keep the originating Document alive while using Entry.
-        using Entry = std::pair<std::string_view, Json>;
+        using Entry = std::pair<String, Json>;
         using Vec = std::pmr::vector<Entry>;
 
     private:

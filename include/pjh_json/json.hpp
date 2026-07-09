@@ -45,7 +45,7 @@ namespace pjh::json
             bool,
             int64_t,
             double,
-            std::string_view,
+            String,
             Array,
             Object>;
 
@@ -140,7 +140,7 @@ namespace pjh::json
         [[nodiscard]] bool is_int() const noexcept { return std::holds_alternative<std::int64_t>(m_data); }
         [[nodiscard]] bool is_float() const noexcept { return std::holds_alternative<double>(m_data); }
         [[nodiscard]] bool is_number() const noexcept { return is_int() || is_float(); }
-        [[nodiscard]] bool is_string() const noexcept { return std::holds_alternative<std::string_view>(m_data); }
+        [[nodiscard]] bool is_string() const noexcept { return std::holds_alternative<String>(m_data); }
         [[nodiscard]] bool is_array() const noexcept { return std::holds_alternative<Array>(m_data); }
         [[nodiscard]] bool is_object() const noexcept { return std::holds_alternative<Object>(m_data); }
 
@@ -156,8 +156,8 @@ namespace pjh::json
         [[nodiscard]] double &as_float() { return std::get<double>(m_data); }
         [[nodiscard]] const double &as_float() const { return std::get<double>(m_data); }
 
-        [[nodiscard]] std::string_view as_string() { return std::get<std::string_view>(m_data); }
-        [[nodiscard]] const std::string_view as_string() const { return std::get<std::string_view>(m_data); }
+        [[nodiscard]] std::string_view as_string() { return std::get<String>(m_data); }
+        [[nodiscard]] std::string_view as_string() const { return std::get<String>(m_data); }
 
         [[nodiscard]] Array &as_array() { return std::get<Array>(m_data); }
         [[nodiscard]] const Array &as_array() const { return std::get<Array>(m_data); }
@@ -183,7 +183,7 @@ namespace pjh::json
         }
         [[nodiscard]] std::optional<std::string_view> try_as_string() const noexcept
         {
-            auto *p = std::get_if<std::string_view>(&m_data);
+            auto *p = std::get_if<String>(&m_data);
             return p ? std::optional(*p) : std::nullopt;
         }
         [[nodiscard]] Array *try_as_array() noexcept

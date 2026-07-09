@@ -44,7 +44,7 @@ namespace pjh::json
         Json parse_array();
         void parse_object_inplace(Json &out);
         void parse_array_inplace(Json &out);
-        std::string_view parse_string();
+        String parse_string();
         Json parse_number();
         Json parse_literal();
 

@@ -5,7 +5,7 @@
 
 namespace pjh::json
 {
-    std::string_view Parser::parse_string()
+    String Parser::parse_string()
     {
         if (m_curr >= m_end || *m_curr != '"')
             throw ParseError("Expected '\"'");
