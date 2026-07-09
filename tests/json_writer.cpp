@@ -7,7 +7,7 @@
 #include <limits>
 #include <sstream>
 
-#include <pjh_json/json.hpp>
+#include <pjh_json/document.hpp>
 #include <pjh_json/writer.hpp>
 
 using namespace pjh::json;

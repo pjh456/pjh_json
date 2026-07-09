@@ -3,7 +3,7 @@
 #include <string>
 #include <string_view>
 
-#include <pjh_json/json.hpp>
+#include <pjh_json/document.hpp>
 #include <pjh_json/config.hpp>
 
 using namespace pjh::json;

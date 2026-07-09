@@ -2,6 +2,7 @@
 #include <cassert>
 #include <stdexcept>
 #include <pjh_json/json.hpp>
+#include <pjh_json/document.hpp>
 
 using namespace pjh::json;
 

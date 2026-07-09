@@ -6,7 +6,7 @@
 #include <memory_resource>
 #include <iosfwd>
 
-#include "json.hpp"
+#include "document.hpp"
 
 namespace pjh::json
 {

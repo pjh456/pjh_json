@@ -1,4 +1,4 @@
-#include "pjh_json/json.hpp"
+#include "pjh_json/document.hpp"
 #include "counting_resource.hpp"
 
 #include <new>
