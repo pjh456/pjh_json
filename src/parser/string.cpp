@@ -68,7 +68,7 @@ namespace pjh::json
             }
             else if (*m_curr == '\\')
             {
-                handle_escape(dst, m_curr, this);
+                handle_escape(dst, m_curr, *this);
             }
             else if (static_cast<uint8_t>(*m_curr) < 0x20)
             {

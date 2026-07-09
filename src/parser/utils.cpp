@@ -90,7 +90,7 @@ namespace pjh::json
         }
     }
 
-    void handle_escape(char *&dst, const char *&m_curr, Parser *parser)
+    void handle_escape(char *&dst, const char *&m_curr, Parser &parser)
     {
         ++m_curr;
         switch (*m_curr)
@@ -122,27 +122,27 @@ namespace pjh::json
         case 'u':
         {
             ++m_curr;
-            uint32_t cp = parser->parse_hex4();
+            uint32_t cp = parser.parse_hex4();
 
             if (cp >= 0xD800 && cp <= 0xDBFF)
             {
                 if (m_curr[0] == '\\' && m_curr[1] == 'u')
                 {
                     m_curr += 2;
-                    uint32_t cp2 = parser->parse_hex4();
+                    uint32_t cp2 = parser.parse_hex4();
                     if (cp2 >= 0xDC00 && cp2 <= 0xDFFF)
                         cp = 0x10000 + (((cp - 0xD800) << 10) | (cp2 - 0xDC00));
                     else
-                        throw std::runtime_error("Invalid surrogate pair");
+                        parser.error("Invalid surrogate pair");
                 }
                 else
-                    throw std::runtime_error("Expected low surrogate");
+                    parser.error("Expected low surrogate");
             }
             encode_utf8(cp, dst);
             return;
         }
         default:
-            throw std::runtime_error("Invalid escape character");
+            parser.error("Invalid escape character");
         }
         ++m_curr;
     }

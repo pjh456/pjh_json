@@ -8,7 +8,7 @@ namespace pjh::json
     class Parser;
 
     void encode_utf8(uint32_t cp, char *&dst);
-    void handle_escape(char *&dst, const char *&m_curr, Parser *parser);
+    void handle_escape(char *&dst, const char *&m_curr, Parser &parser);
 }
 
 #endif
