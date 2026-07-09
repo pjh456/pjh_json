@@ -297,24 +297,30 @@ namespace pjh::json
     };
 
     // ---------------------------------------------------------
-    // Document Wrapper (Takes ownership of the In-Situ buffer)
+    // Document — Zero-copy + Owning JSON root
     // ---------------------------------------------------------
     class Document
     {
         Json m_root;
-        std::pmr::string m_buffer;
+        std::pmr::string m_buffer;          // null/empty = view mode
 
     public:
         Document() = default;
 
+        // Owned mode: buffer is owned (parse_in_situ, parse_copy, parse_file)
         Document(Json &&js, std::pmr::string &&buf)
             : m_root(std::move(js)), m_buffer(std::move(buf)) {}
+
+        // View mode: caller keeps the backing buffer alive (parse_view)
+        explicit Document(Json &&js)
+            : m_root(std::move(js)) {}
 
         Document(const Document &) = delete;
         Document &operator=(const Document &) = delete;
         Document(Document &&) noexcept = default;
         Document &operator=(Document &&) noexcept = default;
 
+        [[nodiscard]] bool is_view() const noexcept { return m_buffer.empty(); }
         [[nodiscard]] const std::pmr::string &buffer() const noexcept { return m_buffer; }
         [[nodiscard]] Json &root() noexcept { return m_root; }
         [[nodiscard]] const Json &root() const noexcept { return m_root; }
@@ -326,6 +332,10 @@ namespace pjh::json
 
     [[nodiscard]] Document parse_copy(
         std::string_view json,
+        std::pmr::memory_resource *res = Config::instance().resource());
+
+    [[nodiscard]] Document parse_view(
+        const char *data, size_t content_len,
         std::pmr::memory_resource *res = Config::instance().resource());
 
     [[nodiscard]] Document parse_file(

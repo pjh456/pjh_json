@@ -41,6 +41,15 @@ namespace pjh::json
         return Document(std::move(root), std::move(buffer));
     }
 
+    Document parse_view(
+        const char *data, size_t content_len,
+        std::pmr::memory_resource *res)
+    {
+        Parser p(std::string_view(data, content_len), res, true);
+        Json root = p.parse();
+        return Document(std::move(root));
+    }
+
     Document parse_file(
         std::string_view filepath,
         std::pmr::memory_resource *res)

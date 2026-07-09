@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cassert>
 #include <string_view>
+#include <cstring>
 #include <stdexcept>
 #include <cmath>
 
@@ -215,6 +216,35 @@ void test_parse_errors()
     std::cout << "Parser Error Handling test passed." << std::endl;
 }
 
+void test_parse_view()
+{
+    std::cout << "Parser View test started." << std::endl;
+
+    // Create a buffer with 64 bytes of null padding after content
+    std::string content = R"({"name": "pjh", "items": [1, 2, 3], "active": true})";
+    std::string buf(content.size() + 64, '\0');
+    memcpy(buf.data(), content.data(), content.size());
+
+    auto doc = parse_view(buf.data(), content.size());
+    assert(doc.is_view());
+    assert(doc.root().is_object());
+    assert(doc.root()["name"] == "pjh");
+    assert(doc.root()["active"] == true);
+    assert(doc.root()["items"].is_array());
+    assert(doc.root()["items"].size() == 3);
+
+    // parse_view with string containing escape sequences (copies, not in-place)
+    std::string esc_content = R"({"msg": "hello\nworld"})";
+    std::string esc_buf(esc_content.size() + 64, '\0');
+    memcpy(esc_buf.data(), esc_content.data(), esc_content.size());
+
+    auto doc2 = parse_view(esc_buf.data(), esc_content.size());
+    assert(doc2.is_view());
+    assert(doc2.root()["msg"] == "hello\nworld");
+
+    std::cout << "Parser View test passed." << std::endl;
+}
+
 int main()
 {
     std::cout << "--- Starting JSON Parser Tests ---" << std::endl;
@@ -226,6 +256,7 @@ int main()
     test_parse_object();
     test_parse_complex();
     test_parse_errors();
+    test_parse_view();
 
     std::cout << "--- All JSON Parser Tests Passed Successfully! ---" << std::endl;
     return 0;
