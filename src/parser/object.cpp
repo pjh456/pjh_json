@@ -9,7 +9,7 @@ namespace pjh::json
         std::pmr::unordered_set<std::string_view> &seen)
     {
         if (!seen.insert(key).second)
-            throw std::runtime_error("JSON Parse Error: Duplicate key in object");
+            throw ParseError("Duplicate key in object");
     }
 
     Json Parser::parse_object()
@@ -39,13 +39,13 @@ namespace pjh::json
         {
             skip_whitespace();
             if (*m_curr != '"')
-                error("Expected string key in object");
+                throw ParseError("Expected string key in object");
             auto key = parse_string();
             check_duplicate_key(key, seen);
 
             skip_whitespace();
             if (*m_curr != ':')
-                error("Expected ':' in object");
+                throw ParseError("Expected ':' in object");
             ++m_curr;
 
             obj.data().emplace_back(key, Json(nullptr));
@@ -53,7 +53,7 @@ namespace pjh::json
 
             skip_whitespace();
             if (m_curr >= m_end)
-                error("Unexpected end of object");
+                throw ParseError("Unexpected end of object");
             if (*m_curr == '}')
             {
                 ++m_curr;
@@ -63,7 +63,7 @@ namespace pjh::json
             if (*m_curr == ',')
                 ++m_curr;
             else
-                error("Expected ',' or '}' in object");
+                throw ParseError("Expected ',' or '}' in object");
         }
     }
 }

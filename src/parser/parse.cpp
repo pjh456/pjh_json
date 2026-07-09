@@ -8,11 +8,11 @@ namespace pjh::json
     Json Parser::parse()
     {
         if (!m_assume_padded)
-            error("Parser requires 64-byte '\\0' padding; use parse_copy/parse_file/parse_in_situ");
+            throw ParseError("Parser requires 64-byte '\\0' padding; use parse_copy/parse_file/parse_in_situ");
         Json result = parse_value();
         skip_whitespace();
         if (m_curr < m_end)
-            error("Extra characters after complete JSON value");
+            throw ParseError("Extra characters after complete JSON value");
         return result;
     }
 
@@ -21,7 +21,7 @@ namespace pjh::json
         std::pmr::memory_resource *res)
     {
         if (buffer.size() < 64)
-            throw std::runtime_error("Buffer too small for in-situ parse");
+            throw ParseError("Buffer too small for in-situ parse");
 
         size_t size = buffer.size() - 64;
         Parser p(std::string_view(buffer.data(), size), res, true);
@@ -48,18 +48,18 @@ namespace pjh::json
         std::string path(filepath);
         std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (!file.is_open())
-            throw std::runtime_error("Failed to open file: " + path);
+            throw ParseError("Failed to open file: " + path);
 
         std::streamsize size = file.tellg();
         if (size < 0)
-            throw std::runtime_error("Failed to get file size: " + path);
+            throw ParseError("Failed to get file size: " + path);
         file.seekg(0, std::ios::beg);
 
         std::pmr::string buffer(res);
         buffer.resize(size + 64, '\0');
 
         if (!file.read(buffer.data(), size))
-            throw std::runtime_error("Failed to read file: " + path);
+            throw ParseError("Failed to read file: " + path);
 
         return parse_in_situ(std::move(buffer), res);
     }

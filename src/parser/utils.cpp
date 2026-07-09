@@ -55,7 +55,7 @@ namespace pjh::json
             else if (c >= 'A' && c <= 'F')
                 code |= (c - 'A' + 10);
             else
-                error("Invalid hex digit in unicode escape");
+                throw ParseError("Invalid hex digit in unicode escape");
         }
         return code;
     }
@@ -86,7 +86,7 @@ namespace pjh::json
         }
         else
         {
-            throw std::runtime_error("Invalid unicode codepoint");
+            throw ParseError("Invalid unicode codepoint");
         }
     }
 
@@ -133,16 +133,16 @@ namespace pjh::json
                     if (cp2 >= 0xDC00 && cp2 <= 0xDFFF)
                         cp = 0x10000 + (((cp - 0xD800) << 10) | (cp2 - 0xDC00));
                     else
-                        parser.error("Invalid surrogate pair");
+                        throw ParseError("Invalid surrogate pair");
                 }
                 else
-                    parser.error("Expected low surrogate");
+                    throw ParseError("Expected low surrogate");
             }
             encode_utf8(cp, dst);
             return;
         }
         default:
-            parser.error("Invalid escape character");
+            throw ParseError("Invalid escape character");
         }
         ++m_curr;
     }

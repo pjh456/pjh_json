@@ -33,9 +33,9 @@ namespace pjh::json
         }
 
         if (digits == 0)
-            error("Invalid number: no digits after '-'");
+            throw ParseError("Invalid number: no digits after '-'");
         if (digits > 1 && *int_start == '0')
-            error("Invalid number: leading zeros are not allowed");
+            throw ParseError("Invalid number: leading zeros are not allowed");
 
         if (*m_curr == '.' || *m_curr == 'e' || *m_curr == 'E' || digits > 18)
         {
@@ -49,7 +49,7 @@ namespace pjh::json
                     ++frac;
                 }
                 if (frac == 0)
-                    error("Invalid number: no digits after decimal point");
+                    throw ParseError("Invalid number: no digits after decimal point");
             }
             if (*m_curr == 'e' || *m_curr == 'E')
             {
@@ -63,12 +63,12 @@ namespace pjh::json
                     ++exp;
                 }
                 if (exp == 0)
-                    error("Invalid number: no digits in exponent");
+                    throw ParseError("Invalid number: no digits in exponent");
             }
             double val = 0.0;
             auto [end, ec] = std::from_chars(start, m_curr, val);
             if (ec != std::errc{} || end != m_curr)
-                error("Invalid number format");
+                throw ParseError("Invalid number format");
             return Json(val);
         }
 

@@ -43,6 +43,6 @@ namespace pjh::json
             return Json(false);
         }
 
-        error("Invalid literal");
+        throw ParseError("Invalid literal");
     }
 }

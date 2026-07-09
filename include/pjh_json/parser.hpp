@@ -9,7 +9,7 @@
 #include <charconv>
 #include <memory_resource>
 
-#include "json_fwd.hpp"
+#include "json.hpp"
 
 namespace pjh::json
 {
@@ -50,11 +50,6 @@ namespace pjh::json
 
     public:
         [[nodiscard]] uint32_t parse_hex4();
-
-        [[noreturn]] void error(const std::string &msg) const
-        {
-            throw std::runtime_error("JSON Parse Error: " + msg);
-        }
     };
 }
 

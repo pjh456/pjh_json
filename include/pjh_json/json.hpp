@@ -15,6 +15,27 @@
 namespace pjh::json
 {
 
+    // -----------------------------------------------------------------------
+    // Exception hierarchy
+    // -----------------------------------------------------------------------
+    class JsonError : public std::runtime_error
+    {
+    public:
+        using std::runtime_error::runtime_error;
+    };
+
+    class ParseError : public JsonError
+    {
+    public:
+        using JsonError::JsonError;
+    };
+
+    class TypeError : public JsonError
+    {
+    public:
+        using JsonError::JsonError;
+    };
+
     class Json
     {
 
@@ -204,53 +225,53 @@ namespace pjh::json
         Json &operator[](size_t idx)
         {
             if (!is_array())
-                throw std::runtime_error("Type error: expected array");
+                throw TypeError("expected array");
             return as_array()[idx];
         }
         const Json &operator[](size_t idx) const
         {
             if (!is_array())
-                throw std::runtime_error("Type error: expected array");
+                throw TypeError("expected array");
             return as_array()[idx];
         }
 
         Json &at(size_t idx)
         {
             if (!is_array())
-                throw std::runtime_error("Type error: expected array");
+                throw TypeError("expected array");
             return as_array().at(idx);
         }
         const Json &at(size_t idx) const
         {
             if (!is_array())
-                throw std::runtime_error("Type error: expected array");
+                throw TypeError("expected array");
             return as_array().at(idx);
         }
 
         Json &operator[](std::string_view key)
         {
             if (!is_object())
-                throw std::runtime_error("Type error: expected object");
+                throw TypeError("expected object");
             return as_object()[key];
         }
         const Json &operator[](std::string_view key) const
         {
             if (!is_object())
-                throw std::runtime_error("Type error: expected object");
+                throw TypeError("expected object");
             return as_object()[key];
         }
 
         Json &at(std::string_view key)
         {
             if (!is_object())
-                throw std::runtime_error("Type error: expected object");
+                throw TypeError("expected object");
             return as_object().at(key);
         }
 
         const Json &at(std::string_view key) const
         {
             if (!is_object())
-                throw std::runtime_error("Type error: expected object");
+                throw TypeError("expected object");
             return as_object().at(key);
         }
 
