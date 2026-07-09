@@ -4,6 +4,14 @@
 
 namespace pjh::json
 {
+    static uint64_t parse_u64(const char *p, uint32_t n)
+    {
+        uint64_t v = 0;
+        for (uint32_t i = 0; i < n; ++i)
+            v = v * 10 + (p[i] - '0');
+        return v;
+    }
+
     Json Parser::parse_number()
     {
         const char *start = m_curr;
@@ -15,19 +23,18 @@ namespace pjh::json
             ++m_curr;
         }
 
-        uint64_t uval = 0;
+        const char *int_start = m_curr;
         uint32_t digits = 0;
 
         while (*m_curr >= '0' && *m_curr <= '9')
         {
-            uval = uval * 10 + (*m_curr - '0');
             ++m_curr;
             ++digits;
         }
 
         if (digits == 0)
             error("Invalid number: no digits after '-'");
-        if (digits > 1 && (is_negative ? start[1] : start[0]) == '0')
+        if (digits > 1 && *int_start == '0')
             error("Invalid number: leading zeros are not allowed");
 
         if (*m_curr == '.' || *m_curr == 'e' || *m_curr == 'E' || digits > 18)
@@ -65,6 +72,7 @@ namespace pjh::json
             return make_float(val);
         }
 
+        uint64_t uval = parse_u64(int_start, digits);
         int64_t val = is_negative ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
         return make_int(val);
     }
