@@ -25,7 +25,7 @@ namespace pjh::json
         // 初始化并接收一段 JSON 文本
         explicit Parser(
             std::string_view json,
-            std::pmr::memory_resource *res = std::pmr::get_default_resource(),
+            std::pmr::memory_resource *res = Config::instance().resource(),
             bool assume_padded = false)
             : m_curr(json.data()),
               m_end(json.data() + json.size()),

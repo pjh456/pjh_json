@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "json_fwd.hpp"
+#include "config.hpp"
 
 namespace pjh::json
 {
@@ -30,7 +31,7 @@ namespace pjh::json
 
     public:
         Array(
-            std::pmr::memory_resource *res = std::pmr::get_default_resource());
+            std::pmr::memory_resource *res = Config::instance().resource());
         Array(Vec vec);
         Array(std::initializer_list<Json> vec);
 

@@ -9,6 +9,8 @@
 #include <memory_resource>
 #include <vector>
 
+#include "config.hpp"
+
 #include "json_fwd.hpp"
 
 namespace pjh::json
@@ -33,7 +35,7 @@ namespace pjh::json
 
     public:
         Object(
-            std::pmr::memory_resource *res = std::pmr::get_default_resource());
+            std::pmr::memory_resource *res = Config::instance().resource());
         Object(Vec val);
         Object(std::initializer_list<Entry> items);
 

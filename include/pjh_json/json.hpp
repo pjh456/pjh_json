@@ -11,6 +11,7 @@
 
 #include "array.hpp"
 #include "object.hpp"
+#include "config.hpp"
 
 namespace pjh::json
 {
@@ -321,15 +322,15 @@ namespace pjh::json
 
     [[nodiscard]] Document parse_in_situ(
         std::pmr::string &&buffer,
-        std::pmr::memory_resource *res = std::pmr::get_default_resource());
+        std::pmr::memory_resource *res = Config::instance().resource());
 
     [[nodiscard]] Document parse_copy(
         std::string_view json,
-        std::pmr::memory_resource *res = std::pmr::get_default_resource());
+        std::pmr::memory_resource *res = Config::instance().resource());
 
     [[nodiscard]] Document parse_file(
         std::string_view filepath,
-        std::pmr::memory_resource *res = std::pmr::get_default_resource());
+        std::pmr::memory_resource *res = Config::instance().resource());
 }
 
 #endif // INCLUDE_PJH_JSON_HPP
