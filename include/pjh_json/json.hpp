@@ -414,14 +414,14 @@ namespace pjh::json
          * @param arr Array to move
          * @return *this
          */
-        Json &operator=(Array &&arr) noexcept;
+        Json &operator=(Array &&arr);
 
         /**
          * @brief Assign object (takes ownership, heap-allocated)
          * @param obj Object to move
          * @return *this
          */
-        Json &operator=(Object &&obj) noexcept;
+        Json &operator=(Object &&obj);
 
     public:
         /** @name Type checks */

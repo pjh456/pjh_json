@@ -34,7 +34,7 @@ namespace pjh::json
      * 2. Allocate and construct Array on heap using its own m_resource.
      * 3. Store pointer as ArrayType.
      */
-    Json &Json::operator=(Array &&arr) noexcept
+    Json &Json::operator=(Array &&arr)
     {
         destroy();
         m_type = Type::ArrayType;
@@ -49,7 +49,7 @@ namespace pjh::json
      * 2. Allocate and construct Object on heap using its own m_resource.
      * 3. Store pointer as ObjectType.
      */
-    Json &Json::operator=(Object &&obj) noexcept
+    Json &Json::operator=(Object &&obj)
     {
         destroy();
         m_type = Type::ObjectType;
