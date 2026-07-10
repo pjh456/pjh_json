@@ -57,6 +57,14 @@ namespace pjh::json
         [[nodiscard]] Storage storage() const noexcept;
 
         /**
+         * @brief Enable/disable duplicate key detection during parse
+         * @note Default: false (skip check for performance). JSON spec
+         *       does not mandate rejection of duplicate keys.
+         */
+        void set_strict_duplicate_keys(bool enable) noexcept { m_strict_duplicate_keys = enable; }
+        [[nodiscard]] bool strict_duplicate_keys() const noexcept { return m_strict_duplicate_keys; }
+
+        /**
          * @brief Release global document
          * @note In debug builds, asserts no outstanding allocations from the
          *       global resource.
@@ -85,6 +93,7 @@ namespace pjh::json
          */
         void release_locked();
 
+        bool m_strict_duplicate_keys = false;
         Storage m_storage = Storage::Pooled;
         size_t m_block = 4096;
         std::unique_ptr<Document> m_global;

@@ -1,5 +1,6 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
+#include <optional>
 #include <unordered_set>
 
 namespace pjh::json
@@ -50,8 +51,12 @@ namespace pjh::json
 
         // Pre-allocate to reduce reallocations
         obj.data().reserve(4);
-        std::pmr::unordered_set<std::string_view> seen(m_resource);
-        seen.reserve(8);
+        std::optional<std::pmr::unordered_set<std::string_view>> seen;
+        if (Config::instance().strict_duplicate_keys())
+        {
+            seen.emplace(m_resource);
+            seen->reserve(8);
+        }
 
         while (true)
         {
@@ -60,7 +65,8 @@ namespace pjh::json
             if (*m_curr != '"')
                 throw ParseError("Expected string key in object");
             auto key = parse_string();
-            check_duplicate_key(key, seen);
+            if (seen)
+                check_duplicate_key(key, *seen);
 
             // Parse colon separator
             skip_whitespace();
