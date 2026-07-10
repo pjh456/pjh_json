@@ -204,11 +204,11 @@ namespace pjh::json
 
     public:
         /**
-         * @brief Compare entry-by-entry (order-sensitive)
+         * @brief Compare by content (order-insensitive)
          * @param other Object to compare with
-         * @return true if same size, keys, and values in same order
+         * @return true if same size and all key-value pairs match
          */
-        [[nodiscard]] bool operator==(const Object &other) const noexcept;
+        [[nodiscard]] bool operator==(const Object &other) const;
     };
 
 }

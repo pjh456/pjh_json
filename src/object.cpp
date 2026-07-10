@@ -1,8 +1,10 @@
 #include "pjh_json/object.hpp"
 #include "pjh_json/json.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <ranges>
+#include <string_view>
 #include <utility>
 
 namespace pjh::json
@@ -225,23 +227,30 @@ namespace pjh::json
     }
 
     /*
-     * Order-sensitive equality
+     * Content equality (order-insensitive).
      *
      * 1. Fast reject on size mismatch.
-     * 2. For each local entry, look up key in other and compare value.
-     *
-     * Equal only if same insertion order, keys, and values.
+     * 2. Sort pointers to entries by key, then compare element-wise.
+     *    O(n log n) instead of O(n^2).
      */
-    bool Object::operator==(const Object &other) const noexcept
+    bool Object::operator==(const Object &other) const
     {
         if (size() != other.size())
             return false;
-        for (const auto &[key, val] : m_data)
+        std::vector<const Entry *> a, b;
+        a.reserve(size());
+        b.reserve(size());
+        for (const auto &e : m_data) a.push_back(&e);
+        for (const auto &e : other.m_data) b.push_back(&e);
+        auto by_key = [](const Entry *x, const Entry *y) {
+            return static_cast<std::string_view>(x->first) <
+                   static_cast<std::string_view>(y->first);
+        };
+        std::sort(a.begin(), a.end(), by_key);
+        std::sort(b.begin(), b.end(), by_key);
+        for (size_t i = 0; i < a.size(); ++i)
         {
-            auto it = std::ranges::find_if(
-                other.m_data,
-                [&](const auto &kv) { return kv.first == key; });
-            if (it == other.m_data.end() || it->second != val)
+            if (a[i]->first != b[i]->first || a[i]->second != b[i]->second)
                 return false;
         }
         return true;
