@@ -8,14 +8,11 @@
 #include <bit>
 #include <charconv>
 #include <memory_resource>
-#include <vector>
 
 #include "document.hpp"
 
 namespace pjh::json
 {
-    struct Stage1Index;
-
     /**
      * @brief Recursive-descent JSON parser (requires padded buffer)
      *
@@ -23,18 +20,12 @@ namespace pjh::json
      * Requires input with 64 trailing NUL bytes for SIMD overread safety.
      * Use parse_copy(), parse_file(), or parse_in_situ() to create correctly
      * padded inputs automatically.
-     *
-     * For large inputs, a two-stage SIMD pipeline can be enabled via
-     * Config::set_two_stage_threshold(). Stage 1 builds a structural
-     * character index; Stage 2 uses it for O(1) structural navigation.
      */
     class Parser
     {
     private:
         const char *m_curr;         // Current parse position
         const char *m_end;          // End of input data
-        const char *m_data;         // Start of input buffer (for two-stage)
-        size_t m_data_len;          // Input data length (for two-stage)
         std::pmr::memory_resource *m_resource;  // Allocator for parsed values
         bool m_assume_padded;       // If true, caller guarantees 64 trailing NUL bytes
 
@@ -53,8 +44,6 @@ namespace pjh::json
             bool assume_padded = false)
             : m_curr(json.data()),
               m_end(json.data() + json.size()),
-              m_data(json.data()),
-              m_data_len(json.size()),
               m_resource(res),
               m_assume_padded(assume_padded) {}
 
@@ -63,8 +52,7 @@ namespace pjh::json
          * @return Fully constructed Json tree
          * @throws ParseError if JSON is invalid or if extra characters follow
          * @note Skips leading and trailing whitespace. Input must be padded
-         *       (m_assume_padded must be true). For inputs above the configured
-         *       two_stage_threshold, uses SIMD structural index pipeline.
+         *       (m_assume_padded must be true).
          */
         [[nodiscard]] Json parse();
 
@@ -120,62 +108,7 @@ namespace pjh::json
          * @return Json holding bool or nullptr
          */
         Json parse_literal();
-
-        // --- Two-stage parsing (SIMD structural index pipeline) ---
-
-        /**
-         * @brief Parse using pre-built structural index
-         * @param idx Structural character index from Stage 1
-         * @return Fully constructed Json tree
-         */
-        Json parse_two_stage(const Stage1Index &idx);
-        /**
-         * @brief Parse object from structural index
-         */
-        void parse_object_two_stage_inplace(
-            Json &out,
-            const uint32_t *offsets, const uint8_t *types,
-            size_t count, size_t &cursor);
-        /**
-         * @brief Parse array from structural index
-         */
-        void parse_array_two_stage_inplace(
-            Json &out,
-            const uint32_t *offsets, const uint8_t *types,
-            size_t count, size_t &cursor);
-        /**
-         * @brief Parse value from structural index
-         */
-        void parse_value_two_stage_inplace(
-            Json &out,
-            const uint32_t *offsets, const uint8_t *types,
-            size_t count, size_t &cursor);
     };
-
-    /**
-     * @brief Structural character index produced by Stage 1
-     *
-     * offsets[i] = byte position in the input buffer.
-     * types[i]   = the character at that position ('{', '}', '[', ']',
-     *              ':', ',', '"') or 0 for escaped quotes.
-     */
-    struct Stage1Index
-    {
-        std::pmr::vector<uint32_t> offsets;
-        std::pmr::vector<uint8_t> types;
-    };
-
-    /**
-     * @brief Build structural character index via SIMD scan
-     * @param data Input buffer (must have 64-byte NUL padding)
-     * @param len  Length of valid data in buffer
-     * @param res  Memory resource for index allocation
-     * @return Structural index with escaped quotes filtered out
-     */
-    Stage1Index build_structural_index(
-        const char *data, size_t len,
-        std::pmr::memory_resource *res);
-
 }
 
 #endif // INCLUDE_PJH_JSON_PARSER_HPP

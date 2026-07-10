@@ -152,17 +152,6 @@ static void BM_PJH_Json_Parse(benchmark::State &state, const std::string &conten
     }
 }
 
-// pjh::json two-stage
-static void BM_PJH_Json_Parse_TwoStage(benchmark::State &state, const std::string &content)
-{
-    pjh::json::Config::instance().set_two_stage_threshold(1);
-    for (auto _ : state)
-    {
-        auto doc = pjh::json::parse_copy(content, pjh::json::Storage::Arena);
-        benchmark::DoNotOptimize(doc);
-    }
-}
-
 // 动态注册 Benchmarks
 void RegisterBenchmarks()
 {
@@ -202,10 +191,8 @@ void RegisterBenchmarks()
         std::string bm_pjh = "PJH/" + fname;
         std::string bm_nlohmann = "Nlohmann/" + fname;
         std::string bm_rapid = "RapidJSON/" + fname;
-        std::string bm_pjh_ts = "PJH_TwoStage/" + fname;
 
         benchmark::RegisterBenchmark(bm_pjh.c_str(), BM_PJH_Json_Parse, json_data);
-        benchmark::RegisterBenchmark(bm_pjh_ts.c_str(), BM_PJH_Json_Parse_TwoStage, json_data);
         benchmark::RegisterBenchmark(bm_nlohmann.c_str(), BM_Nlohmann_Json_Parse, json_data);
         benchmark::RegisterBenchmark(bm_rapid.c_str(), BM_Rapid_Json_Parse, json_data);
     }

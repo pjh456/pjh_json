@@ -47,22 +47,15 @@ namespace pjh::json
     /*
      * Parse a complete JSON value from the padded input.
      *
-     * For inputs above Config::two_stage_threshold(), builds a SIMD
-     * structural index and uses two-stage parsing. For smaller inputs,
-     * falls back to recursive-descent (lower overhead, no index allocation).
+     * 1. Verify input has 64-byte NUL padding (SIMD safety).
+     * 2. Parse the top-level value (skips leading whitespace).
+     * 3. Skip trailing whitespace.
+     * 4. Reject extra characters after the parsed value.
      */
     Json Parser::parse()
     {
         if (!m_assume_padded)
             throw ParseError("Parser requires 64-byte '\\0' padding; use parse_copy/parse_file/parse_in_situ");
-
-        size_t threshold = Config::instance().two_stage_threshold();
-        if (threshold > 0 && m_data_len >= threshold)
-        {
-            Stage1Index idx = build_structural_index(m_data, m_data_len, m_resource);
-            return parse_two_stage(idx);
-        }
-
         Json result = parse_value();
         skip_whitespace();
         if (m_curr < m_end)

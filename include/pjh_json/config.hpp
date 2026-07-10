@@ -65,18 +65,6 @@ namespace pjh::json
         [[nodiscard]] bool strict_duplicate_keys() const noexcept { return m_strict_duplicate_keys; }
 
         /**
-         * @brief Set two-stage parsing threshold in bytes (0 = disabled)
-         * @param bytes Files larger than this use SIMD two-stage parsing.
-         *        Default 0 (always use recursive-descent for all sizes).
-         *        Recommended: 65536 (64 KB) for good speed/memory tradeoff.
-         * @note Two-stage parsing builds a structural index (~1 entry per
-         *       10-20 bytes of input). Below the threshold, recursive-descent
-         *       is faster and uses no extra memory.
-         */
-        void set_two_stage_threshold(size_t bytes) noexcept { m_two_stage_threshold = bytes; }
-        [[nodiscard]] size_t two_stage_threshold() const noexcept { return m_two_stage_threshold; }
-
-        /**
          * @brief Set arena initial block size for per-parse allocation (0 = auto)
          * @param bytes Arena buffer size in bytes. 0 (default) means
          *        auto-scale based on input size (input_size * 3, capped at 16 GB).
@@ -116,7 +104,6 @@ namespace pjh::json
         void release_locked();
 
         bool m_strict_duplicate_keys = false;
-        size_t m_two_stage_threshold = 0;
         size_t m_arena_block_size = 0;
         Storage m_storage = Storage::Pooled;
         size_t m_block = 4096;
