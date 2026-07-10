@@ -688,7 +688,7 @@ namespace pjh::json
          * @param other Json to compare with
          * @return true if same type and value
          */
-        [[nodiscard]] bool operator==(const Json &other) const noexcept;
+        [[nodiscard]] bool operator==(const Json &other) const;
         /**
          * @brief Compare with null
          * @return true if holds null
@@ -723,12 +723,12 @@ namespace pjh::json
          * @brief Compare with Array
          * @return true if holds equal Array
          */
-        [[nodiscard]] bool operator==(const Array &val) const noexcept;
+        [[nodiscard]] bool operator==(const Array &val) const;
         /**
          * @brief Compare with Object
          * @return true if holds equal Object
          */
-        [[nodiscard]] bool operator==(const Object &val) const noexcept;
+        [[nodiscard]] bool operator==(const Object &val) const;
         /**@}*/
     };
 

@@ -110,7 +110,7 @@ namespace pjh::json
     /*
      * Compare sizes first for fast rejection, then element-by-element
      */
-    bool Array::operator==(const Array &other) const noexcept
+    bool Array::operator==(const Array &other) const
     {
         if (m_data.size() != other.m_data.size())
             return false;

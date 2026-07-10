@@ -283,7 +283,7 @@ namespace pjh::json
      * 2. Json-vs-scalar: type-check first, then value comparison.
      * 3. StringView and StringOwned are compared by content (not storage).
      */
-    bool Json::operator==(const Json &other) const noexcept
+    bool Json::operator==(const Json &other) const
     {
         if (is_string() && other.is_string())
             return as_string() == other.as_string();
@@ -313,6 +313,6 @@ namespace pjh::json
     bool Json::operator==(double val) const noexcept { return is_float() && as_float() == val; }
     bool Json::operator==(std::string_view val) const noexcept { return is_string() && as_string() == val; }
     bool Json::operator==(const char *val) const noexcept { return operator==(std::string_view(val)); }
-    bool Json::operator==(const Array &val) const noexcept { return is_array() && as_array() == val; }
-    bool Json::operator==(const Object &val) const noexcept { return is_object() && as_object() == val; }
+    bool Json::operator==(const Array &val) const { return is_array() && as_array() == val; }
+    bool Json::operator==(const Object &val) const { return is_object() && as_object() == val; }
 }

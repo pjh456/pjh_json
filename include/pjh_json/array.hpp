@@ -205,7 +205,7 @@ namespace pjh::json
          * @param other Array to compare with
          * @return true if same size and each element equal
          */
-        [[nodiscard]] bool operator==(const Array &other) const noexcept;
+        [[nodiscard]] bool operator==(const Array &other) const;
     };
 
 }
