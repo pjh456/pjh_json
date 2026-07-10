@@ -152,6 +152,17 @@ static void BM_PJH_Json_Parse(benchmark::State &state, const std::string &conten
     }
 }
 
+// pjh::json two-stage
+static void BM_PJH_Json_Parse_TwoStage(benchmark::State &state, const std::string &content)
+{
+    pjh::json::Config::instance().set_two_stage_threshold(1);
+    for (auto _ : state)
+    {
+        auto doc = pjh::json::parse_copy(content, pjh::json::Storage::Arena);
+        benchmark::DoNotOptimize(doc);
+    }
+}
+
 // 动态注册 Benchmarks
 void RegisterBenchmarks()
 {
@@ -164,11 +175,14 @@ void RegisterBenchmarks()
 
     // 定义要测试的数据档位
     std::vector<std::pair<std::string, size_t>> sizes = {
-        {"1mb.json", 1 * 1024 * 1024},
-        {"10mb.json", 10 * 1024 * 1024},
-        {"30mb.json", 30 * 1024 * 1024},
-        {"50mb.json", 50 * 1024 * 1024},
-        {"100mb.json", 100 * 1024 * 1024},
+        {"1mb.json", 1ULL * 1024 * 1024},
+        {"10mb.json", 10ULL * 1024 * 1024},
+        {"30mb.json", 30ULL * 1024 * 1024},
+        {"50mb.json", 50ULL * 1024 * 1024},
+        {"100mb.json", 100ULL * 1024 * 1024},
+        {"200mb.json", 200ULL * 1024 * 1024},
+        {"500mb.json", 500ULL * 1024 * 1024},
+        {"1gb.json", 1024ULL * 1024 * 1024},
     };
 
     for (auto &[fname, target_size] : sizes)
@@ -188,8 +202,10 @@ void RegisterBenchmarks()
         std::string bm_pjh = "PJH/" + fname;
         std::string bm_nlohmann = "Nlohmann/" + fname;
         std::string bm_rapid = "RapidJSON/" + fname;
+        std::string bm_pjh_ts = "PJH_TwoStage/" + fname;
 
         benchmark::RegisterBenchmark(bm_pjh.c_str(), BM_PJH_Json_Parse, json_data);
+        benchmark::RegisterBenchmark(bm_pjh_ts.c_str(), BM_PJH_Json_Parse_TwoStage, json_data);
         benchmark::RegisterBenchmark(bm_nlohmann.c_str(), BM_Nlohmann_Json_Parse, json_data);
         benchmark::RegisterBenchmark(bm_rapid.c_str(), BM_Rapid_Json_Parse, json_data);
     }
