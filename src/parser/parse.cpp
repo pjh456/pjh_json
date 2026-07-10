@@ -11,8 +11,18 @@ namespace pjh::json
         constexpr size_t kMinArenaBlock = 4096;
         constexpr size_t kMaxArenaBlock = size_t(1) << 34; // 16 GB cap
 
-        // Determine arena initial block size.
-        // If user configured a fixed size, use it. Otherwise auto-scale.
+        /*
+         * Determine arena initial block size for a given input length.
+         *
+         * 1. If user configured a fixed size via
+         *    Config::set_arena_block_size(), use it directly.
+         * 2. Otherwise auto-scale: use kBlock (4096) for small inputs,
+         *    input_size * 3 for larger inputs (estimated DOM overhead),
+         *    clamped to [kMinArenaBlock, kMaxArenaBlock].
+         *
+         * Auto-scaling avoids excessive intermediate buffer allocations
+         * in monotonic_buffer_resource during vector growth.
+         */
         static size_t arena_block_for(size_t input_len)
         {
             size_t cfg = Config::instance().arena_block_size();

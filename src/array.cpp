@@ -44,6 +44,10 @@ namespace pjh::json
 
     /*
      * Move ownership, null out source resource
+     *
+     * 1. Guard against self-assignment.
+     * 2. Move the internal vector.
+     * 3. Transfer resource pointer, null out source.
      */
     Array &Array::operator=(Array &&other) noexcept
     {
@@ -54,6 +58,9 @@ namespace pjh::json
         return *this;
     }
 
+    /*
+     * Move construct — steal vector and resource from source
+     */
     Array::Array(Array &&other) noexcept
         : m_data(std::move(other.m_data)),
           m_resource(std::exchange(other.m_resource, nullptr))

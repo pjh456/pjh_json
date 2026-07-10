@@ -7,7 +7,9 @@
 
 namespace pjh::json
 {
-    // Write newline + indentation for pretty-print.
+    /*
+     * Write newline + indentation for pretty-print.
+     */
     static void write_indent(std::pmr::string &sink, const DumpOptions &opts, size_t depth)
     {
         sink.push_back('\n');
@@ -157,17 +159,29 @@ namespace pjh::json
         }
     }
 
+    /*
+     * Serialize JSON value into a pmr::string sink
+     */
     void dump_to(std::pmr::string &sink, const Json &value, const DumpOptions &opts)
     {
         write_value(sink, value, opts, 0);
     }
 
+    /*
+     * Serialize JSON value into a std::ostream
+     */
     void dump_to(std::ostream &os, const Json &value, const DumpOptions &opts)
     {
         std::pmr::string out = dump(value, opts);
         os.write(out.data(), static_cast<std::streamsize>(out.size()));
     }
 
+    /*
+     * Serialize JSON value into a new pmr::string
+     *
+     * 1. Allocate sink string from the given resource.
+     * 2. Recursively write the value tree.
+     */
     std::pmr::string dump(const Json &value, const DumpOptions &opts,
                           std::pmr::memory_resource *res)
     {
@@ -176,6 +190,9 @@ namespace pjh::json
         return sink;
     }
 
+    /*
+     * Serialize Document (delegates to Json dump on root value)
+     */
     std::pmr::string dump(const Document &doc, const DumpOptions &opts,
                           std::pmr::memory_resource *res)
     {
@@ -195,6 +212,12 @@ namespace pjh::json
             throw JsonError("Failed to write file: " + std::string(path));
     }
 
+    /*
+     * Serialize JSON value and write to file
+     *
+     * 1. Dump into a pmr::string.
+     * 2. Write the serialized content to disk.
+     */
     void dump_file(std::string_view path, const Json &value, const DumpOptions &opts)
     {
         std::pmr::string out = dump(value, opts);

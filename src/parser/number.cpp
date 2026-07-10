@@ -4,7 +4,9 @@
 
 namespace pjh::json
 {
-    // Parse n-digit unsigned integer (digits already validated, no overflow check).
+    /*
+     * Parse n-digit unsigned integer (digits already validated, no overflow check).
+     */
     static uint64_t parse_u64(const char *p, uint32_t n)
     {
         uint64_t v = 0;

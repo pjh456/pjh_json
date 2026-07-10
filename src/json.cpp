@@ -4,6 +4,12 @@ namespace pjh::json
 {
     // --- operator= ---
 
+    /*
+     * Assign string_view (borrowed)
+     *
+     * 1. Destroy old value.
+     * 2. Store {ptr, len} inline as T_StrView.
+     */
     Json &Json::operator=(std::string_view val)
     {
         destroy();
@@ -13,11 +19,21 @@ namespace pjh::json
         return *this;
     }
 
+    /*
+     * Assign C string (delegates to string_view overload)
+     */
     Json &Json::operator=(const char *val)
     {
         return operator=(std::string_view(val));
     }
 
+    /*
+     * Assign array (takes ownership, heap-allocated via PMR)
+     *
+     * 1. Destroy old value.
+     * 2. Allocate and construct Array on heap using its own m_resource.
+     * 3. Store pointer as T_Array.
+     */
     Json &Json::operator=(Array &&arr) noexcept
     {
         destroy();
@@ -26,6 +42,13 @@ namespace pjh::json
         return *this;
     }
 
+    /*
+     * Assign object (takes ownership, heap-allocated via PMR)
+     *
+     * 1. Destroy old value.
+     * 2. Allocate and construct Object on heap using its own m_resource.
+     * 3. Store pointer as T_Object.
+     */
     Json &Json::operator=(Object &&obj) noexcept
     {
         destroy();
@@ -36,6 +59,15 @@ namespace pjh::json
 
     // --- clone ---
 
+    /*
+     * Deep copy into target memory resource
+     *
+     * 1. Scalars (null/bool/int/float): copy by value.
+     * 2. String (borrowed or owned): read string_view, allocate owned
+     *    pmr::string copy in target resource, store as T_StrOwned.
+     * 3. Array/Object: delegate to container's clone() which recursively
+     *    clones all children, then heap-allocate via PMR.
+     */
     Json Json::clone(std::pmr::memory_resource *into) const
     {
         switch (m_type)
@@ -77,6 +109,14 @@ namespace pjh::json
     }
 
     // --- try_as ---
+
+    /*
+     * Safe access: check internal type, return nullopt/nullptr on mismatch.
+     *
+     * 1. Scalar types: compare m_type, return the value or nullopt.
+     * 2. Array/Object: return pointer to heap object or nullptr.
+     * 3. String: delegates to is_string() + as_string().
+     */
 
     std::optional<bool> Json::try_as_boolean() const noexcept
     {
@@ -128,6 +168,12 @@ namespace pjh::json
 
     // --- size / empty ---
 
+    /*
+     * Delegate to contained container if array/object, else scalar
+     *
+     * 1. Array/object returns container size.
+     * 2. Scalar always returns size=1, empty=false.
+     */
     size_t Json::size() const noexcept
     {
         if (is_array()) return as_array().size();
@@ -143,6 +189,18 @@ namespace pjh::json
     }
 
     // --- operator[] / at ---
+
+    /*
+     * Element access with type validation
+     *
+     * 1. Verify m_type is T_Array or T_Object (throw TypeError on mismatch).
+     * 2. Delegate to the underlying container's accessor.
+     *
+     * operator[] skips bounds check (Array) or insert-if-missing (Object).
+     * at() includes bounds check from the container.
+     *
+     * @throws TypeError if not the expected container type
+     */
 
     Json &Json::operator[](size_t idx)
     {
@@ -194,6 +252,14 @@ namespace pjh::json
 
     // --- operator== ---
 
+    /*
+     * Equality comparison
+     *
+     * 1. Json-vs-Json: compare m_type first for fast rejection, then
+     *    compare values by type.
+     * 2. Json-vs-scalar: type-check first, then value comparison.
+     * 3. T_StrView and T_StrOwned are compared by content (not storage).
+     */
     bool Json::operator==(const Json &other) const noexcept
     {
         if (m_type != other.m_type) return false;

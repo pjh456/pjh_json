@@ -5,7 +5,12 @@
 
 namespace pjh::json
 {
-    // Track seen keys via unordered_set for duplicate detection.
+    /*
+     * Track seen keys via unordered_set for duplicate detection.
+     *
+     * If the key was already inserted, throw ParseError.
+     * Only called when Config::strict_duplicate_keys() is enabled.
+     */
     static void check_duplicate_key(
         std::string_view key,
         std::pmr::unordered_set<std::string_view> &seen)

@@ -49,12 +49,22 @@ namespace pjh::json
         return out;
     }
 
+    /*
+     * Move construct — steal vector and resource from source
+     */
     Object::Object(Object &&other) noexcept
         : m_data(std::move(other.m_data)),
           m_resource(std::exchange(other.m_resource, nullptr))
     {
     }
 
+    /*
+     * Move ownership, null out source resource
+     *
+     * 1. Guard against self-assignment.
+     * 2. Move the internal vector.
+     * 3. Transfer resource pointer, null out source.
+     */
     Object &Object::operator=(Object &&other) noexcept
     {
         if (this == &other)
@@ -64,7 +74,9 @@ namespace pjh::json
         return *this;
     }
 
-    // Linear search by key (insertion-order vector)
+    /*
+     * Linear search by key (insertion-order vector)
+     */
     bool Object::contains(std::string_view key) const noexcept
     {
         return std::ranges::find_if(
@@ -117,6 +129,13 @@ namespace pjh::json
         return it->second;
     }
 
+    /*
+     * Mutable key access with bounds check: find-or-throw
+     *
+     * 1. Search for key via linear scan.
+     * 2. If found, return mutable reference.
+     * 3. If missing, throw out_of_range.
+     */
     Json &Object::at(std::string_view key)
     {
         auto it = std::ranges::find_if(
@@ -130,6 +149,13 @@ namespace pjh::json
         return it->second;
     }
 
+    /*
+     * Const key access with bounds check: find-or-throw
+     *
+     * 1. Search for key via linear scan.
+     * 2. If found, return const reference.
+     * 3. If missing, throw out_of_range.
+     */
     const Json &Object::at(std::string_view key) const
     {
         auto it = std::ranges::find_if(
