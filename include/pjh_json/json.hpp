@@ -14,36 +14,10 @@
 #include "array.hpp"
 #include "object.hpp"
 #include "config.hpp"
+#include "utils.hpp"
 
 namespace pjh::json
 {
-
-    /**
-     * @brief Base exception for all JSON errors
-     */
-    class JsonError : public std::runtime_error
-    {
-    public:
-        using std::runtime_error::runtime_error;
-    };
-
-    /**
-     * @brief JSON parse failure
-     */
-    class ParseError : public JsonError
-    {
-    public:
-        using JsonError::JsonError;
-    };
-
-    /**
-     * @brief Type mismatch on access
-     */
-    class TypeError : public JsonError
-    {
-    public:
-        using JsonError::JsonError;
-    };
 
     /**
      * @brief Core JSON value type — custom tagged union, 24 bytes.
@@ -475,34 +449,58 @@ namespace pjh::json
         /**
          * @brief Get null value
          */
-        [[nodiscard]] std::nullptr_t as_null() const { return nullptr; }
+        [[nodiscard]] std::nullptr_t as_null() const noexcept { return nullptr; }
 
         /**
          * @brief Get bool reference
          */
-        [[nodiscard]] bool &as_boolean() { return m_data.boolean; }
+        [[nodiscard]] bool &as_boolean() PJH_JSON_NOEXCEPT
+        {
+            debug_check_type(m_type, Type::Boolean, "boolean");
+            return m_data.boolean;
+        }
         /**
          * @brief Get const bool reference
          */
-        [[nodiscard]] const bool &as_boolean() const { return m_data.boolean; }
+        [[nodiscard]] const bool &as_boolean() const PJH_JSON_NOEXCEPT
+        {
+            debug_check_type(m_type, Type::Boolean, "boolean");
+            return m_data.boolean;
+        }
 
         /**
          * @brief Get int64 reference
          */
-        [[nodiscard]] int64_t &as_int() { return m_data.integer; }
+        [[nodiscard]] int64_t &as_int() PJH_JSON_NOEXCEPT
+        {
+            debug_check_type(m_type, Type::Integer, "int");
+            return m_data.integer;
+        }
         /**
          * @brief Get const int64 reference
          */
-        [[nodiscard]] const int64_t &as_int() const { return m_data.integer; }
+        [[nodiscard]] const int64_t &as_int() const PJH_JSON_NOEXCEPT
+        {
+            debug_check_type(m_type, Type::Integer, "int");
+            return m_data.integer;
+        }
 
         /**
          * @brief Get double reference
          */
-        [[nodiscard]] double &as_float() { return m_data.floating; }
+        [[nodiscard]] double &as_float() PJH_JSON_NOEXCEPT
+        {
+            debug_check_type(m_type, Type::Floating, "float");
+            return m_data.floating;
+        }
         /**
          * @brief Get const double reference
          */
-        [[nodiscard]] const double &as_float() const { return m_data.floating; }
+        [[nodiscard]] const double &as_float() const PJH_JSON_NOEXCEPT
+        {
+            debug_check_type(m_type, Type::Floating, "float");
+            return m_data.floating;
+        }
 
         /**
          * @brief Get string view.
@@ -512,8 +510,9 @@ namespace pjh::json
          *
          * @return View of the string content
          */
-        [[nodiscard]] std::string_view as_string() const
+        [[nodiscard]] std::string_view as_string() const PJH_JSON_NOEXCEPT
         {
+            debug_check_type2(m_type, Type::StringView, Type::StringOwned, "string");
             if (m_type == Type::StringView)
                 return std::string_view(m_data.str_view.data, m_data.str_view.length);
             return *static_cast<std::pmr::string *>(m_data.heap);
@@ -522,20 +521,36 @@ namespace pjh::json
         /**
          * @brief Get array reference
          */
-        [[nodiscard]] Array &as_array() { return *static_cast<Array *>(m_data.heap); }
+        [[nodiscard]] Array &as_array() PJH_JSON_NOEXCEPT
+        {
+            debug_check_type(m_type, Type::ArrayType, "array");
+            return *static_cast<Array *>(m_data.heap);
+        }
         /**
          * @brief Get const array reference
          */
-        [[nodiscard]] const Array &as_array() const { return *static_cast<const Array *>(m_data.heap); }
+        [[nodiscard]] const Array &as_array() const PJH_JSON_NOEXCEPT
+        {
+            debug_check_type(m_type, Type::ArrayType, "array");
+            return *static_cast<const Array *>(m_data.heap);
+        }
 
         /**
          * @brief Get object reference
          */
-        [[nodiscard]] Object &as_object() { return *static_cast<Object *>(m_data.heap); }
+        [[nodiscard]] Object &as_object() PJH_JSON_NOEXCEPT
+        {
+            debug_check_type(m_type, Type::ObjectType, "object");
+            return *static_cast<Object *>(m_data.heap);
+        }
         /**
          * @brief Get const object reference
          */
-        [[nodiscard]] const Object &as_object() const { return *static_cast<const Object *>(m_data.heap); }
+        [[nodiscard]] const Object &as_object() const PJH_JSON_NOEXCEPT
+        {
+            debug_check_type(m_type, Type::ObjectType, "object");
+            return *static_cast<const Object *>(m_data.heap);
+        }
         /**@}*/
 
     public:
