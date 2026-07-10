@@ -76,7 +76,7 @@ namespace pjh::json
             ++m_curr;
 
             // Parse value
-            obj.data().emplace_back(key, Json(nullptr));
+            obj.data().emplace_back(std::move(key), Json(nullptr));
             parse_value_inplace(obj.data().back().second);
 
             // Check for closing brace or comma

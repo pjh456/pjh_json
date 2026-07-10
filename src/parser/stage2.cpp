@@ -61,7 +61,7 @@ namespace pjh::json
             m_curr = m_data + offsets[cursor - 1] + 1;
             skip_ws(m_curr, m_data + m_data_len);
 
-            obj.data().emplace_back(key, Json(nullptr));
+            obj.data().emplace_back(std::move(key), Json(nullptr));
             parse_value_two_stage_inplace(obj.data().back().second,
                                           offsets, types, count, cursor);
 

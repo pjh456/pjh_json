@@ -29,6 +29,8 @@ namespace pjh::json
         Vec m_data;
         std::pmr::memory_resource *m_resource{nullptr};
 
+        friend class Json;
+
     public:
         /**
          * @brief Construct empty array with given allocator
