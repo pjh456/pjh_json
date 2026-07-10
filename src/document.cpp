@@ -100,8 +100,14 @@ namespace pjh::json
     {
         if (this != &other)
         {
-            this->~Document();
-            new (this) Document(std::move(other));
+            m_arena = std::move(other.m_arena);
+            m_root = std::move(other.m_root);
+            m_buffer = std::move(other.m_buffer);
+            m_is_view = other.m_is_view;
+            m_storage = other.m_storage;
+            m_block = other.m_block;
+            m_thread_safe = other.m_thread_safe;
+            m_count = other.m_count;
         }
         return *this;
     }

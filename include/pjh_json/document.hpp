@@ -77,11 +77,9 @@ namespace pjh::json
          */
         Document(Document &&) noexcept = default;
         /**
-         * @brief Move assign
+         * @brief Move assign (member-wise, noexcept)
          * @param other Source document (left empty)
          * @return *this
-         * @note Destructs this then placement-new from other to handle
-         *       potentially unequal allocators.
          */
         Document &operator=(Document &&other) noexcept;
 
