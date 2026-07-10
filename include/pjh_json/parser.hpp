@@ -80,11 +80,22 @@ namespace pjh::json
         /**
          * @brief Parse JSON object
          */
-        Json parse_object();
+        Json parse_object()
+        {
+            Json out;
+            parse_object_inplace(out);
+            return out;
+        }
+
         /**
          * @brief Parse JSON array
          */
-        Json parse_array();
+        Json parse_array()
+        {
+            Json out;
+            parse_array_inplace(out);
+            return out;
+        }
         /**
          * @brief Parse object into existing Json
          */

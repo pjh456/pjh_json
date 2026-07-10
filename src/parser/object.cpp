@@ -19,13 +19,6 @@ namespace pjh::json
             throw ParseError("Duplicate key in object");
     }
 
-    Json Parser::parse_object()
-    {
-        Json out;
-        parse_object_inplace(out);
-        return out;
-    }
-
     /*
      * Parse JSON object in-place
      *

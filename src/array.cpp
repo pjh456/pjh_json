@@ -89,9 +89,6 @@ namespace pjh::json
     Array::Vec::const_iterator Array::begin() const noexcept { return m_data.begin(); }
     Array::Vec::const_iterator Array::end() const noexcept { return m_data.end(); }
 
-    Array::Vec &Array::data() noexcept { return m_data; }
-    const Array::Vec &Array::data() const noexcept { return m_data; }
-
     Json &Array::operator[](size_t idx) noexcept { return m_data[idx]; }
     const Json &Array::operator[](size_t idx) const noexcept { return m_data[idx]; }
 

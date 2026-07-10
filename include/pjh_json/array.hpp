@@ -146,12 +146,12 @@ namespace pjh::json
          * @brief Direct access to underlying vector
          * @return Mutable reference to internal Vec
          */
-        [[nodiscard]] Vec &data() noexcept;
+        [[nodiscard]] Vec &data() noexcept { return m_data; }
         /**
          * @brief Direct access to underlying vector (const)
          * @return Const reference to internal Vec
          */
-        [[nodiscard]] const Vec &data() const noexcept;
+        [[nodiscard]] const Vec &data() const noexcept { return m_data; }
 
     public:
         /** @name Indexed access */

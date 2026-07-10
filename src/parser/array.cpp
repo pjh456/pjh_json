@@ -3,13 +3,6 @@
 
 namespace pjh::json
 {
-    Json Parser::parse_array()
-    {
-        Json out;
-        parse_array_inplace(out);
-        return out;
-    }
-
     /*
      * Parse JSON array in-place
      *

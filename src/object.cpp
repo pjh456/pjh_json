@@ -254,7 +254,4 @@ namespace pjh::json
     Object::Vec::iterator Object::end() noexcept { return m_data.end(); }
     Object::Vec::const_iterator Object::begin() const noexcept { return m_data.begin(); }
     Object::Vec::const_iterator Object::end() const noexcept { return m_data.end(); }
-
-    Object::Vec &Object::data() noexcept { return m_data; }
-    const Object::Vec &Object::data() const noexcept { return m_data; }
 }
