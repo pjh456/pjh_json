@@ -8,8 +8,25 @@ namespace pjh::json
     namespace
     {
         constexpr size_t kBlock = 4096;
+        constexpr size_t kMinArenaBlock = 4096;
+        constexpr size_t kMaxArenaBlock = size_t(1) << 34; // 16 GB cap
 
-        // Unwrap arena resource (nullptr -> new_delete_resource).
+        // Determine arena initial block size.
+        // If user configured a fixed size, use it. Otherwise auto-scale.
+        static size_t arena_block_for(size_t input_len)
+        {
+            size_t cfg = Config::instance().arena_block_size();
+            if (cfg > 0)
+                return cfg;
+            if (input_len <= kBlock)
+                return kBlock;
+            size_t est = input_len * 3;
+            if (est < kMinArenaBlock)
+                return kMinArenaBlock;
+            if (est > kMaxArenaBlock)
+                return kMaxArenaBlock;
+            return est;
+        }
         std::pmr::memory_resource *arena_res(
             const std::unique_ptr<std::pmr::memory_resource> &arena) noexcept
         {
@@ -60,11 +77,12 @@ namespace pjh::json
             throw ParseError("Buffer too small for in-situ parse");
 
         size_t size = buffer.size() - 64;
-        auto arena = Document::make_arena(storage, kBlock, false);
+        size_t block = arena_block_for(size);
+        auto arena = Document::make_arena(storage, block, false);
         Parser p(std::string_view(buffer.data(), size), arena_res(arena), true);
         Json root = p.parse();
         return Document(std::move(arena), std::move(root), std::move(buffer),
-                        false, storage, kBlock);
+                        false, storage, block);
     }
 
     /*
@@ -78,7 +96,8 @@ namespace pjh::json
      */
     Document parse_copy(std::string_view json, Storage storage)
     {
-        auto arena = Document::make_arena(storage, kBlock, false);
+        size_t block = arena_block_for(json.size());
+        auto arena = Document::make_arena(storage, block, false);
         std::pmr::memory_resource *res = arena_res(arena);
 
         std::pmr::string buffer(res);
@@ -88,7 +107,7 @@ namespace pjh::json
         Parser p(std::string_view(buffer.data(), json.size()), res, true);
         Json root = p.parse();
         return Document(std::move(arena), std::move(root), std::move(buffer),
-                        false, storage, kBlock);
+                        false, storage, block);
     }
 
     /*
@@ -102,11 +121,12 @@ namespace pjh::json
      */
     Document parse_view(const char *data, size_t content_len, Storage storage)
     {
-        auto arena = Document::make_arena(storage, kBlock, false);
+        size_t block = arena_block_for(content_len);
+        auto arena = Document::make_arena(storage, block, false);
         Parser p(std::string_view(data, content_len), arena_res(arena), true);
         Json root = p.parse();
         return Document(std::move(arena), std::move(root), std::pmr::string{},
-                        true, storage, kBlock);
+                        true, storage, block);
     }
 
     /*
@@ -122,7 +142,8 @@ namespace pjh::json
      */
     Document parse_jsonl(std::string_view input, Storage storage)
     {
-        auto arena = Document::make_arena(storage, kBlock, false);
+        size_t block = arena_block_for(input.size());
+        auto arena = Document::make_arena(storage, block, false);
         std::pmr::memory_resource *res = arena_res(arena);
 
         // single padded buffer owned by Document; each line borrows into it
@@ -169,7 +190,7 @@ namespace pjh::json
         }
 
         return Document(std::move(arena), Json(std::move(arr)), std::move(buffer),
-                        false, storage, kBlock);
+                        false, storage, block);
     }
 
     /*

@@ -77,6 +77,16 @@ namespace pjh::json
         [[nodiscard]] size_t two_stage_threshold() const noexcept { return m_two_stage_threshold; }
 
         /**
+         * @brief Set arena initial block size for per-parse allocation (0 = auto)
+         * @param bytes Arena buffer size in bytes. 0 (default) means
+         *        auto-scale based on input size (input_size * 3, capped at 16 GB).
+         *        Non-zero uses the given fixed size for every parse.
+         * @note Only meaningful with Storage::Arena.
+         */
+        void set_arena_block_size(size_t bytes) noexcept { m_arena_block_size = bytes; }
+        [[nodiscard]] size_t arena_block_size() const noexcept { return m_arena_block_size; }
+
+        /**
          * @brief Release global document
          * @note In debug builds, asserts no outstanding allocations from the
          *       global resource.
@@ -107,6 +117,7 @@ namespace pjh::json
 
         bool m_strict_duplicate_keys = false;
         size_t m_two_stage_threshold = 0;
+        size_t m_arena_block_size = 0;
         Storage m_storage = Storage::Pooled;
         size_t m_block = 4096;
         std::unique_ptr<Document> m_global;
