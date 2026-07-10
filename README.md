@@ -2,7 +2,7 @@
 
 SIMD-accelerated C++20 JSON parser. Custom tagged-union `Json` type (24 bytes), PMR-based memory management, zero-copy strings.
 
-`pjh_json` is ~5x faster than `Nlohmann` across all sizes. Against `RapidJSON`, `pjh_json` trails ~30-55% up to 500 MB but pulls ahead at 1 GB.
+`pjh_json` is ~5x faster than `Nlohmann` across all sizes, and matches `RapidJSON` at scale (faster at 1 GB, tied at 500 MB).
 
 ## Features
 
@@ -95,22 +95,23 @@ cmake --build build
 | `PJH_JSON_BUILD_TESTS` | `OFF` | Build unit tests |
 | `PJH_JSON_BUILD_EXAMPLES` | `OFF` | Build example programs |
 | `PJH_JSON_BUILD_BENCHMARKS` | `OFF` | Build Google Benchmark suite |
-| `PJH_JSON_ENABLE_OPTIMIZATIONS` | `ON` | Apply `-O3 -march=native` (GCC/Clang) or `/O2 /arch:AVX2` (MSVC) |
+| `PJH_JSON_ENABLE_OPTIMIZATIONS` | `ON` | Apply `-O3 -march=native -ffast-math` (GCC/Clang) or `/O2 /arch:AVX2` (MSVC), plus LTO |
+| `PJH_JSON_PGO` | `OFF` | PGO mode: `GENERATE` or `USE` (requires separate build directories) |
 
 ## Benchmark
 
-Google Benchmark, 2026-07-10, Windows x64, MSVC, `/O2 /arch:AVX2`. Time in nanoseconds, lower is better.
+Google Benchmark, 2026-07-10, Windows x64, MinGW GCC 15.2, `-O3 -march=native -ffast-math -flto`. Time in nanoseconds, lower is better.
 
 | File | `pjh_json` | `Nlohmann` | `RapidJSON` | vs `Nlohmann` | vs `RapidJSON` |
 |------|----------|----------|-----------|-------------|--------------|
-| 1mb | 7,478,602 | 40,866,416 | 5,629,413 | 5.5x faster | 1.3x slower |
-| 10mb | 75,769,567 | 398,856,250 | 54,972,610 | 5.3x faster | 1.4x slower |
-| 30mb | 212,723,967 | 1,151,613,100 | 165,299,550 | 5.4x faster | 1.3x slower |
-| 50mb | 357,752,000 | 1,892,383,800 | 268,116,950 | 5.3x faster | 1.3x slower |
-| 100mb | 692,498,000 | 3,877,429,500 | 524,787,400 | 5.6x faster | 1.3x slower |
-| 200mb | 1,529,318,100 | 7,728,438,800 | 1,093,066,900 | 5.1x faster | 1.4x slower |
-| 500mb | 4,418,134,700 | 24,716,000,000 | 2,889,175,500 | 5.6x faster | 1.5x slower |
-| 1gb | 9,265,859,800 | 45,631,000,000 | 10,436,000,000 | 4.9x faster | 1.1x faster |
+| 1mb | 7,718,335 | 37,683,824 | 5,000,000 | 4.9x faster | 1.5x slower |
+| 10mb | 73,783,811 | 376,909,950 | 51,146,440 | 5.1x faster | 1.4x slower |
+| 30mb | 204,950,667 | 1,108,532,900 | 149,929,325 | 5.4x faster | 1.4x slower |
+| 50mb | 359,449,850 | 1,818,289,800 | 253,719,533 | 5.1x faster | 1.4x slower |
+| 100mb | 682,962,700 | 3,671,994,300 | 616,983,000 | 5.4x faster | 1.1x slower |
+| 200mb | 1,519,806,900 | 7,611,437,200 | 1,063,263,900 | 5.0x faster | 1.4x slower |
+| 500mb | 4,202,217,200 | 19,909,000,000 | 4,161,192,600 | 4.7x faster | 1.0x (tie) |
+| 1gb | 9,252,783,000 | 44,975,000,000 | 10,260,000,000 | 4.9x faster | 1.1x faster |
 
 ## Design
 
