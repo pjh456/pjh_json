@@ -32,28 +32,28 @@ namespace pjh::json
     }
 
     // runtime bridges: copy from compile-time array into PMR-backed container
-    template <size_t N>
-    inline Array array_from_literal(
-        std::array<Json, N> arr,
-        std::pmr::memory_resource *res = Config::instance().resource())
-    {
-        Array a(res);
-        a.reserve(N);
-        for (auto &el : arr)
-            a.push_back(std::move(el));
-        return a;
-    }
+template <size_t N>
+inline Array array_from_literal(
+    std::array<Json, N> &&arr,
+    std::pmr::memory_resource *res = Config::instance().resource())
+{
+    Array a(res);
+    a.reserve(N);
+    for (auto &el : arr)
+        a.push_back(std::move(el));
+    return a;
+}
 
-    template <size_t N>
-    inline Object object_from_literal(
-        std::array<Object::Entry, N> entries,
-        std::pmr::memory_resource *res = Config::instance().resource())
-    {
-        Object o(res);
-        for (auto &e : entries)
-            o.insert(std::move(e));
-        return o;
-    }
+template <size_t N>
+inline Object object_from_literal(
+    std::array<Object::Entry, N> &&entries,
+    std::pmr::memory_resource *res = Config::instance().resource())
+{
+    Object o(res);
+    for (auto &e : entries)
+        o.insert(std::move(e));
+    return o;
+}
 
 }
 
