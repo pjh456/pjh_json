@@ -26,22 +26,7 @@ namespace pjh::json
         using Vec = std::pmr::vector<Json>;
 
     private:
-        /**
-         * @brief Pimpl allocation and data holder
-         */
-        struct Impl;
-        /**
-         * @brief Custom deleter using pmr allocator
-         */
-        struct ImplDeleter
-        {
-            std::pmr::memory_resource *res{nullptr};
-            /**
-             * @brief Destroy and deallocate via pmr allocator
-             */
-            void operator()(Impl *ptr) const noexcept;
-        };
-        std::unique_ptr<Impl, ImplDeleter> m_impl;
+        Vec m_data;
         std::pmr::memory_resource *m_resource{nullptr};
 
     public:
@@ -58,10 +43,7 @@ namespace pjh::json
          */
         Array(Vec vec);
 
-        /**
-         * @brief Destructor
-         */
-        ~Array();
+        ~Array() = default;
 
         /**
          * @brief Copy not allowed -- use clone()

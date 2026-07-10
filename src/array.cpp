@@ -7,63 +7,17 @@
 
 namespace pjh::json
 {
-    struct Array::Impl
-    {
-        explicit Impl(std::pmr::memory_resource *res)
-            : data(res) {}
-        Vec data;
-    };
-
-    /*
-     * Deallocate Impl through the same pmr allocator used for construction
-     */
-    void Array::ImplDeleter::operator()(Impl *ptr) const noexcept
-    {
-        if (!ptr)
-            return;
-        std::pmr::polymorphic_allocator<Impl> alloc(res ? res : Config::instance().resource());
-        std::destroy_at(ptr);
-        alloc.deallocate(ptr, 1);
-    }
-
-    /*
-     * Construct empty Array with pmr pimpl
-     *
-     * 1. Resolve allocator (default to global config resource).
-     * 2. Allocate Impl block via pmr allocator.
-     * 3. Construct Impl in-place. On exception, free the block.
-     * 4. Transfer ownership to m_impl unique_ptr.
-     */
     Array::Array(std::pmr::memory_resource *res)
-        : m_impl(nullptr, ImplDeleter{res ? res : Config::instance().resource()}),
+        : m_data(res ? res : Config::instance().resource()),
           m_resource(res ? res : Config::instance().resource())
     {
-        std::pmr::polymorphic_allocator<Impl> alloc(m_resource);
-        Impl *ptr = alloc.allocate(1);
-        try
-        {
-            std::construct_at(ptr, m_resource);
-        }
-        catch (...)
-        {
-            alloc.deallocate(ptr, 1);
-            throw;
-        }
-        m_impl.reset(ptr);
     }
 
-    /*
-     * Adopt existing vector
-     *
-     * Infer resource from vector's allocator, then move data in.
-     */
     Array::Array(Vec vec)
-        : Array(vec.get_allocator().resource())
+        : m_data(std::move(vec)),
+          m_resource(m_data.get_allocator().resource())
     {
-        m_impl->data = std::move(vec);
     }
-
-    Array::~Array() = default;
 
     /*
      * Deep copy each element into a new Array with the target resource
@@ -71,8 +25,8 @@ namespace pjh::json
     Array Array::clone(std::pmr::memory_resource *into) const
     {
         Array out(into);
-        out.reserve(m_impl->data.size());
-        for (const Json &e : m_impl->data)
+        out.reserve(m_data.size());
+        for (const Json &e : m_data)
             out.push_back(e.clone(into));
         return out;
     }
@@ -84,58 +38,58 @@ namespace pjh::json
     {
         if (this == &other)
             return *this;
-        m_impl = std::move(other.m_impl);
+        m_data = std::move(other.m_data);
         m_resource = std::exchange(other.m_resource, nullptr);
         return *this;
     }
 
     Array::Array(Array &&other) noexcept
-        : m_impl(std::move(other.m_impl)),
+        : m_data(std::move(other.m_data)),
           m_resource(std::exchange(other.m_resource, nullptr))
     {
     }
 
-    size_t Array::size() const noexcept { return m_impl->data.size(); }
-    bool Array::empty() const noexcept { return m_impl->data.empty(); }
-    void Array::clear() noexcept { return m_impl->data.clear(); }
+    size_t Array::size() const noexcept { return m_data.size(); }
+    bool Array::empty() const noexcept { return m_data.empty(); }
+    void Array::clear() noexcept { return m_data.clear(); }
 
     // Linear search via std::find using Json operator==
     bool Array::contains(const Json &val) const noexcept
     {
         return std::find(
-                   m_impl->data.begin(),
-                   m_impl->data.end(),
+                   m_data.begin(),
+                   m_data.end(),
                    val) !=
-               m_impl->data.end();
+               m_data.end();
     }
 
-    void Array::resize(size_t val) { m_impl->data.resize(val); }
-    void Array::reserve(size_t val) { m_impl->data.reserve(val); }
+    void Array::resize(size_t val) { m_data.resize(val); }
+    void Array::reserve(size_t val) { m_data.reserve(val); }
 
-    Array::Vec::iterator Array::begin() noexcept { return m_impl->data.begin(); }
-    Array::Vec::iterator Array::end() noexcept { return m_impl->data.end(); }
-    Array::Vec::const_iterator Array::begin() const noexcept { return m_impl->data.begin(); }
-    Array::Vec::const_iterator Array::end() const noexcept { return m_impl->data.end(); }
+    Array::Vec::iterator Array::begin() noexcept { return m_data.begin(); }
+    Array::Vec::iterator Array::end() noexcept { return m_data.end(); }
+    Array::Vec::const_iterator Array::begin() const noexcept { return m_data.begin(); }
+    Array::Vec::const_iterator Array::end() const noexcept { return m_data.end(); }
 
-    Array::Vec &Array::data() noexcept { return m_impl->data; }
-    const Array::Vec &Array::data() const noexcept { return m_impl->data; }
+    Array::Vec &Array::data() noexcept { return m_data; }
+    const Array::Vec &Array::data() const noexcept { return m_data; }
 
-    Json &Array::operator[](size_t idx) noexcept { return m_impl->data[idx]; }
-    const Json &Array::operator[](size_t idx) const noexcept { return m_impl->data[idx]; }
+    Json &Array::operator[](size_t idx) noexcept { return m_data[idx]; }
+    const Json &Array::operator[](size_t idx) const noexcept { return m_data[idx]; }
 
-    Json &Array::at(size_t idx) { return m_impl->data.at(idx); }
-    const Json &Array::at(size_t idx) const { return m_impl->data.at(idx); }
+    Json &Array::at(size_t idx) { return m_data.at(idx); }
+    const Json &Array::at(size_t idx) const { return m_data.at(idx); }
 
-    void Array::push_back(Json v) { return m_impl->data.push_back(std::move(v)); }
+    void Array::push_back(Json v) { return m_data.push_back(std::move(v)); }
 
     /*
      * Validate range, then erase [idx, idx+len)
      */
     void Array::erase(size_t idx, size_t len)
     {
-        if (idx > m_impl->data.size() || len > m_impl->data.size() - idx)
+        if (idx > m_data.size() || len > m_data.size() - idx)
             throw std::out_of_range("array erase out of range");
-        m_impl->data.erase(m_impl->data.begin() + idx, m_impl->data.begin() + idx + len);
+        m_data.erase(m_data.begin() + idx, m_data.begin() + idx + len);
     }
 
     /*
@@ -143,12 +97,12 @@ namespace pjh::json
      */
     bool Array::operator==(const Array &other) const noexcept
     {
-        if (m_impl->data.size() != other.m_impl->data.size())
+        if (m_data.size() != other.m_data.size())
             return false;
         return std::equal(
-            m_impl->data.begin(),
-            m_impl->data.end(),
-            other.m_impl->data.begin(),
+            m_data.begin(),
+            m_data.end(),
+            other.m_data.begin(),
             [](const Json &x, const Json &y)
             { return x == y; });
     }
