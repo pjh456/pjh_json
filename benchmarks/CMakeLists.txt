@@ -1,3 +1,5 @@
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
 include(FetchContent)
 
 # 1. 引入 Google Benchmark
