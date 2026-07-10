@@ -7,12 +7,23 @@
 
 namespace pjh::json
 {
+    /*
+     * Construct empty Array with pmr allocator
+     *
+     * 1. Resolve allocator (default to global config resource).
+     * 2. Initialize internal vector with the resolved resource.
+     */
     Array::Array(std::pmr::memory_resource *res)
         : m_data(res ? res : Config::instance().resource()),
           m_resource(res ? res : Config::instance().resource())
     {
     }
 
+    /*
+     * Adopt existing vector
+     *
+     * Infer resource from vector's allocator, then move data in.
+     */
     Array::Array(Vec vec)
         : m_data(std::move(vec)),
           m_resource(m_data.get_allocator().resource())

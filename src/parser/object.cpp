@@ -26,10 +26,11 @@ namespace pjh::json
      *
      * 1. Consume opening '{'.
      * 2. Skip whitespace; if '}' immediately -> empty object, return.
-     * 3. Pre-allocate capacity hints and set up duplicate-key tracking.
+     * 3. Pre-allocate capacity hints. Duplicate-key tracking is lazily
+     *    initialized only when Config::strict_duplicate_keys() is set.
      * 4. Loop:
      *    a. Parse a string key.
-     *    b. Check for duplicate keys.
+     *    b. Conditionally check for duplicate keys.
      *    c. Expect and consume ':' separator.
      *    d. Parse the value in-place.
      *    e. Check for ',' (continue) or '}' (done).
