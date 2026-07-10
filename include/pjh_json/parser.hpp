@@ -30,15 +30,6 @@ namespace pjh::json
         std::pmr::memory_resource *m_resource;  // Allocator for parsed values
         bool m_assume_padded;       // If true, caller guarantees 64 trailing NUL bytes
 
-        [[noreturn]] void throw_error(const char *msg) const
-        {
-            auto off = static_cast<size_t>(m_curr - m_begin);
-            throw ParseError(
-                std::string(msg) + " at offset " + std::to_string(off));
-        }
-
-        friend void handle_escape(char *&dst, const char *&m_curr, Parser &parser);
-
     public:
         /**
          * @brief Construct parser over a JSON text range
@@ -73,7 +64,10 @@ namespace pjh::json
          * @throws ParseError on non-hex digit
          * @note Called from unicode escape handling during string parsing.
          */
-        [[nodiscard]] uint32_t parse_hex4();
+        [[nodiscard]] uint32_t parse_hex4()
+        {
+            return pjh::json::parse_hex4(m_curr, m_begin);
+        }
 
     private:
         /**

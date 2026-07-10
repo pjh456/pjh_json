@@ -61,7 +61,7 @@ namespace pjh::json
         Json result = parse_value();
         skip_whitespace();
         if (m_curr < m_end)
-            throw_error("Extra characters after complete JSON value");
+            throw_parse_error("Extra characters after complete JSON value", m_curr, m_begin);
         return result;
     }
 

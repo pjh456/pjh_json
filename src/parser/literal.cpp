@@ -58,7 +58,7 @@ namespace pjh::json
             }
             else
             {
-                throw_error("Invalid literal, expected true/false/null");
+                throw_parse_error("Invalid literal, expected true/false/null", m_curr, m_begin);
             }
         }
 
@@ -69,7 +69,7 @@ namespace pjh::json
             next != ',' && next != ':' && next != '}' && next != ']' &&
             next != 0)
         {
-            throw_error("Invalid literal, unexpected characters after true/false/null");
+            throw_parse_error("Invalid literal, unexpected characters after true/false/null", m_curr, m_begin);
         }
 
         return result;

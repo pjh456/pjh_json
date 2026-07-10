@@ -1,6 +1,5 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
-#include "internal.hpp"
 #include <xsimd/xsimd.hpp>
 
 namespace pjh::json
@@ -24,7 +23,7 @@ namespace pjh::json
     String Parser::parse_string()
     {
         if (m_curr >= m_end || *m_curr != '"')
-            throw_error("Expected '\"'");
+            throw_parse_error("Expected '\"'", m_curr, m_begin);
         ++m_curr;
 
         const char *start = m_curr;
@@ -72,9 +71,9 @@ namespace pjh::json
                 else
                 {
                     if (m_curr >= m_end)
-                        throw_error("Unterminated string");
+                        throw_parse_error("Unterminated string", m_curr, m_begin);
                     else
-                        throw_error("Unescaped control character in string");
+                        throw_parse_error("Unescaped control character in string", m_curr, m_begin);
                 }
             }
             else
@@ -93,11 +92,11 @@ namespace pjh::json
             }
             else if (*m_curr == '\\')
             {
-                handle_escape(dst, m_curr, *this);
+                handle_escape(dst, m_curr, m_begin);
             }
             else if (static_cast<uint8_t>(*m_curr) < 0x20)
             {
-                throw_error("Unescaped control character in string");
+                throw_parse_error("Unescaped control character in string", m_curr, m_begin);
             }
             else
             {

@@ -63,7 +63,7 @@ namespace pjh::json
             // Parse key
             skip_whitespace();
             if (*m_curr != '"')
-                throw_error("Expected string key in object");
+                throw_parse_error("Expected string key in object", m_curr, m_begin);
             auto key = parse_string();
             if (seen)
                 check_duplicate_key(key, *seen);
@@ -71,7 +71,7 @@ namespace pjh::json
             // Parse colon separator
             skip_whitespace();
             if (*m_curr != ':')
-                throw_error("Expected ':' in object");
+                throw_parse_error("Expected ':' in object", m_curr, m_begin);
             ++m_curr;
 
             // Parse value
@@ -81,7 +81,7 @@ namespace pjh::json
             // Check for closing brace or comma
             skip_whitespace();
             if (m_curr >= m_end)
-                throw_error("Unexpected end of object");
+                throw_parse_error("Unexpected end of object", m_curr, m_begin);
             if (*m_curr == '}')
             {
                 ++m_curr;
@@ -91,7 +91,7 @@ namespace pjh::json
             if (*m_curr == ',')
                 ++m_curr;
             else
-                throw_error("Expected ',' or '}' in object");
+                throw_parse_error("Expected ',' or '}' in object", m_curr, m_begin);
         }
     }
 }
