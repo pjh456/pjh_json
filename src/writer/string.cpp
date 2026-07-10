@@ -101,6 +101,18 @@ namespace pjh::json
                 }
                 p += len;
 
+                // Validate codepoint per RFC 3629
+                if (len == 2 && cp < 0x80)
+                    throw JsonError("Overlong UTF-8 sequence in string");
+                if (len == 3 && cp < 0x800)
+                    throw JsonError("Overlong UTF-8 sequence in string");
+                if (len == 4 && cp < 0x10000)
+                    throw JsonError("Overlong UTF-8 sequence in string");
+                if (cp > 0x10FFFF)
+                    throw JsonError("UTF-8 codepoint exceeds U+10FFFF in string");
+                if (cp >= 0xD800 && cp <= 0xDFFF)
+                    throw JsonError("UTF-8 surrogate codepoint in string");
+
                 // Emit as \uXXXX (or surrogate pair for >U+FFFF)
                 if (cp <= 0xFFFF)
                 {
