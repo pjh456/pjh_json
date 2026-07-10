@@ -6,6 +6,7 @@
 #include <memory>
 #include <memory_resource>
 #include <mutex>
+#include <shared_mutex>
 
 namespace pjh::json
 {
@@ -109,7 +110,7 @@ namespace pjh::json
         std::atomic<Storage> m_storage{Storage::Pooled};
         size_t m_block = 4096;
         std::unique_ptr<Document> m_global;
-        std::mutex m_mutex;
+        std::shared_mutex m_mutex;
     };
 }
 

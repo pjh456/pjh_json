@@ -45,6 +45,7 @@ namespace pjh::json
 
     std::pmr::memory_resource *Config::resource() noexcept
     {
+        std::shared_lock lock(m_mutex);
         return m_global->resource();
     }
 
