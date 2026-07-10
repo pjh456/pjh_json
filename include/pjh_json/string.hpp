@@ -5,6 +5,7 @@
 #include <string_view>
 #include <memory_resource>
 #include <string>
+#include <type_traits>
 
 namespace pjh::json
 {
@@ -92,12 +93,15 @@ namespace pjh::json
         /**
          * @brief Destructor — deletes owned pmr::string if present
          */
-        ~String()
+        constexpr ~String()
         {
-            if (m_storage == Storage::Owned)
+            if (!std::is_constant_evaluated())
             {
-                delete heap_ptr;
-                m_storage = Storage::View;
+                if (m_storage == Storage::Owned)
+                {
+                    delete heap_ptr;
+                    m_storage = Storage::View;
+                }
             }
         }
 

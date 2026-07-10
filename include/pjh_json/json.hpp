@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <memory>
 #include <memory_resource>
+#include <type_traits>
 #include <utility>
 #include <concepts>
 #include <new>
@@ -277,7 +278,11 @@ namespace pjh::json
         /**
          * @brief Destructor — frees heap-allocated types
          */
-        ~Json() { destroy(); }
+        constexpr ~Json()
+        {
+            if (!std::is_constant_evaluated())
+                destroy();
+        }
 
         /**
          * @brief Deep copy into specified memory resource
