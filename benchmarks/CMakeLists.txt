@@ -27,6 +27,9 @@ FetchContent_Declare(
     rapidjson
     GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
     GIT_TAG v1.1.0
+    PATCH_COMMAND ${CMAKE_COMMAND}
+        -Dsrc=${CMAKE_BINARY_DIR}/_deps/rapidjson-src/include/rapidjson/document.h
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/rapidjson_patch.cmake
 )
 set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
 set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
