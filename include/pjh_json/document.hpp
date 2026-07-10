@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "json.hpp"
+#include "literal.hpp"
 
 namespace pjh::json
 {
@@ -198,44 +199,6 @@ namespace pjh::json
     {
         Object o;
         (o.insert(Object::Entry(std::forward<Es>(entries))), ...);
-        return o;
-    }
-
-    // --- constexpr literal factories (compile-time) ---
-
-    template <typename... Ts>
-    consteval auto json_array_literal(Ts &&...vals)
-    {
-        return std::array<Json, sizeof...(Ts)>{Json(std::forward<Ts>(vals))...};
-    }
-
-    consteval auto kv(const char *key, auto &&val)
-    {
-        return Object::Entry{String(key), Json(val)};
-    }
-
-    // --- runtime bridges (copy from compile-time array into PMR-backed container) ---
-
-    template <size_t N>
-    inline Array array_from_literal(
-        std::array<Json, N> arr,
-        std::pmr::memory_resource *res = Config::instance().resource())
-    {
-        Array a(res);
-        a.reserve(N);
-        for (auto &el : arr)
-            a.push_back(std::move(el));
-        return a;
-    }
-
-    template <size_t N>
-    inline Object object_from_literal(
-        std::array<Object::Entry, N> entries,
-        std::pmr::memory_resource *res = Config::instance().resource())
-    {
-        Object o(res);
-        for (auto &e : entries)
-            o.insert(std::move(e));
         return o;
     }
     /// @endcond
