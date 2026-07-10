@@ -37,8 +37,8 @@ namespace pjh::json
     Json &Json::operator=(Array &&arr)
     {
         destroy();
-        m_type = Type::ArrayType;
         m_data.heap = heap_alloc(arr.m_resource, std::move(arr));
+        m_type = Type::ArrayType;
         return *this;
     }
 
@@ -52,8 +52,8 @@ namespace pjh::json
     Json &Json::operator=(Object &&obj)
     {
         destroy();
-        m_type = Type::ObjectType;
         m_data.heap = heap_alloc(obj.m_resource, std::move(obj));
+        m_type = Type::ObjectType;
         return *this;
     }
 
@@ -85,23 +85,26 @@ namespace pjh::json
         {
             std::string_view sv = as_string();
             std::pmr::string owned(sv, into);
+            auto *ptr = new std::pmr::string(std::move(owned));
             Json out;
             out.m_type = Type::StringOwned;
-            out.m_data.heap = new std::pmr::string(std::move(owned));
+            out.m_data.heap = ptr;
             return out;
         }
         case Type::ArrayType:
         {
+            auto *ptr = heap_alloc(into, as_array().clone(into));
             Json out;
             out.m_type = Type::ArrayType;
-            out.m_data.heap = heap_alloc(into, as_array().clone(into));
+            out.m_data.heap = ptr;
             return out;
         }
         case Type::ObjectType:
         {
+            auto *ptr = heap_alloc(into, as_object().clone(into));
             Json out;
             out.m_type = Type::ObjectType;
-            out.m_data.heap = heap_alloc(into, as_object().clone(into));
+            out.m_data.heap = ptr;
             return out;
         }
         }
