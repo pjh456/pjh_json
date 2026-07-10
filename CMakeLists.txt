@@ -88,9 +88,10 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
         add_subdirectory(tests)
     endif()
 
-    # if(PJH_JSON_BUILD_EXAMPLES)
-    # add_subdirectory(examples)
-    # endif()
+    if(PJH_JSON_BUILD_EXAMPLES)
+        add_subdirectory(examples)
+    endif()
+
     if(PJH_JSON_BUILD_BENCHMARKS)
         add_subdirectory(benchmarks)
     endif()

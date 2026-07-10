@@ -1,0 +1,10 @@
+function(add_example example_name example_src)
+    add_executable(${example_name} ${example_src})
+    target_link_libraries(${example_name} PRIVATE pjh::json)
+endfunction()
+
+add_example(ex_basic_parse_dump 01_basic/parse_dump.cpp)
+add_example(ex_basic_array_object 01_basic/array_object.cpp)
+add_example(ex_adv_serialization 02_advanced/serialization.cpp)
+add_example(ex_adv_file_io 02_advanced/file_io.cpp)
+add_example(ex_adv_custom_memory 02_advanced/custom_memory.cpp)
