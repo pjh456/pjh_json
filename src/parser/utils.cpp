@@ -166,6 +166,9 @@ namespace pjh::json
                 else
                     parser.throw_error("Expected low surrogate");
             }
+            // Lone low surrogate (U+DC00-U+DFFF) not allowed by RFC 8259 §7
+            else if (cp >= 0xDC00 && cp <= 0xDFFF)
+                parser.throw_error("Lone low surrogate, expected high surrogate first");
             encode_utf8(cp, dst);
             return;
         }
