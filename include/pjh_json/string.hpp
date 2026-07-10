@@ -56,14 +56,14 @@ namespace pjh::json
         /**
          * @brief Construct empty (null view)
          */
-        String() noexcept : view_data{nullptr, 0} {}
+        constexpr String() noexcept : view_data{nullptr, 0} {}
 
         /**
          * @brief Borrowed view from string_view (no copy)
          * @param sv Source view — caller must guarantee lifetime
          * @note Stores {ptr, len} inline. Does NOT copy.
          */
-        String(std::string_view sv) noexcept : m_storage(Storage::View)
+        constexpr String(std::string_view sv) noexcept : m_storage(Storage::View)
         {
             view_data.data = sv.data();
             view_data.length = static_cast<uint32_t>(sv.size());
@@ -74,7 +74,7 @@ namespace pjh::json
          * @param s NUL-terminated source — caller must guarantee lifetime
          * @note Wraps s in string_view. Does NOT copy.
          */
-        String(const char *s) noexcept : m_storage(Storage::View)
+        constexpr String(const char *s) noexcept : m_storage(Storage::View)
         {
             std::string_view sv(s);
             view_data.data = sv.data();
@@ -114,7 +114,7 @@ namespace pjh::json
          * @brief Move construct (steals active member, marks source empty)
          * @param other Source (left as empty view)
          */
-        String(String &&other) noexcept : m_storage(other.m_storage)
+        constexpr String(String &&other) noexcept : m_storage(other.m_storage)
         {
             if (other.m_storage == Storage::Owned)
                 heap_ptr = other.heap_ptr;
@@ -147,7 +147,7 @@ namespace pjh::json
          * @brief Implicit conversion to string_view
          * @return View of content (works for both borrowed and owned)
          */
-        [[nodiscard]] operator std::string_view() const noexcept
+        [[nodiscard]] constexpr operator std::string_view() const noexcept
         {
             if (m_storage == Storage::Owned)
                 return *heap_ptr;
@@ -157,7 +157,7 @@ namespace pjh::json
         /**
          * @brief true if data is owned (pmr::string on heap), not borrowed
          */
-        [[nodiscard]] bool is_owned() const noexcept
+        [[nodiscard]] constexpr bool is_owned() const noexcept
         {
             return m_storage == Storage::Owned;
         }
@@ -190,7 +190,7 @@ namespace pjh::json
          *
          * @return Pointer to owned pmr::string, or nullptr if was borrowed.
          */
-        [[nodiscard]] std::pmr::string *release() noexcept
+        [[nodiscard]] constexpr std::pmr::string *release() noexcept
         {
             if (m_storage == Storage::Owned)
             {
@@ -206,7 +206,7 @@ namespace pjh::json
          * @param other String to compare
          * @return true if content is identical
          */
-        [[nodiscard]] bool operator==(const String &other) const noexcept
+        [[nodiscard]] constexpr bool operator==(const String &other) const noexcept
         {
             return static_cast<std::string_view>(*this) == static_cast<std::string_view>(other);
         }
@@ -216,7 +216,7 @@ namespace pjh::json
          * @param other View to compare
          * @return true if content matches
          */
-        [[nodiscard]] bool operator==(std::string_view other) const noexcept
+        [[nodiscard]] constexpr bool operator==(std::string_view other) const noexcept
         {
             return static_cast<std::string_view>(*this) == other;
         }
@@ -226,7 +226,7 @@ namespace pjh::json
          * @param other NUL-terminated string to compare
          * @return true if content matches
          */
-        [[nodiscard]] bool operator==(const char *other) const noexcept
+        [[nodiscard]] constexpr bool operator==(const char *other) const noexcept
         {
             return static_cast<std::string_view>(*this) == other;
         }
