@@ -139,30 +139,30 @@ namespace pjh::json
         /**
          * @brief Construct null value
          */
-        Json() = default;
+        constexpr Json() = default;
 
         /**
          * @brief Construct null value
          */
-        Json(std::nullptr_t) {}
+        constexpr Json(std::nullptr_t) {}
 
         /**
          * @brief Construct bool value
          * @param val Boolean to store
          */
-        Json(bool val) : m_type(Type::Boolean) { m_data.boolean = val; }
+        constexpr Json(bool val) : m_type(Type::Boolean) { m_data.boolean = val; }
 
         /**
          * @brief Construct int64 value
          * @param val Integer to store
          */
-        Json(int64_t val) : m_type(Type::Integer) { m_data.integer = val; }
+        constexpr Json(int64_t val) : m_type(Type::Integer) { m_data.integer = val; }
 
         /**
          * @brief Construct double value
          * @param val Floating-point to store
          */
-        Json(double val) : m_type(Type::Floating) { m_data.floating = val; }
+        constexpr Json(double val) : m_type(Type::Floating) { m_data.floating = val; }
 
         /**
          * @brief Construct int64 from any integer type (except bool)
@@ -171,7 +171,7 @@ namespace pjh::json
          */
         template <std::integral T>
             requires(!std::same_as<T, bool>)
-        Json(T val) : m_type(Type::Integer), m_data{.integer = static_cast<int64_t>(val)}
+        constexpr Json(T val) : m_type(Type::Integer), m_data{.integer = static_cast<int64_t>(val)}
         {
         }
 
@@ -181,14 +181,14 @@ namespace pjh::json
          * @param val Value to store as double
          */
         template <std::floating_point T>
-        Json(T val) : m_type(Type::Floating), m_data{.floating = static_cast<double>(val)} {}
+        constexpr Json(T val) : m_type(Type::Floating), m_data{.floating = static_cast<double>(val)} {}
 
         /**
          * @brief Construct string from string_view (borrowed)
          * @param sv Source view — caller must guarantee lifetime
          * @note Does NOT copy. Stores {ptr, len} inline.
          */
-        Json(std::string_view sv) : m_type(Type::StringView)
+        constexpr Json(std::string_view sv) : m_type(Type::StringView)
         {
             m_data.str_view.data = sv.data();
             m_data.str_view.length = static_cast<uint32_t>(sv.size());
@@ -199,7 +199,7 @@ namespace pjh::json
          * @param str NUL-terminated source — caller must guarantee lifetime
          * @note Does NOT copy. Internally wraps str in string_view.
          */
-        Json(const char *str) : Json(std::string_view(str)) {}
+        constexpr Json(const char *str) : Json(std::string_view(str)) {}
 
         /**
          * @brief Construct array value (takes ownership, heap-allocated)
@@ -253,7 +253,7 @@ namespace pjh::json
         /**
          * @brief Move construct (steals tagged data, marks source null)
          */
-        Json(Json &&other) noexcept : m_type(other.m_type)
+        constexpr Json(Json &&other) noexcept : m_type(other.m_type)
         {
             m_data = other.m_data;
             other.m_type = Type::Null;
@@ -404,42 +404,42 @@ namespace pjh::json
         /**
          * @brief true if holds null
          */
-        [[nodiscard]] bool is_null() const noexcept { return m_type == Type::Null; }
+        [[nodiscard]] constexpr bool is_null() const noexcept { return m_type == Type::Null; }
 
         /**
          * @brief true if holds bool
          */
-        [[nodiscard]] bool is_boolean() const noexcept { return m_type == Type::Boolean; }
+        [[nodiscard]] constexpr bool is_boolean() const noexcept { return m_type == Type::Boolean; }
 
         /**
          * @brief true if holds int64
          */
-        [[nodiscard]] bool is_int() const noexcept { return m_type == Type::Integer; }
+        [[nodiscard]] constexpr bool is_int() const noexcept { return m_type == Type::Integer; }
 
         /**
          * @brief true if holds double
          */
-        [[nodiscard]] bool is_float() const noexcept { return m_type == Type::Floating; }
+        [[nodiscard]] constexpr bool is_float() const noexcept { return m_type == Type::Floating; }
 
         /**
          * @brief true if holds a number (int or float)
          */
-        [[nodiscard]] bool is_number() const noexcept { return is_int() || is_float(); }
+        [[nodiscard]] constexpr bool is_number() const noexcept { return is_int() || is_float(); }
 
         /**
          * @brief true if holds a string (borrowed or owned)
          */
-        [[nodiscard]] bool is_string() const noexcept { return m_type == Type::StringView || m_type == Type::StringOwned; }
+        [[nodiscard]] constexpr bool is_string() const noexcept { return m_type == Type::StringView || m_type == Type::StringOwned; }
 
         /**
          * @brief true if holds Array
          */
-        [[nodiscard]] bool is_array() const noexcept { return m_type == Type::ArrayType; }
+        [[nodiscard]] constexpr bool is_array() const noexcept { return m_type == Type::ArrayType; }
 
         /**
          * @brief true if holds Object
          */
-        [[nodiscard]] bool is_object() const noexcept { return m_type == Type::ObjectType; }
+        [[nodiscard]] constexpr bool is_object() const noexcept { return m_type == Type::ObjectType; }
         /**@}*/
 
     public:
@@ -449,7 +449,7 @@ namespace pjh::json
         /**
          * @brief Get null value
          */
-        [[nodiscard]] std::nullptr_t as_null() const noexcept { return nullptr; }
+        [[nodiscard]] constexpr std::nullptr_t as_null() const noexcept { return nullptr; }
 
         /**
          * @brief Get bool reference
