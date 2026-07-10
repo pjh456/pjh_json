@@ -14,6 +14,7 @@ SIMD-accelerated C++20 JSON parser. Custom tagged-union `Json` type (24 bytes), 
 * **Serialization**: `dump` (compact/pretty), `dump_jsonl`, `prettify`
 * **Safe access**: `try_as_int()`, `try_as_string()`, `try_as_array()`, etc. -- returns `nullopt` on type mismatch
 * **Builder API**: `Array::of(...)`, `Object::of(...)` for in-code construction
+* **Compile-time construction**: `constexpr` scalars and `String` views; `consteval` array/object factories with runtime bridge. *Array/Object bridges copy into PMR — not zero-cost.*
 
 ## Example
 
@@ -41,6 +42,35 @@ Object obj = Object::of(
 std::pmr::string compact = dump(doc);
 std::pmr::string pretty  = dump(doc, DumpOptions{.pretty = true, .indent = 2});
 dump_file("out.json", doc.root());
+```
+
+### Compile-time construction
+
+```cpp
+#include "pjh_json/json.hpp"
+#include "pjh_json/document.hpp"   // literal factories & bridges
+
+using namespace pjh::json;
+
+// Scalars and strings are zero-cost — constructed entirely at compile time
+constexpr Json count = int64_t(42);
+constexpr Json label = std::string_view("hello");
+constexpr String key   = "name";
+static_assert(count.is_int());
+static_assert(label == std::string_view("hello"));
+
+// Arrays/objects: compile-time factory + runtime bridge (copies into PMR)
+auto arr = array_from_literal(
+    json_array_literal(1, 2, std::string_view("three"), false, nullptr));
+
+auto obj = object_from_literal(std::array{
+    kv("name", std::string_view("alice")),
+    kv("age", int64_t(30)),
+    kv("active", true),
+});
+
+std::pmr::string out = dump(Json(std::move(arr)));
+// arr is [1,2,"three",false,null]
 ```
 
 ## Build
