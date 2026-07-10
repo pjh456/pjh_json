@@ -282,6 +282,8 @@ namespace pjh::json
      */
     bool Json::operator==(const Json &other) const noexcept
     {
+        if (is_string() && other.is_string())
+            return as_string() == other.as_string();
         if (m_type != other.m_type)
             return false;
         switch (m_type)
@@ -294,10 +296,6 @@ namespace pjh::json
             return m_data.integer == other.m_data.integer;
         case Type::Floating:
             return m_data.floating == other.m_data.floating;
-        case Type::StringView:
-            return as_string() == other.as_string();
-        case Type::StringOwned:
-            return as_string() == other.as_string();
         case Type::ArrayType:
             return as_array() == other.as_array();
         case Type::ObjectType:
