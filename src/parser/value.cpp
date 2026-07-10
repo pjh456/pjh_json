@@ -3,6 +3,14 @@
 
 namespace pjh::json
 {
+    /*
+     * In-place value dispatch (avoids move)
+     *
+     * 1. Skip leading whitespace.
+     * 2. Dispatch by the first character to a type-specific parser:
+     *    - '{' '[' : in-place variants write directly into out.
+     *    - '"' t/f/n '-' 0-9 : assign via operator= or return-value.
+     */
     void Parser::parse_value_inplace(Json &out)
     {
         skip_whitespace();
@@ -40,6 +48,13 @@ namespace pjh::json
         }
     }
 
+    /*
+     * Value dispatch returning a new Json
+     *
+     * Same dispatch as in-place, but returns a new Json value each call.
+     * Also checks for '\0' sentinel to detect truncated input
+     * (only hit when padding is zeroed).
+     */
     Json Parser::parse_value()
     {
         skip_whitespace();

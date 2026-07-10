@@ -3,6 +3,7 @@
 namespace pjh::json
 {
     // --- operator= ---
+
     Json &Json::operator=(std::nullptr_t)
     {
         m_data = nullptr;
@@ -40,6 +41,14 @@ namespace pjh::json
     }
 
     // --- clone ---
+
+    /*
+     * Deep copy dispatching on variant type
+     *
+     * 1. Scalars (null/bool/int/float) copy trivially via assignment.
+     * 2. String materialises into the target memory resource.
+     * 3. Array/Object recurse via their own clone().
+     */
     Json Json::clone(std::pmr::memory_resource *into) const
     {
         Json out;
@@ -65,6 +74,7 @@ namespace pjh::json
     }
 
     // --- try_as ---
+
     std::optional<bool> Json::try_as_boolean() const noexcept
     {
         auto *p = std::get_if<bool>(&m_data);
@@ -110,6 +120,13 @@ namespace pjh::json
     }
 
     // --- size / empty ---
+
+    /*
+     * Delegate to contained container if array/object, else scalar
+     *
+     * 1. Array/object returns container size.
+     * 2. Scalar always returns size=1, empty=false.
+     */
     size_t Json::size() const noexcept
     {
         if (is_array())
@@ -129,6 +146,19 @@ namespace pjh::json
     }
 
     // --- operator[] / at ---
+
+    /*
+     * Element access with type validation
+     *
+     * 1. Verify the variant holds the expected type (Array or Object).
+     * 2. Delegate to the underlying container's accessor.
+     *
+     * operator[] skips bounds check (Array) or insert-if-missing (Object).
+     * at() includes bounds check from the container.
+     *
+     * @throws TypeError if variant type does not match
+     */
+
     Json &Json::operator[](size_t idx)
     {
         if (!is_array())
@@ -186,6 +216,13 @@ namespace pjh::json
     }
 
     // --- operator== ---
+
+    /*
+     * Equality comparison
+     *
+     * 1. Json-vs-Json: delegates to std::variant operator==.
+     * 2. Json-vs-scalar: type-check first, then value comparison.
+     */
     bool Json::operator==(const Json &other) const noexcept
     {
         return m_data == other.m_data;

@@ -9,6 +9,7 @@ namespace pjh::json
     {
         constexpr size_t kBlock = 4096;
 
+        // Unwrap arena resource (nullptr -> new_delete_resource).
         std::pmr::memory_resource *arena_res(
             const std::unique_ptr<std::pmr::memory_resource> &arena) noexcept
         {
@@ -16,6 +17,14 @@ namespace pjh::json
         }
     }
 
+    /*
+     * Parse a complete JSON value from the padded input
+     *
+     * 1. Verify input has 64-byte NUL padding (SIMD safety).
+     * 2. Parse the top-level value (skips leading whitespace).
+     * 3. Skip trailing whitespace.
+     * 4. Reject extra characters after the parsed value.
+     */
     Json Parser::parse()
     {
         if (!m_assume_padded)
@@ -27,6 +36,17 @@ namespace pjh::json
         return result;
     }
 
+    /*
+     * Parse a pre-padded buffer in-place (moves buffer ownership)
+     *
+     * 1. Validate buffer has >= 64 bytes (content + padding).
+     * 2. Compute content size (total - 64).
+     * 3. Create arena and parser, then parse.
+     * 4. Return Document owning arena, tree, and buffer.
+     *
+     * The parsed tree borrows strings from the buffer, which stays alive
+     * inside the Document.
+     */
     Document parse_in_situ(std::pmr::string &&buffer, Storage storage)
     {
         if (buffer.size() < 64)
@@ -40,6 +60,15 @@ namespace pjh::json
                         false, storage, kBlock);
     }
 
+    /*
+     * Parse a copy of the input (input is padded internally)
+     *
+     * 1. Create arena.
+     * 2. Allocate a buffer large enough for input + 64 NUL bytes.
+     * 3. Copy input into the buffer.
+     * 4. Parse from the padded buffer.
+     * 5. Return Document owning arena, tree, and buffer copy.
+     */
     Document parse_copy(std::string_view json, Storage storage)
     {
         auto arena = Document::make_arena(storage, kBlock, false);
@@ -55,6 +84,15 @@ namespace pjh::json
                         false, storage, kBlock);
     }
 
+    /*
+     * Parse caller-owned memory (no copy)
+     *
+     * 1. Create arena (for parsed values only).
+     * 2. Parse directly from caller's memory (no buffer copy).
+     * 3. Return Document with is_view=true.
+     *
+     * Caller must keep data alive for the Document's lifetime.
+     */
     Document parse_view(const char *data, size_t content_len, Storage storage)
     {
         auto arena = Document::make_arena(storage, kBlock, false);
@@ -64,12 +102,23 @@ namespace pjh::json
                         true, storage, kBlock);
     }
 
+    /*
+     * Parse newline-delimited JSON (one value per line)
+     *
+     * 1. Create arena and padded buffer containing the entire input.
+     * 2. Scan line by line:
+     *    a. Find the next '\n'.
+     *    b. Strip trailing '\r' (Windows line endings).
+     *    c. Skip lines composed only of whitespace.
+     *    d. Parse the line as a JSON value and append to an Array.
+     * 3. Return Document containing the Array root.
+     */
     Document parse_jsonl(std::string_view input, Storage storage)
     {
         auto arena = Document::make_arena(storage, kBlock, false);
         std::pmr::memory_resource *res = arena_res(arena);
 
-        // 单块 padded buffer 归 Document 所有，每行借用的字符串都指向它
+        // single padded buffer owned by Document; each line borrows into it
         std::pmr::string buffer(res);
         buffer.resize(input.size() + 64, '\0');
         std::memcpy(buffer.data(), input.data(), input.size());
@@ -81,14 +130,17 @@ namespace pjh::json
 
         while (i < n)
         {
+            // Find end of current line
             size_t nl = i;
             while (nl < n && base[nl] != '\n')
                 ++nl;
 
             size_t len = nl - i;
+            // Strip trailing \r for Windows line endings
             if (len > 0 && base[i + len - 1] == '\r')
                 --len;
 
+            // Skip blank/whitespace-only lines
             bool blank = true;
             for (size_t k = 0; k < len; ++k)
             {
@@ -113,6 +165,14 @@ namespace pjh::json
                         false, storage, kBlock);
     }
 
+    /*
+     * Parse a JSON file
+     *
+     * 1. Open file in binary mode, seek to end for total size.
+     * 2. Allocate a buffer with 64-byte padding.
+     * 3. Read the entire file into the buffer.
+     * 4. Delegate to parse_in_situ for parsing.
+     */
     Document parse_file(std::string_view filepath, Storage storage)
     {
         std::string path(filepath);

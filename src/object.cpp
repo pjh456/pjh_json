@@ -14,6 +14,9 @@ namespace pjh::json
         Vec data;
     };
 
+    /*
+     * Deallocate Impl through the same pmr allocator used for construction
+     */
     void Object::ImplDeleter::operator()(Impl *ptr) const noexcept
     {
         if (!ptr)
@@ -23,6 +26,13 @@ namespace pjh::json
         alloc.deallocate(ptr, 1);
     }
 
+    /*
+     * Construct empty Object with pmr pimpl
+     *
+     * 1. Resolve allocator.
+     * 2. Allocate and construct Impl via pmr allocator (exception-safe).
+     * 3. Transfer to m_impl.
+     */
     Object::Object(std::pmr::memory_resource *res)
         : m_impl(nullptr, ImplDeleter{res ? res : Config::instance().resource()}),
           m_resource(res ? res : Config::instance().resource())
@@ -49,6 +59,12 @@ namespace pjh::json
 
     Object::~Object() = default;
 
+    /*
+     * Deep copy each entry into a new Object with the target resource
+     *
+     * 1. Materialise key string into target resource.
+     * 2. Recursively clone value.
+     */
     Object Object::clone(std::pmr::memory_resource *into) const
     {
         Object out(into);
@@ -77,6 +93,7 @@ namespace pjh::json
         return *this;
     }
 
+    // Linear search by key (insertion-order vector)
     bool Object::contains(std::string_view key) const noexcept
     {
         return std::ranges::find_if(
@@ -86,6 +103,13 @@ namespace pjh::json
                m_impl->data.end();
     }
 
+    /*
+     * Mutable key access: find-or-insert
+     *
+     * 1. Search for existing key via linear scan.
+     * 2. If found, return reference to value.
+     * 3. If not found, append default-constructed Json entry and return it.
+     */
     Json &Object::operator[](std::string_view key)
     {
         auto it = std::find_if(
@@ -102,6 +126,13 @@ namespace pjh::json
         return it->second;
     }
 
+    /*
+     * Const key access: find-or-throw
+     *
+     * 1. Search for key via linear scan.
+     * 2. If found, return const reference.
+     * 3. If missing, throw out_of_range.
+     */
     const Json &Object::operator[](std::string_view key) const
     {
         auto it = std::ranges::find_if(
@@ -141,6 +172,13 @@ namespace pjh::json
         return it->second;
     }
 
+    /*
+     * Insert or overwrite by key
+     *
+     * 1. Search for existing key.
+     * 2. If found, overwrite its value.
+     * 3. If not found, append new entry.
+     */
     void Object::insert(std::string_view key, Json val)
     {
         auto it = std::ranges::find_if(
@@ -169,6 +207,13 @@ namespace pjh::json
         m_impl->data.push_back(std::move(entry));
     }
 
+    /*
+     * Remove key
+     *
+     * 1. Search for key.
+     * 2. If found, erase entry and return true.
+     * 3. If missing, return false.
+     */
     bool Object::remove(std::string_view key)
     {
         auto it = std::ranges::find_if(
@@ -182,6 +227,14 @@ namespace pjh::json
         return true;
     }
 
+    /*
+     * Order-sensitive equality
+     *
+     * 1. Fast reject on size mismatch.
+     * 2. For each local entry, look up key in other and compare value.
+     *
+     * Equal only if same insertion order, keys, and values.
+     */
     bool Object::operator==(const Object &other) const noexcept
     {
         if (size() != other.size())

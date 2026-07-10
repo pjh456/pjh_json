@@ -6,6 +6,15 @@
 
 namespace pjh::json
 {
+    /*
+     * Create memory resource for parsed document
+     *
+     * 1. Switch by storage policy to select resource type:
+     *    - Pooled: thread-safe or unsynchronized pool_resource.
+     *    - Arena: monotonic_buffer_resource (no per-block deallocation).
+     *    - SystemDefault: return nullptr (caller falls back to new_delete).
+     * 2. Debug mode: optionally wrap in CountingResource for leak detection.
+     */
     std::unique_ptr<std::pmr::memory_resource>
     Document::make_arena(Storage storage, size_t block, bool thread_safe, bool count)
     {
@@ -38,12 +47,18 @@ namespace pjh::json
         return base;
     }
 
+    /*
+     * Delegated constructor: make_arena then forward to full constructor
+     */
     Document::Document(Storage storage, size_t block, bool thread_safe, bool count)
         : Document(make_arena(storage, block, thread_safe, count),
                    Json(), std::pmr::string{}, false, storage, block, thread_safe, count)
     {
     }
 
+    /*
+     * Full constructor: take ownership of arena, root, buffer, and settings
+     */
     Document::Document(std::unique_ptr<std::pmr::memory_resource> arena,
                        Json &&root, std::pmr::string &&buffer, bool is_view,
                        Storage storage, size_t block, bool thread_safe, bool count)
@@ -58,21 +73,33 @@ namespace pjh::json
     {
     }
 
+    /*
+     * Return the arena resource, or fall back to new_delete_resource
+     */
     std::pmr::memory_resource *Document::resource() noexcept
     {
         return m_arena ? m_arena.get() : std::pmr::new_delete_resource();
     }
 
+    /*
+     * Reconstruct in-place: assign a fresh empty Document with same settings
+     */
     void Document::reset()
     {
         *this = Document(m_storage, m_block, m_thread_safe, m_count);
     }
 
+    /*
+     * Move assignment via destruct + placement-new
+     *
+     * Directly moving unique_ptr (arena) and Json is safe across unequal
+     * allocators. The old Document is destroyed first to prevent double-free
+     * of arena resources when the source is destroyed.
+     */
     Document &Document::operator=(Document &&other) noexcept
     {
         if (this != &other)
         {
-            // move 构造会窃取并接管 allocator；赋值/swap 在 allocator 不等时会复制或 UB
             this->~Document();
             new (this) Document(std::move(other));
         }

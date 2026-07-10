@@ -14,6 +14,9 @@ namespace pjh::json
         Vec data;
     };
 
+    /*
+     * Deallocate Impl through the same pmr allocator used for construction
+     */
     void Array::ImplDeleter::operator()(Impl *ptr) const noexcept
     {
         if (!ptr)
@@ -23,6 +26,14 @@ namespace pjh::json
         alloc.deallocate(ptr, 1);
     }
 
+    /*
+     * Construct empty Array with pmr pimpl
+     *
+     * 1. Resolve allocator (default to global config resource).
+     * 2. Allocate Impl block via pmr allocator.
+     * 3. Construct Impl in-place. On exception, free the block.
+     * 4. Transfer ownership to m_impl unique_ptr.
+     */
     Array::Array(std::pmr::memory_resource *res)
         : m_impl(nullptr, ImplDeleter{res ? res : Config::instance().resource()}),
           m_resource(res ? res : Config::instance().resource())
@@ -41,6 +52,11 @@ namespace pjh::json
         m_impl.reset(ptr);
     }
 
+    /*
+     * Adopt existing vector
+     *
+     * Infer resource from vector's allocator, then move data in.
+     */
     Array::Array(Vec vec)
         : Array(vec.get_allocator().resource())
     {
@@ -49,6 +65,9 @@ namespace pjh::json
 
     Array::~Array() = default;
 
+    /*
+     * Deep copy each element into a new Array with the target resource
+     */
     Array Array::clone(std::pmr::memory_resource *into) const
     {
         Array out(into);
@@ -58,6 +77,9 @@ namespace pjh::json
         return out;
     }
 
+    /*
+     * Move ownership, null out source resource
+     */
     Array &Array::operator=(Array &&other) noexcept
     {
         if (this == &other)
@@ -76,6 +98,8 @@ namespace pjh::json
     size_t Array::size() const noexcept { return m_impl->data.size(); }
     bool Array::empty() const noexcept { return m_impl->data.empty(); }
     void Array::clear() noexcept { return m_impl->data.clear(); }
+
+    // Linear search via std::find using Json operator==
     bool Array::contains(const Json &val) const noexcept
     {
         return std::find(
@@ -103,6 +127,10 @@ namespace pjh::json
     const Json &Array::at(size_t idx) const { return m_impl->data.at(idx); }
 
     void Array::push_back(Json v) { return m_impl->data.push_back(std::move(v)); }
+
+    /*
+     * Validate range, then erase [idx, idx+len)
+     */
     void Array::erase(size_t idx, size_t len)
     {
         if (idx > m_impl->data.size() || len > m_impl->data.size() - idx)
@@ -110,6 +138,9 @@ namespace pjh::json
         m_impl->data.erase(m_impl->data.begin() + idx, m_impl->data.begin() + idx + len);
     }
 
+    /*
+     * Compare sizes first for fast rejection, then element-by-element
+     */
     bool Array::operator==(const Array &other) const noexcept
     {
         if (m_impl->data.size() != other.m_impl->data.size())

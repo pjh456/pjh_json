@@ -5,6 +5,17 @@
 
 namespace pjh::json
 {
+    /*
+     * Parse JSON literal (true / false / null)
+     *
+     * Uses bit_cast to precompute integer magic constants for the expected
+     * byte sequences, then compares via memcpy. This avoids strcmp and
+     * is safe for unaligned access on all modern platforms.
+     *
+     * 1. Read 4 bytes: compare against "true" and "null" as uint32.
+     * 2. Read 8 bytes with a 5-byte mask: compare against "false".
+     * 3. No match triggers an error.
+     */
     Json Parser::parse_literal()
     {
         struct UChar4
@@ -21,6 +32,7 @@ namespace pjh::json
         constexpr uint64_t false_magic = std::bit_cast<uint64_t>(UChar8{'f', 'a', 'l', 's', 'e', 0, 0, 0});
         constexpr uint64_t false_mask = std::bit_cast<uint64_t>(UChar8{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0});
 
+        // Try true / null (4-byte match)
         uint32_t val32;
         std::memcpy(&val32, m_curr, 4);
 
@@ -35,6 +47,7 @@ namespace pjh::json
             return Json(nullptr);
         }
 
+        // Try false (5-byte match with trailing mask)
         uint64_t val64;
         std::memcpy(&val64, m_curr, 8);
         if ((val64 & false_mask) == false_magic)

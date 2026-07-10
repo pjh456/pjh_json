@@ -7,12 +7,21 @@
 
 namespace pjh::json
 {
+    // Write newline + indentation for pretty-print.
     static void write_indent(std::pmr::string &sink, const DumpOptions &opts, size_t depth)
     {
         sink.push_back('\n');
         sink.append(static_cast<size_t>(opts.indent) * depth, opts.indent_char);
     }
 
+    /*
+     * Serialise double to JSON string
+     *
+     * 1. Reject NaN/Inf (not valid JSON).
+     * 2. Format via std::to_chars (shortest round-trip representation).
+     * 3. If the output is a bare integer (no '.' or 'e'), append ".0"
+     *    to distinguish float from int64 on round-trip.
+     */
     static void write_double(std::pmr::string &sink, double val)
     {
         if (!std::isfinite(val))
@@ -39,6 +48,15 @@ namespace pjh::json
             sink.append(".0");
     }
 
+    /*
+     * Recursively write a Json value into sink
+     *
+     * 1. Dispatch by variant type: null, bool, int64, double, string.
+     * 2. Array: '[' + elements (comma-separated, indented if pretty) + ']'.
+     * 3. Object: '{' + key:value pairs + '}'.
+     *    - If sort_keys: collect entry pointers, sort by key, emit sorted.
+     *    - Otherwise emit in insertion order.
+     */
     static void write_value(std::pmr::string &sink, const Json &value,
                             const DumpOptions &opts, size_t depth)
     {
@@ -98,6 +116,7 @@ namespace pjh::json
 
             if (opts.sort_keys)
             {
+                // Build pointer vector, sort by key, emit in sorted order
                 std::pmr::vector<const Object::Entry *> sorted(obj->data().get_allocator());
                 sorted.reserve(obj->size());
                 for (const auto &e : *obj)
@@ -119,6 +138,7 @@ namespace pjh::json
             }
             else
             {
+                // Emit in insertion order (default)
                 for (const auto &[key, val] : *obj)
                 {
                     if (!first)
@@ -162,6 +182,9 @@ namespace pjh::json
         return dump(doc.root(), opts, res);
     }
 
+    /*
+     * Write raw data to file (binary mode)
+     */
     void write_file(std::string_view path, std::string_view data)
     {
         std::ofstream file(std::string(path), std::ios::binary);
@@ -178,6 +201,9 @@ namespace pjh::json
         write_file(path, out);
     }
 
+    /*
+     * Prettify: parse then dump with pretty=true
+     */
     std::pmr::string prettify(std::string_view json, uint8_t indent,
                               std::pmr::memory_resource *res)
     {

@@ -7,6 +7,7 @@ namespace pjh::json
 {
     static constexpr char HEX[] = "0123456789abcdef";
 
+    // Append JSON escape sequence for character c to sink.
     static void append_escape(std::pmr::string &sink, char c)
     {
         switch (c)
@@ -44,6 +45,7 @@ namespace pjh::json
         }
     }
 
+    // Append \uXXXX for a 16-bit value.
     static void append_u4(std::pmr::string &sink, uint16_t v)
     {
         char buf[6] = {'\\', 'u', 0, 0, 0, 0};
@@ -54,6 +56,13 @@ namespace pjh::json
         sink.append(buf, 6);
     }
 
+    /*
+     * ASCII-escape mode: scan byte-by-byte
+     *
+     * 1. Escape control chars, quote, and backslash immediately.
+     * 2. For non-ASCII (>0x7F), decode the UTF-8 sequence, then emit
+     *    the codepoint as \uXXXX (or surrogate pair for >U+FFFF).
+     */
     static void write_escaped_ascii(std::pmr::string &sink, std::string_view s)
     {
         const auto *p = reinterpret_cast<const uint8_t *>(s.data());
@@ -73,7 +82,7 @@ namespace pjh::json
             }
             else
             {
-                // decode a UTF-8 sequence to a codepoint
+                // Decode UTF-8 lead byte to codepoint
                 uint32_t cp;
                 int len;
                 if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; len = 2; }
@@ -81,6 +90,7 @@ namespace pjh::json
                 else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; len = 4; }
                 else throw JsonError("Invalid UTF-8 lead byte in string");
 
+                // Validate continuation bytes
                 if (p + len > end)
                     throw JsonError("Truncated UTF-8 sequence in string");
                 for (int i = 1; i < len; ++i)
@@ -91,6 +101,7 @@ namespace pjh::json
                 }
                 p += len;
 
+                // Emit as \uXXXX (or surrogate pair for >U+FFFF)
                 if (cp <= 0xFFFF)
                 {
                     append_u4(sink, static_cast<uint16_t>(cp));
@@ -105,7 +116,18 @@ namespace pjh::json
         }
     }
 
-    // Escape and append s to sink, wrapped in double quotes.
+    /*
+     * Write JSON-escaped string (with surrounding double quotes)
+     *
+     * Phase 1 — SIMD fast path (non-ASCII mode only):
+     *   1. Batch-scan for characters needing escape (quote, backslash, ctrl).
+     *   2. Copy clean runs directly to sink.
+     *   3. Escape matched characters.
+     *
+     * Phase 2 — Scalar tail (remaining < batch bytes):
+     *   4. Scan remaining bytes one-by-one.
+     *   5. Copy clean runs verbatim, escape special characters.
+     */
     void write_escaped(std::pmr::string &sink, std::string_view s, bool ascii)
     {
         sink.push_back('"');
@@ -126,9 +148,9 @@ namespace pjh::json
         auto escape = xsimd::broadcast<uint8_t>('\\');
         auto ctrl = xsimd::broadcast<uint8_t>(0x20);
 
-        const char *run = curr; // start of current clean (copy-verbatim) run
+        const char *run = curr; // start of clean (copy-verbatim) run
 
-        // SIMD bulk scan over full batches
+        // Phase 1: SIMD bulk scan over full batches
         while (curr + batch_size <= end)
         {
             auto b = batch_type::load_unaligned(
@@ -139,6 +161,7 @@ namespace pjh::json
             if constexpr (batch_size < 64)
                 mask &= (1ULL << batch_size) - 1;
 
+            // Process all hits in this batch (via ctz on remaining bits)
             while (mask != 0)
             {
                 int off = std::countr_zero(mask);
@@ -152,7 +175,7 @@ namespace pjh::json
             curr += batch_size;
         }
 
-        // scalar tail
+        // Phase 2: scalar tail
         while (curr < end)
         {
             char c = *curr;

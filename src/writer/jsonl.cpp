@@ -2,6 +2,12 @@
 
 namespace pjh::json
 {
+    /*
+     * JSONL dump: write each array element as a compact JSON line
+     *
+     * 1. Serialise each element via dump_to with compact options.
+     * 2. Append '\n' after each element.
+     */
     void dump_jsonl_to(std::pmr::string &sink, const Array &arr)
     {
         DumpOptions compact{};
