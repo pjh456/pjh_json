@@ -32,6 +32,9 @@ namespace pjh::json
 
         using batch_type = xsimd::batch<uint8_t>;
         std::size_t batch_size = batch_type::size;
+        static_assert(
+            batch_type::size <= 64,
+            "batch_size too large for uint64_t mask");
         auto quote = xsimd::broadcast<uint8_t>('"');
         auto escape = xsimd::broadcast<uint8_t>('\\');
         auto ctrl = xsimd::broadcast<uint8_t>(0x20);
