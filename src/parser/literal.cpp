@@ -32,30 +32,46 @@ namespace pjh::json
         constexpr uint64_t false_magic = std::bit_cast<uint64_t>(UChar8{'f', 'a', 'l', 's', 'e', 0, 0, 0});
         constexpr uint64_t false_mask = std::bit_cast<uint64_t>(UChar8{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0});
 
-        // Try true / null (4-byte match)
+        Json result;
+
         uint32_t val32;
         std::memcpy(&val32, m_curr, 4);
 
         if (val32 == true_magic)
         {
             m_curr += 4;
-            return Json(true);
+            result = Json(true);
         }
-        if (val32 == null_magic)
+        else if (val32 == null_magic)
         {
             m_curr += 4;
-            return Json(nullptr);
+            result = Json(nullptr);
         }
-
-        // Try false (5-byte match with trailing mask)
-        uint64_t val64;
-        std::memcpy(&val64, m_curr, 8);
-        if ((val64 & false_mask) == false_magic)
+        else
         {
-            m_curr += 5;
-            return Json(false);
+            uint64_t val64;
+            std::memcpy(&val64, m_curr, 8);
+            if ((val64 & false_mask) == false_magic)
+            {
+                m_curr += 5;
+                result = Json(false);
+            }
+            else
+            {
+                throw_error("Invalid literal, expected true/false/null");
+            }
         }
 
-        throw_error("Invalid literal, expected true/false/null");
+        // Reject trailing garbage: after a literal, only whitespace,
+        // structural characters (, : } ]), or end-of-input are valid.
+        uint8_t next = static_cast<uint8_t>(*m_curr);
+        if (next != ' ' && next != '\t' && next != '\n' && next != '\r' &&
+            next != ',' && next != ':' && next != '}' && next != ']' &&
+            next != 0)
+        {
+            throw_error("Invalid literal, unexpected characters after true/false/null");
+        }
+
+        return result;
     }
 }
