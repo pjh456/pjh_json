@@ -1,6 +1,7 @@
 #ifndef INCLUDE_PJH_JSON_CONFIG_HPP
 #define INCLUDE_PJH_JSON_CONFIG_HPP
 
+#include <atomic>
 #include <cstddef>
 #include <memory>
 #include <memory_resource>
@@ -105,7 +106,7 @@ namespace pjh::json
 
         bool m_strict_duplicate_keys = false;
         size_t m_arena_block_size = 0;
-        Storage m_storage = Storage::Pooled;
+        std::atomic<Storage> m_storage{Storage::Pooled};
         size_t m_block = 4096;
         std::unique_ptr<Document> m_global;
         std::mutex m_mutex;
