@@ -9,18 +9,28 @@
 namespace pjh::json
 {
     /**
-     * @brief JSON string: view (borrowed) or heap-allocated (owned)
+     * @brief JSON string — view (borrowed) or heap-allocated (owned).
      *
      * Replaces std::variant<string_view, pmr::string> with a manual tagged
      * union to reduce size from 40 to 16 bytes. Borrowed strings store a
      * {ptr, len} pair inline. Owned strings store a pointer to a
-     * heap-allocated pmr::string. The m_owned flag selects the active member.
+     * heap-allocated pmr::string.
      *
-     * Move-only -- copy is deleted.
+     * Move-only — copy is deleted.
      */
     class String
     {
-        bool m_owned = false;
+    private:
+        /**
+         * @brief Storage mode for the active union member.
+         */
+        enum class Storage : uint8_t
+        {
+            View = 0, // borrowed: m_data.view_data active
+            Owned = 1 // owned:    m_data.heap_ptr active
+        };
+
+        Storage m_storage = Storage::View;
 
         struct ViewData
         {
@@ -28,39 +38,47 @@ namespace pjh::json
             uint32_t length;
         };
 
+        /**
+         * @brief Inline storage. Only one member is active per m_storage.
+         *
+         * | m_storage | active member | content                |
+         * |-----------|---------------|------------------------|
+         * | View      | view_data     | {ptr, len} inline      |
+         * | Owned     | heap_ptr      | pmr::string* on heap   |
+         */
         union
         {
-            ViewData m_view;           // valid when !m_owned
-            std::pmr::string *m_heap;  // valid when m_owned
+            ViewData view_data;         // borrowed
+            std::pmr::string *heap_ptr; // owned
         };
 
     public:
         /**
          * @brief Construct empty (null view)
          */
-        String() noexcept : m_view{nullptr, 0} {}
+        String() noexcept : view_data{nullptr, 0} {}
 
         /**
          * @brief Borrowed view from string_view (no copy)
-         * @param sv Source view -- caller must guarantee lifetime
+         * @param sv Source view — caller must guarantee lifetime
          * @note Stores {ptr, len} inline. Does NOT copy.
          */
-        String(std::string_view sv) noexcept : m_owned(false)
+        String(std::string_view sv) noexcept : m_storage(Storage::View)
         {
-            m_view.data = sv.data();
-            m_view.length = static_cast<uint32_t>(sv.size());
+            view_data.data = sv.data();
+            view_data.length = static_cast<uint32_t>(sv.size());
         }
 
         /**
          * @brief Borrowed view from C string (no copy)
-         * @param s NUL-terminated source -- caller must guarantee lifetime
+         * @param s NUL-terminated source — caller must guarantee lifetime
          * @note Wraps s in string_view. Does NOT copy.
          */
-        String(const char *s) noexcept : m_owned(false)
+        String(const char *s) noexcept : m_storage(Storage::View)
         {
             std::string_view sv(s);
-            m_view.data = sv.data();
-            m_view.length = static_cast<uint32_t>(sv.size());
+            view_data.data = sv.data();
+            view_data.length = static_cast<uint32_t>(sv.size());
         }
 
         /**
@@ -68,40 +86,41 @@ namespace pjh::json
          * @param s Pointer to heap-allocated pmr::string.
          * @note Caller transfers ownership. Destructor will delete.
          */
-        String(std::pmr::string *s) noexcept : m_owned(true), m_heap(s) {}
+        String(std::pmr::string *s) noexcept
+            : m_storage(Storage::Owned), heap_ptr(s) {}
 
         /**
-         * @brief Destructor -- deletes owned pmr::string if present
+         * @brief Destructor — deletes owned pmr::string if present
          */
         ~String()
         {
-            if (m_owned)
+            if (m_storage == Storage::Owned)
             {
-                delete m_heap;
-                m_owned = false;
+                delete heap_ptr;
+                m_storage = Storage::View;
             }
         }
 
         /**
-         * @brief Copy not allowed -- use own() to materialise
+         * @brief Copy not allowed — use own() to materialise
          */
         String(const String &) = delete;
         /**
-         * @brief Copy not allowed -- use own() to materialise
+         * @brief Copy not allowed — use own() to materialise
          */
         String &operator=(const String &) = delete;
 
         /**
-         * @brief Move construct (steals heap pointer, marks source empty)
+         * @brief Move construct (steals active member, marks source empty)
          * @param other Source (left as empty view)
          */
-        String(String &&other) noexcept : m_owned(other.m_owned)
+        String(String &&other) noexcept : m_storage(other.m_storage)
         {
-            if (other.m_owned)
-                m_heap = other.m_heap;
+            if (other.m_storage == Storage::Owned)
+                heap_ptr = other.heap_ptr;
             else
-                m_view = other.m_view;
-            other.m_owned = false;
+                view_data = other.view_data;
+            other.m_storage = Storage::View;
         }
 
         /**
@@ -114,12 +133,12 @@ namespace pjh::json
             if (this != &other)
             {
                 this->~String();
-                m_owned = other.m_owned;
-                if (other.m_owned)
-                    m_heap = other.m_heap;
+                m_storage = other.m_storage;
+                if (other.m_storage == Storage::Owned)
+                    heap_ptr = other.heap_ptr;
                 else
-                    m_view = other.m_view;
-                other.m_owned = false;
+                    view_data = other.view_data;
+                other.m_storage = Storage::View;
             }
             return *this;
         }
@@ -130,15 +149,18 @@ namespace pjh::json
          */
         [[nodiscard]] operator std::string_view() const noexcept
         {
-            if (m_owned)
-                return *m_heap;
-            return std::string_view(m_view.data, m_view.length);
+            if (m_storage == Storage::Owned)
+                return *heap_ptr;
+            return std::string_view(view_data.data, view_data.length);
         }
 
         /**
          * @brief true if data is owned (pmr::string on heap), not borrowed
          */
-        [[nodiscard]] bool is_owned() const noexcept { return m_owned; }
+        [[nodiscard]] bool is_owned() const noexcept
+        {
+            return m_storage == Storage::Owned;
+        }
 
         /**
          * @brief Materialise borrowed view as owned copy if not already owned
@@ -152,11 +174,11 @@ namespace pjh::json
          */
         void own(std::pmr::memory_resource *res = std::pmr::get_default_resource())
         {
-            if (!m_owned)
+            if (m_storage == Storage::View)
             {
-                auto sv = std::string_view(m_view.data, m_view.length);
-                m_heap = new std::pmr::string(sv, res);
-                m_owned = true;
+                auto sv = std::string_view(view_data.data, view_data.length);
+                heap_ptr = new std::pmr::string(sv, res);
+                m_storage = Storage::Owned;
             }
         }
 
@@ -170,10 +192,10 @@ namespace pjh::json
          */
         [[nodiscard]] std::pmr::string *release() noexcept
         {
-            if (m_owned)
+            if (m_storage == Storage::Owned)
             {
-                auto *p = m_heap;
-                m_owned = false;
+                auto *p = heap_ptr;
+                m_storage = Storage::View;
                 return p;
             }
             return nullptr;

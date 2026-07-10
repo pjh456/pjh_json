@@ -8,14 +8,14 @@ namespace pjh::json
      * Assign string_view (borrowed)
      *
      * 1. Destroy old value.
-     * 2. Store {ptr, len} inline as T_StrView.
+     * 2. Store {ptr, len} inline as StringView.
      */
     Json &Json::operator=(std::string_view val)
     {
         destroy();
-        m_type = T_StrView;
-        m_data.sv.data = val.data();
-        m_data.sv.length = static_cast<uint32_t>(val.size());
+        m_type = Type::StringView;
+        m_data.str_view.data = val.data();
+        m_data.str_view.length = static_cast<uint32_t>(val.size());
         return *this;
     }
 
@@ -32,12 +32,12 @@ namespace pjh::json
      *
      * 1. Destroy old value.
      * 2. Allocate and construct Array on heap using its own m_resource.
-     * 3. Store pointer as T_Array.
+     * 3. Store pointer as ArrayType.
      */
     Json &Json::operator=(Array &&arr) noexcept
     {
         destroy();
-        m_type = T_Array;
+        m_type = Type::ArrayType;
         m_data.heap = heap_alloc(arr.m_resource, std::move(arr));
         return *this;
     }
@@ -47,12 +47,12 @@ namespace pjh::json
      *
      * 1. Destroy old value.
      * 2. Allocate and construct Object on heap using its own m_resource.
-     * 3. Store pointer as T_Object.
+     * 3. Store pointer as ObjectType.
      */
     Json &Json::operator=(Object &&obj) noexcept
     {
         destroy();
-        m_type = T_Object;
+        m_type = Type::ObjectType;
         m_data.heap = heap_alloc(obj.m_resource, std::move(obj));
         return *this;
     }
@@ -62,9 +62,9 @@ namespace pjh::json
     /*
      * Deep copy into target memory resource
      *
-     * 1. Scalars (null/bool/int/float): copy by value.
+     * 1. Scalars (null/boolean/integer/floating): copy by value.
      * 2. String (borrowed or owned): read string_view, allocate owned
-     *    pmr::string copy in target resource, store as T_StrOwned.
+     *    pmr::string copy in target resource, store as StringOwned.
      * 3. Array/Object: delegate to container's clone() which recursively
      *    clones all children, then heap-allocate via PMR.
      */
@@ -72,35 +72,35 @@ namespace pjh::json
     {
         switch (m_type)
         {
-        case T_Null:
+        case Type::Null:
             return nullptr;
-        case T_Bool:
-            return m_data.b_val;
-        case T_Int:
-            return m_data.i_val;
-        case T_Float:
-            return m_data.f_val;
-        case T_StrView:
-        case T_StrOwned:
+        case Type::Boolean:
+            return m_data.boolean;
+        case Type::Integer:
+            return m_data.integer;
+        case Type::Floating:
+            return m_data.floating;
+        case Type::StringView:
+        case Type::StringOwned:
         {
             std::string_view sv = as_string();
             std::pmr::string owned(sv, into);
             Json out;
-            out.m_type = T_StrOwned;
+            out.m_type = Type::StringOwned;
             out.m_data.heap = new std::pmr::string(std::move(owned));
             return out;
         }
-        case T_Array:
+        case Type::ArrayType:
         {
             Json out;
-            out.m_type = T_Array;
+            out.m_type = Type::ArrayType;
             out.m_data.heap = heap_alloc(into, as_array().clone(into));
             return out;
         }
-        case T_Object:
+        case Type::ObjectType:
         {
             Json out;
-            out.m_type = T_Object;
+            out.m_type = Type::ObjectType;
             out.m_data.heap = heap_alloc(into, as_object().clone(into));
             return out;
         }
@@ -120,49 +120,57 @@ namespace pjh::json
 
     std::optional<bool> Json::try_as_boolean() const noexcept
     {
-        if (m_type == T_Bool) return m_data.b_val;
+        if (m_type == Type::Boolean)
+            return m_data.boolean;
         return std::nullopt;
     }
 
     std::optional<int64_t> Json::try_as_int() const noexcept
     {
-        if (m_type == T_Int) return m_data.i_val;
+        if (m_type == Type::Integer)
+            return m_data.integer;
         return std::nullopt;
     }
 
     std::optional<double> Json::try_as_float() const noexcept
     {
-        if (m_type == T_Float) return m_data.f_val;
+        if (m_type == Type::Floating)
+            return m_data.floating;
         return std::nullopt;
     }
 
     std::optional<std::string_view> Json::try_as_string() const noexcept
     {
-        if (is_string()) return as_string();
+        if (is_string())
+            return as_string();
         return std::nullopt;
     }
 
     Array *Json::try_as_array() noexcept
     {
-        if (m_type == T_Array) return static_cast<Array *>(m_data.heap);
+        if (m_type == Type::ArrayType)
+            return static_cast<Array *>(m_data.heap);
         return nullptr;
     }
 
     const Array *Json::try_as_array() const noexcept
     {
-        if (m_type == T_Array) return static_cast<const Array *>(m_data.heap);
+        if (m_type == Type::ArrayType)
+            return static_cast<const Array *>(m_data.heap);
         return nullptr;
     }
 
     Object *Json::try_as_object() noexcept
     {
-        if (m_type == T_Object) return static_cast<Object *>(m_data.heap);
+        if (m_type == Type::ObjectType)
+            return static_cast<Object *>(m_data.heap);
         return nullptr;
     }
 
     const Object *Json::try_as_object() const noexcept
     {
-        if (m_type == T_Object) return static_cast<const Object *>(m_data.heap);
+        if (m_type == Type::ObjectType)
+            return static_cast<const Object *>(m_data.heap);
         return nullptr;
     }
 
@@ -176,15 +184,19 @@ namespace pjh::json
      */
     size_t Json::size() const noexcept
     {
-        if (is_array()) return as_array().size();
-        if (is_object()) return as_object().size();
+        if (is_array())
+            return as_array().size();
+        if (is_object())
+            return as_object().size();
         return 1;
     }
 
     bool Json::empty() const noexcept
     {
-        if (is_array()) return as_array().empty();
-        if (is_object()) return as_object().empty();
+        if (is_array())
+            return as_array().empty();
+        if (is_object())
+            return as_object().empty();
         return false;
     }
 
@@ -193,7 +205,7 @@ namespace pjh::json
     /*
      * Element access with type validation
      *
-     * 1. Verify m_type is T_Array or T_Object (throw TypeError on mismatch).
+     * 1. Verify m_type is ArrayType or ObjectType (throw TypeError on mismatch).
      * 2. Delegate to the underlying container's accessor.
      *
      * operator[] skips bounds check (Array) or insert-if-missing (Object).
@@ -204,49 +216,57 @@ namespace pjh::json
 
     Json &Json::operator[](size_t idx)
     {
-        if (!is_array()) throw TypeError("expected array");
+        if (!is_array())
+            throw TypeError("expected array");
         return as_array()[idx];
     }
 
     const Json &Json::operator[](size_t idx) const
     {
-        if (!is_array()) throw TypeError("expected array");
+        if (!is_array())
+            throw TypeError("expected array");
         return as_array()[idx];
     }
 
     Json &Json::at(size_t idx)
     {
-        if (!is_array()) throw TypeError("expected array");
+        if (!is_array())
+            throw TypeError("expected array");
         return as_array().at(idx);
     }
 
     const Json &Json::at(size_t idx) const
     {
-        if (!is_array()) throw TypeError("expected array");
+        if (!is_array())
+            throw TypeError("expected array");
         return as_array().at(idx);
     }
 
     Json &Json::operator[](std::string_view key)
     {
-        if (!is_object()) throw TypeError("expected object");
+        if (!is_object())
+            throw TypeError("expected object");
         return as_object()[key];
     }
 
     const Json &Json::operator[](std::string_view key) const
     {
-        if (!is_object()) throw TypeError("expected object");
+        if (!is_object())
+            throw TypeError("expected object");
         return as_object()[key];
     }
 
     Json &Json::at(std::string_view key)
     {
-        if (!is_object()) throw TypeError("expected object");
+        if (!is_object())
+            throw TypeError("expected object");
         return as_object().at(key);
     }
 
     const Json &Json::at(std::string_view key) const
     {
-        if (!is_object()) throw TypeError("expected object");
+        if (!is_object())
+            throw TypeError("expected object");
         return as_object().at(key);
     }
 
@@ -258,21 +278,30 @@ namespace pjh::json
      * 1. Json-vs-Json: compare m_type first for fast rejection, then
      *    compare values by type.
      * 2. Json-vs-scalar: type-check first, then value comparison.
-     * 3. T_StrView and T_StrOwned are compared by content (not storage).
+     * 3. StringView and StringOwned are compared by content (not storage).
      */
     bool Json::operator==(const Json &other) const noexcept
     {
-        if (m_type != other.m_type) return false;
+        if (m_type != other.m_type)
+            return false;
         switch (m_type)
         {
-        case T_Null: return true;
-        case T_Bool: return m_data.b_val == other.m_data.b_val;
-        case T_Int: return m_data.i_val == other.m_data.i_val;
-        case T_Float: return m_data.f_val == other.m_data.f_val;
-        case T_StrView: return as_string() == other.as_string();
-        case T_StrOwned: return as_string() == other.as_string();
-        case T_Array: return as_array() == other.as_array();
-        case T_Object: return as_object() == other.as_object();
+        case Type::Null:
+            return true;
+        case Type::Boolean:
+            return m_data.boolean == other.m_data.boolean;
+        case Type::Integer:
+            return m_data.integer == other.m_data.integer;
+        case Type::Floating:
+            return m_data.floating == other.m_data.floating;
+        case Type::StringView:
+            return as_string() == other.as_string();
+        case Type::StringOwned:
+            return as_string() == other.as_string();
+        case Type::ArrayType:
+            return as_array() == other.as_array();
+        case Type::ObjectType:
+            return as_object() == other.as_object();
         }
         return false;
     }

@@ -46,71 +46,82 @@ namespace pjh::json
     };
 
     /**
-     * @brief Core JSON value type (custom tagged union)
+     * @brief Core JSON value type — custom tagged union, 24 bytes.
      *
      * Replaces std::variant with a hand-rolled tagged union to reduce
      * per-node size from 48 to 24 bytes. Small types (null, bool, int64,
      * double, borrowed string) are stored inline. Heap types (owned string,
      * Array, Object) are stored as pointers into PMR-allocated memory.
      *
-     * Copy disabled -- use clone() for deep copy.
+     * Move-only — copy disabled. Use clone() for deep copy.
      */
     class Json
     {
     public:
         /**
-         * @brief Internal type tag
-         *
-         * T_StrView: borrowed string_view stored inline as {ptr, len}.
-         * T_StrOwned: heap-allocated pmr::string, pointer in m_data.heap.
-         * T_Array/T_Object: heap-allocated via PMR, pointer in m_data.heap.
+         * @brief Runtime type tag for the active union member.
          */
-        enum Type : uint8_t
+        enum class Type : uint8_t
         {
-            T_Null = 0,
-            T_Bool,
-            T_Int,
-            T_Float,
-            T_StrView,
-            T_StrOwned,
-            T_Array,
-            T_Object
+            Null = 0,    // nullptr_t
+            Boolean,     // bool
+            Integer,     // int64_t
+            Floating,    // double
+            StringView,  // borrowed: m_data.str_view = {ptr, len}
+            StringOwned, // owned:   m_data.heap → pmr::string*
+            ArrayType,   // m_data.heap → Array*
+            ObjectType   // m_data.heap → Object*
         };
 
     private:
-        Type m_type = T_Null;
+        Type m_type = Type::Null;
 
-        struct StrViewData
+        struct StrView
         {
             const char *data;
             uint32_t length;
         };
 
+        /**
+         * @brief Value storage. Only one member is active, selected by m_type.
+         *
+         * | m_type             | active member |
+         * |--------------------|---------------|
+         * | Null               | (none)        |
+         * | Boolean            | boolean       |
+         * | Integer            | integer       |
+         * | Floating           | floating      |
+         * | StringView         | str_view      |
+         * | StringOwned        | heap (pmr::string*)  |
+         * | ArrayType          | heap (Array*)        |
+         * | ObjectType         | heap (Object*)       |
+         */
         union Data
         {
-            bool b_val;
-            int64_t i_val;
-            double f_val;
-            StrViewData sv;
+            bool boolean;
+            int64_t integer;
+            double floating;
+            StrView str_view;
             void *heap;
         } m_data = {};
 
         /*
-         * Destroy current value and reset to null.
+         * Destroy current value and reset to Null.
          *
-         * 1. Scalar types (null/bool/int/float/StrView): nothing to free.
-         * 2. T_StrOwned: delete the heap-allocated pmr::string.
-         * 3. T_Array/T_Object: destroy in place, then deallocate via PMR
-         *    using the resource stored in the container's m_resource field.
+         * 1. Scalar types (null/boolean/integer/floating/StringView):
+         *    nothing to free.
+         * 2. StringOwned: delete the heap-allocated pmr::string.
+         * 3. ArrayType/ObjectType: destroy in place, then deallocate
+         *    via PMR using the resource stored in the container.
          */
         void destroy()
         {
             switch (m_type)
             {
-            case T_StrOwned:
+            case Type::StringOwned:
                 delete static_cast<std::pmr::string *>(m_data.heap);
                 break;
-            case T_Array:
+            case Type::ArrayType:
             {
                 std::pmr::polymorphic_allocator<Array> alloc(
                     static_cast<Array *>(m_data.heap)->m_resource);
@@ -119,7 +130,7 @@ namespace pjh::json
                 alloc.deallocate(p, 1);
                 break;
             }
-            case T_Object:
+            case Type::ObjectType:
             {
                 std::pmr::polymorphic_allocator<Object> alloc(
                     static_cast<Object *>(m_data.heap)->m_resource);
@@ -131,7 +142,7 @@ namespace pjh::json
             default:
                 break;
             }
-            m_type = T_Null;
+            m_type = Type::Null;
         }
 
         /*
@@ -165,19 +176,19 @@ namespace pjh::json
          * @brief Construct bool value
          * @param val Boolean to store
          */
-        Json(bool val) : m_type(T_Bool) { m_data.b_val = val; }
+        Json(bool val) : m_type(Type::Boolean) { m_data.boolean = val; }
 
         /**
          * @brief Construct int64 value
          * @param val Integer to store
          */
-        Json(int64_t val) : m_type(T_Int) { m_data.i_val = val; }
+        Json(int64_t val) : m_type(Type::Integer) { m_data.integer = val; }
 
         /**
          * @brief Construct double value
          * @param val Floating-point to store
          */
-        Json(double val) : m_type(T_Float) { m_data.f_val = val; }
+        Json(double val) : m_type(Type::Floating) { m_data.floating = val; }
 
         /**
          * @brief Construct int64 from any integer type (except bool)
@@ -186,7 +197,9 @@ namespace pjh::json
          */
         template <std::integral T>
             requires(!std::same_as<T, bool>)
-        Json(T val) : m_type(T_Int), m_data{.i_val = static_cast<int64_t>(val)} {}
+        Json(T val) : m_type(Type::Integer), m_data{.integer = static_cast<int64_t>(val)}
+        {
+        }
 
         /**
          * @brief Construct double from any floating-point type
@@ -194,22 +207,22 @@ namespace pjh::json
          * @param val Value to store as double
          */
         template <std::floating_point T>
-        Json(T val) : m_type(T_Float), m_data{.f_val = static_cast<double>(val)} {}
+        Json(T val) : m_type(Type::Floating), m_data{.floating = static_cast<double>(val)} {}
 
         /**
          * @brief Construct string from string_view (borrowed)
-         * @param sv Source view -- caller must guarantee lifetime
-         * @note Does NOT copy. The Json borrows a {ptr, len} pair.
+         * @param sv Source view — caller must guarantee lifetime
+         * @note Does NOT copy. Stores {ptr, len} inline.
          */
-        Json(std::string_view sv) : m_type(T_StrView)
+        Json(std::string_view sv) : m_type(Type::StringView)
         {
-            m_data.sv.data = sv.data();
-            m_data.sv.length = static_cast<uint32_t>(sv.size());
+            m_data.str_view.data = sv.data();
+            m_data.str_view.length = static_cast<uint32_t>(sv.size());
         }
 
         /**
          * @brief Construct string from C string (borrowed view)
-         * @param str NUL-terminated source -- caller must guarantee lifetime
+         * @param str NUL-terminated source — caller must guarantee lifetime
          * @note Does NOT copy. Internally wraps str in string_view.
          */
         Json(const char *str) : Json(std::string_view(str)) {}
@@ -218,7 +231,7 @@ namespace pjh::json
          * @brief Construct array value (takes ownership, heap-allocated)
          * @param arr Array to move into this value
          */
-        Json(Array arr) : m_type(T_Array)
+        Json(Array arr) : m_type(Type::ArrayType)
         {
             m_data.heap = heap_alloc(arr.m_resource, std::move(arr));
         }
@@ -227,7 +240,7 @@ namespace pjh::json
          * @brief Construct object value (takes ownership, heap-allocated)
          * @param obj Object to move into this value
          */
-        Json(Object obj) : m_type(T_Object)
+        Json(Object obj) : m_type(Type::ObjectType)
         {
             m_data.heap = heap_alloc(obj.m_resource, std::move(obj));
         }
@@ -235,41 +248,41 @@ namespace pjh::json
         /**
          * @brief Construct from String rvalue (used by parser).
          *
-         * Borrowed strings store {ptr, len} inline. Owned strings
-         * transfer the heap-allocated pmr::string pointer via release().
+         * Borrowed strings store {ptr, len} inline as StringView.
+         * Owned strings transfer the heap pointer via release().
          *
          * @param s String to adopt (must be an rvalue)
          */
-        Json(String &&s) : m_type(T_StrView)
+        Json(String &&s) : m_type(Type::StringView)
         {
             std::string_view sv = s;
-            m_data.sv.data = sv.data();
-            m_data.sv.length = static_cast<uint32_t>(sv.size());
+            m_data.str_view.data = sv.data();
+            m_data.str_view.length = static_cast<uint32_t>(sv.size());
 
             if (s.is_owned())
             {
-                m_type = T_StrOwned;
+                m_type = Type::StringOwned;
                 m_data.heap = s.release();
             }
         }
 
     public:
         /**
-         * @brief Copy not allowed -- use clone()
+         * @brief Copy not allowed — use clone()
          */
         Json(const Json &) = delete;
         /**
-         * @brief Copy not allowed -- use clone()
+         * @brief Copy not allowed — use clone()
          */
         Json &operator=(const Json &) = delete;
 
         /**
-         * @brief Move construct (steals heap pointers, marks source null)
+         * @brief Move construct (steals tagged data, marks source null)
          */
         Json(Json &&other) noexcept : m_type(other.m_type)
         {
             m_data = other.m_data;
-            other.m_type = T_Null;
+            other.m_type = Type::Null;
         }
 
         /**
@@ -282,13 +295,13 @@ namespace pjh::json
                 destroy();
                 m_type = other.m_type;
                 m_data = other.m_data;
-                other.m_type = T_Null;
+                other.m_type = Type::Null;
             }
             return *this;
         }
 
         /**
-         * @brief Destructor -- frees heap-allocated types
+         * @brief Destructor — frees heap-allocated types
          */
         ~Json() { destroy(); }
 
@@ -319,13 +332,13 @@ namespace pjh::json
         Json &operator=(bool val)
         {
             destroy();
-            m_type = T_Bool;
-            m_data.b_val = val;
+            m_type = Type::Boolean;
+            m_data.boolean = val;
             return *this;
         }
 
         /**
-         * @brief Assign from String rvalue
+         * @brief Assign from String rvalue.
          *
          * Borrowed strings store {ptr, len} inline. Owned strings
          * transfer the heap pointer. Old value is destroyed first.
@@ -337,15 +350,15 @@ namespace pjh::json
         {
             destroy();
             std::string_view sv = s;
-            m_data.sv.data = sv.data();
-            m_data.sv.length = static_cast<uint32_t>(sv.size());
+            m_data.str_view.data = sv.data();
+            m_data.str_view.length = static_cast<uint32_t>(sv.size());
             if (s.is_owned())
             {
-                m_type = T_StrOwned;
+                m_type = Type::StringOwned;
                 m_data.heap = s.release();
             }
             else
-                m_type = T_StrView;
+                m_type = Type::StringView;
             return *this;
         }
 
@@ -360,8 +373,8 @@ namespace pjh::json
         Json &operator=(T val)
         {
             destroy();
-            m_type = T_Int;
-            m_data.i_val = static_cast<int64_t>(val);
+            m_type = Type::Integer;
+            m_data.integer = static_cast<int64_t>(val);
             return *this;
         }
 
@@ -375,14 +388,14 @@ namespace pjh::json
         Json &operator=(T val)
         {
             destroy();
-            m_type = T_Float;
-            m_data.f_val = static_cast<double>(val);
+            m_type = Type::Floating;
+            m_data.floating = static_cast<double>(val);
             return *this;
         }
 
         /**
          * @brief Assign string_view (borrowed)
-         * @param val Source view -- caller must guarantee lifetime
+         * @param val Source view — caller must guarantee lifetime
          * @return *this
          * @note Does NOT copy.
          */
@@ -390,7 +403,7 @@ namespace pjh::json
 
         /**
          * @brief Assign C string (borrowed view)
-         * @param val NUL-terminated source -- caller must guarantee lifetime
+         * @param val NUL-terminated source — caller must guarantee lifetime
          * @return *this
          * @note Does NOT copy. Internally wraps val in string_view.
          */
@@ -417,42 +430,42 @@ namespace pjh::json
         /**
          * @brief true if holds null
          */
-        [[nodiscard]] bool is_null() const noexcept { return m_type == T_Null; }
+        [[nodiscard]] bool is_null() const noexcept { return m_type == Type::Null; }
 
         /**
          * @brief true if holds bool
          */
-        [[nodiscard]] bool is_boolean() const noexcept { return m_type == T_Bool; }
+        [[nodiscard]] bool is_boolean() const noexcept { return m_type == Type::Boolean; }
 
         /**
          * @brief true if holds int64
          */
-        [[nodiscard]] bool is_int() const noexcept { return m_type == T_Int; }
+        [[nodiscard]] bool is_int() const noexcept { return m_type == Type::Integer; }
 
         /**
          * @brief true if holds double
          */
-        [[nodiscard]] bool is_float() const noexcept { return m_type == T_Float; }
+        [[nodiscard]] bool is_float() const noexcept { return m_type == Type::Floating; }
 
         /**
-         * @brief true if variant is a number (int or float)
+         * @brief true if holds a number (int or float)
          */
         [[nodiscard]] bool is_number() const noexcept { return is_int() || is_float(); }
 
         /**
          * @brief true if holds a string (borrowed or owned)
          */
-        [[nodiscard]] bool is_string() const noexcept { return m_type == T_StrView || m_type == T_StrOwned; }
+        [[nodiscard]] bool is_string() const noexcept { return m_type == Type::StringView || m_type == Type::StringOwned; }
 
         /**
          * @brief true if holds Array
          */
-        [[nodiscard]] bool is_array() const noexcept { return m_type == T_Array; }
+        [[nodiscard]] bool is_array() const noexcept { return m_type == Type::ArrayType; }
 
         /**
          * @brief true if holds Object
          */
-        [[nodiscard]] bool is_object() const noexcept { return m_type == T_Object; }
+        [[nodiscard]] bool is_object() const noexcept { return m_type == Type::ObjectType; }
         /**@}*/
 
     public:
@@ -467,42 +480,42 @@ namespace pjh::json
         /**
          * @brief Get bool reference
          */
-        [[nodiscard]] bool &as_boolean() { return m_data.b_val; }
+        [[nodiscard]] bool &as_boolean() { return m_data.boolean; }
         /**
          * @brief Get const bool reference
          */
-        [[nodiscard]] const bool &as_boolean() const { return m_data.b_val; }
+        [[nodiscard]] const bool &as_boolean() const { return m_data.boolean; }
 
         /**
          * @brief Get int64 reference
          */
-        [[nodiscard]] int64_t &as_int() { return m_data.i_val; }
+        [[nodiscard]] int64_t &as_int() { return m_data.integer; }
         /**
          * @brief Get const int64 reference
          */
-        [[nodiscard]] const int64_t &as_int() const { return m_data.i_val; }
+        [[nodiscard]] const int64_t &as_int() const { return m_data.integer; }
 
         /**
          * @brief Get double reference
          */
-        [[nodiscard]] double &as_float() { return m_data.f_val; }
+        [[nodiscard]] double &as_float() { return m_data.floating; }
         /**
          * @brief Get const double reference
          */
-        [[nodiscard]] const double &as_float() const { return m_data.f_val; }
+        [[nodiscard]] const double &as_float() const { return m_data.floating; }
 
         /**
          * @brief Get string view.
          *
-         * For T_StrView, returns a view of the inline {ptr, len} pair.
-         * For T_StrOwned, returns a view of the heap-allocated pmr::string.
+         * For StringView, returns a view of the inline {ptr, len} pair.
+         * For StringOwned, returns a view of the heap-allocated pmr::string.
          *
          * @return View of the string content
          */
         [[nodiscard]] std::string_view as_string() const
         {
-            if (m_type == T_StrView)
-                return std::string_view(m_data.sv.data, m_data.sv.length);
+            if (m_type == Type::StringView)
+                return std::string_view(m_data.str_view.data, m_data.str_view.length);
             return *static_cast<std::pmr::string *>(m_data.heap);
         }
 
