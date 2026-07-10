@@ -67,7 +67,9 @@ void test_dump_escaping()
     assert(sv(out) == R"("line1\nline2\t\"q\"\\end")");
 
     // control char -> \u00XX (0x01); build directly (raw ctrl is invalid JSON input)
-    Json ctrl = std::string_view("a\x01" "b", 3);
+    Json ctrl = std::string_view("a\x01"
+                                 "b",
+                                 3);
     auto out2 = dump(ctrl);
     assert(sv(out2) == R"("a\u0001b")");
 
@@ -114,7 +116,7 @@ void test_prettify()
 {
     std::cout << "Prettify test started." << std::endl;
 
-    auto out = prettify(R"({"a":[1,2]})", 2);
+    auto out = prettify(R"({"a":[1,2]})", {.pretty = true, .indent = 2});
     const char *expected =
         "{\n"
         "  \"a\": [\n"

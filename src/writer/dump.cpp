@@ -227,10 +227,10 @@ namespace pjh::json
     /*
      * Prettify: parse then dump with pretty=true
      */
-    std::pmr::string prettify(std::string_view json, uint8_t indent,
+    std::pmr::string prettify(std::string_view json, const DumpOptions &opts,
                               std::pmr::memory_resource *res)
     {
         Document doc = parse_copy(json);
-        return dump(doc.root(), DumpOptions{.pretty = true, .indent = indent}, res);
+        return dump(doc.root(), opts, res);
     }
 }

@@ -111,17 +111,17 @@ namespace pjh::json
     /** @name Prettify (parse + dump with pretty print) */
     /**@{*/
     /**
-     * @brief Parse JSON string and re-serialize with indentation
-     * @param json   Raw JSON text
-     * @param indent Indentation depth (default 2)
-     * @param res    Memory resource (default: global config)
-     * @return Pretty-printed JSON string
+     * @brief Parse JSON string and re-serialize with given options
+     * @param json Raw JSON text
+     * @param opts Formatting options (pretty=true, indent=2 by default)
+     * @param res  Memory resource (default: global config)
+     * @return Serialized JSON string with specified formatting
      * @throws ParseError if input is invalid JSON
      * @throws JsonError if value contains non-finite double
      */
     [[nodiscard]] std::pmr::string prettify(
         std::string_view json,
-        uint8_t indent = 2,
+        const DumpOptions &opts = {.pretty = true, .indent = 2},
         std::pmr::memory_resource *res = Config::instance().resource());
     /**@}*/
 

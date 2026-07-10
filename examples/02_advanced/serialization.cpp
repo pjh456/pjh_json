@@ -25,7 +25,7 @@ int main()
               << pjh::json::dump_jsonl(arr) << "\n";
 
     // Prettify (parse + re-serialize)
-    auto pretty = pjh::json::prettify(json, 2);
+    auto pretty = pjh::json::prettify(json, {.pretty = true, .indent = 2});
     std::cout << "prettify:\n"
               << pretty << "\n";
 }
