@@ -44,7 +44,7 @@ namespace pjh::json
             out = parse_number();
             return;
         default:
-            throw ParseError("Unexpected character");
+            throw_error("Unexpected character");
         }
     }
 
@@ -85,10 +85,10 @@ namespace pjh::json
             return parse_number();
         case '\0':
             if (m_curr >= m_end)
-                throw ParseError("Unexpected end of input");
+                throw_error("Unexpected end of input");
             [[fallthrough]];
         default:
-            throw ParseError("Unexpected character parsing value");
+            throw_error("Unexpected character parsing value");
         }
     }
 }

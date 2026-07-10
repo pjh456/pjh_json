@@ -24,7 +24,7 @@ namespace pjh::json
     String Parser::parse_string()
     {
         if (m_curr >= m_end || *m_curr != '"')
-            throw ParseError("Expected '\"'");
+            throw_error("Expected '\"'");
         ++m_curr;
 
         const char *start = m_curr;
@@ -69,9 +69,9 @@ namespace pjh::json
                 else
                 {
                     if (m_curr >= m_end)
-                        throw ParseError("Unterminated string");
+                        throw_error("Unterminated string");
                     else
-                        throw ParseError("Unescaped control character in string");
+                        throw_error("Unescaped control character in string");
                 }
             }
             else
@@ -94,7 +94,7 @@ namespace pjh::json
             }
             else if (static_cast<uint8_t>(*m_curr) < 0x20)
             {
-                throw ParseError("Unescaped control character in string");
+                throw_error("Unescaped control character in string");
             }
             else
             {

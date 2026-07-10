@@ -16,7 +16,8 @@ namespace pjh::json
         std::pmr::unordered_set<std::string_view> &seen)
     {
         if (!seen.insert(key).second)
-            throw ParseError("Duplicate key in object");
+            throw ParseError(
+                std::string("Duplicate key \"") + std::string(key) + "\" in object");
     }
 
     /*
@@ -62,7 +63,7 @@ namespace pjh::json
             // Parse key
             skip_whitespace();
             if (*m_curr != '"')
-                throw ParseError("Expected string key in object");
+                throw_error("Expected string key in object");
             auto key = parse_string();
             if (seen)
                 check_duplicate_key(key, *seen);
@@ -70,7 +71,7 @@ namespace pjh::json
             // Parse colon separator
             skip_whitespace();
             if (*m_curr != ':')
-                throw ParseError("Expected ':' in object");
+                throw_error("Expected ':' in object");
             ++m_curr;
 
             // Parse value
@@ -80,7 +81,7 @@ namespace pjh::json
             // Check for closing brace or comma
             skip_whitespace();
             if (m_curr >= m_end)
-                throw ParseError("Unexpected end of object");
+                throw_error("Unexpected end of object");
             if (*m_curr == '}')
             {
                 ++m_curr;
@@ -90,7 +91,7 @@ namespace pjh::json
             if (*m_curr == ',')
                 ++m_curr;
             else
-                throw ParseError("Expected ',' or '}' in object");
+                throw_error("Expected ',' or '}' in object");
         }
     }
 }

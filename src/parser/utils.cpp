@@ -66,7 +66,7 @@ namespace pjh::json
             else if (c >= 'A' && c <= 'F')
                 code |= (c - 'A' + 10);
             else
-                throw ParseError("Invalid hex digit in unicode escape");
+                throw_error("Invalid hex digit in unicode escape");
         }
         return code;
     }
@@ -161,16 +161,16 @@ namespace pjh::json
                     if (cp2 >= 0xDC00 && cp2 <= 0xDFFF)
                         cp = 0x10000 + (((cp - 0xD800) << 10) | (cp2 - 0xDC00));
                     else
-                        throw ParseError("Invalid surrogate pair");
+                        parser.throw_error("Invalid surrogate pair");
                 }
                 else
-                    throw ParseError("Expected low surrogate");
+                    parser.throw_error("Expected low surrogate");
             }
             encode_utf8(cp, dst);
             return;
         }
         default:
-            throw ParseError("Invalid escape character");
+            parser.throw_error("Invalid escape character");
         }
         ++m_curr;
     }

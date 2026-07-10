@@ -46,7 +46,7 @@ namespace pjh::json
             if (*m_curr == ',')
                 ++m_curr;
             else
-                throw ParseError("Expected ',' or ']' in array");
+                throw_error("Expected ',' or ']' in array");
         }
     }
 }

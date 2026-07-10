@@ -24,10 +24,20 @@ namespace pjh::json
     class Parser
     {
     private:
+        const char *m_begin;        // Start of input buffer (for position reporting)
         const char *m_curr;         // Current parse position
         const char *m_end;          // End of input data
         std::pmr::memory_resource *m_resource;  // Allocator for parsed values
         bool m_assume_padded;       // If true, caller guarantees 64 trailing NUL bytes
+
+        [[noreturn]] void throw_error(const char *msg) const
+        {
+            auto off = static_cast<size_t>(m_curr - m_begin);
+            throw ParseError(
+                std::string(msg) + " at offset " + std::to_string(off));
+        }
+
+        friend void handle_escape(char *&dst, const char *&m_curr, Parser &parser);
 
     public:
         /**
@@ -42,7 +52,8 @@ namespace pjh::json
             std::string_view json,
             std::pmr::memory_resource *res = Config::instance().resource(),
             bool assume_padded = false)
-            : m_curr(json.data()),
+            : m_begin(json.data()),
+              m_curr(json.data()),
               m_end(json.data() + json.size()),
               m_resource(res),
               m_assume_padded(assume_padded) {}

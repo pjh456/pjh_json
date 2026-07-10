@@ -55,11 +55,13 @@ namespace pjh::json
     Json Parser::parse()
     {
         if (!m_assume_padded)
-            throw ParseError("Parser requires 64-byte '\\0' padding; use parse_copy/parse_file/parse_in_situ");
+            throw ParseError(
+                "Parser requires 64-byte '\\0' padding;"
+                " use parse_copy/parse_file/parse_in_situ");
         Json result = parse_value();
         skip_whitespace();
         if (m_curr < m_end)
-            throw ParseError("Extra characters after complete JSON value");
+            throw_error("Extra characters after complete JSON value");
         return result;
     }
 
