@@ -55,6 +55,12 @@ if(PJH_JSON_ENABLE_OPTIMIZATIONS)
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
         target_compile_options(pjh_json PUBLIC /O2 /arch:AVX2 /fp:fast)
     endif()
+
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT _ipo_supported LANGUAGES CXX)
+    if(_ipo_supported)
+        set_property(TARGET pjh_json PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    endif()
 endif()
 
 if(MSVC)
