@@ -1,19 +1,19 @@
-file(GLOB TEST_SOURCES CONFIGURE_DEPENDS
-    *.cpp
+set(DOCTEST_WITH_MAIN_IN_STATIC_LIB OFF CACHE BOOL "" FORCE)
+add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/doctest ${CMAKE_BINARY_DIR}/doctest)
+
+set(PJH_JSON_TEST_SOURCES
+    test_main.cpp
+    config_document.cpp
+    constexpr_json_test.cpp
+    json_parser.cpp
+    json_types.cpp
+    json_writer.cpp
+    literal_test.cpp
+    read_file.cpp
 )
 
-foreach(test_file ${TEST_SOURCES})
-    get_filename_component(test_name ${test_file} NAME_WE)
+add_executable(pjh_json_tests ${PJH_JSON_TEST_SOURCES})
+target_link_libraries(pjh_json_tests PRIVATE pjh_json doctest)
 
-    add_executable(${test_name} ${test_file})
-
-    target_link_libraries(${test_name}
-        PRIVATE
-        pjh::json
-    )
-
-    add_test(
-        NAME ${test_name}
-        COMMAND ${test_name}
-    )
-endforeach()
+include(${CMAKE_SOURCE_DIR}/thirdparty/doctest/scripts/cmake/doctest.cmake)
+doctest_discover_tests(pjh_json_tests)
