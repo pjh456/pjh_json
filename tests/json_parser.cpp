@@ -160,6 +160,8 @@ void test_parse_errors()
 {
     std::cout << "Parser Error Handling test started." << std::endl;
 
+    Config::instance().set_strict_duplicate_keys(true);
+
     // 辅助 lambda 检查是否抛出异常
     auto expect_throw = [](std::string_view invalid_json)
     {
