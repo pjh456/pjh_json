@@ -14,7 +14,7 @@ SIMD-accelerated C++20 JSON parser. Custom tagged-union `Json` type (24 bytes), 
 * **Serialization**: `dump` (compact/pretty), `dump_jsonl`, `prettify`
 * **Safe access**: `try_as_int()`, `try_as_string()`, `try_as_array()`, etc. -- returns `nullopt` on type mismatch
 * **Builder API**: `Array::of(...)`, `Object::of(...)` for in-code construction
-* **Compile-time construction**: `constexpr` scalars and `String` views; `consteval` array/object factories with runtime bridge. *Array/Object bridges copy into PMR — not zero-cost.*
+* **Compile-time JSON**: `ConstJson::of()` builds nested JSON trees at compile time via template type encoding. `ConstJson::parse()` validates JSON strings at compile time. No heap allocation — all data lives inline in `std::tuple`.
 
 ## Example
 
@@ -44,34 +44,55 @@ std::pmr::string pretty  = dump(doc, DumpOptions{.pretty = true, .indent = 2});
 dump_file("out.json", doc.root());
 ```
 
-### Compile-time construction
+### Compile-time JSON construction
 
 ```cpp
-#include "pjh_json/json.hpp"
-#include "pjh_json/document.hpp"   // literal factories & bridges
+#include "pjh_json/json_constexpr.hpp"
 
 using namespace pjh::json;
 
-// Scalars and strings are zero-cost — constructed entirely at compile time
-constexpr Json count = int64_t(42);
-constexpr Json label = std::string_view("hello");
-constexpr String key   = "name";
-static_assert(count.is_int());
-static_assert(label == std::string_view("hello"));
+// --- scalars (constexpr) ---
+constexpr auto n = to_const_json(42);
+static_assert(n.v == 42);
+Json jn = to_runtime(n);  // → Json(42)
 
-// Arrays/objects: compile-time factory + runtime bridge (copies into PMR)
-auto arr = array_from_literal(
-    json_array_literal(1, 2, std::string_view("three"), false, nullptr));
+// --- arrays ---
+auto arr = ConstJson::of(1, 2.5, std::string_view("hello"), true, nullptr);
+Json jarr = arr.to_runtime();  // → [1,2.5,"hello",true,null]
 
-auto obj = object_from_literal(std::array{
-    kv("name", std::string_view("alice")),
-    kv("age", int64_t(30)),
-    kv("active", true),
-});
+// --- objects ---
+auto obj = ConstJson::of(
+    kv("name",  std::string_view("alice")),
+    kv("age",   int64_t(30)),
+    kv("score", 99.5),
+    kv("active", true)
+);
+Json jobj = obj.to_runtime();
 
-std::pmr::string out = dump(Json(std::move(arr)));
-// arr is [1,2,"three",false,null]
+// --- nesting (deeply recursive, all inline) ---
+auto root = ConstJson::of(
+    kv("user", ConstJson::of(
+        kv("id",   42),
+        kv("tags", ConstJson::of("admin", "dev"))
+    ))
+);
+Json nested = root.to_runtime();
+// → {"user":{"id":42,"tags":["admin","dev"]}}
 ```
+
+### Compile-time JSON validation
+
+```cpp
+// Validates at compile time — invalid JSON is a hard error
+constexpr auto pr = ConstJson::parse(R"({"port":8080,"debug":false})");
+static_assert(pr.valid);
+
+// Build a Document from validated source at runtime (no re-validation)
+auto doc = pr.to_document();
+auto port = doc.root()["port"].as_int();  // 8080
+```
+
+> **How it works**: `ConstJson::of()` encodes the entire JSON structure as C++ template types. `ConstJson::of(1, 2, 3)` produces `ConstJsonArray<ConstJsonInt, ConstJsonInt, ConstJsonInt>` — each element's type lives in the template parameter pack. Nested containers are embedded in `std::tuple`, so pointers never escape and all data lives on the stack. `to_runtime()` recursively walks the type tree and copies into PMR-backed `Json`. Pure C++20 — no `std::vector`, no heap allocation, no compiler non-transient constexpr support required.
 
 ## Build
 
