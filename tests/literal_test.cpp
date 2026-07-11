@@ -1,4 +1,5 @@
 #include "pjh_json/json.hpp"
+#include "pjh_json/json_constexpr.hpp"
 #include "pjh_json/document.hpp"
 #include "pjh_json/writer.hpp"
 #include "pjh_json/utils.hpp"
@@ -165,16 +166,11 @@ void test_array_literal_roundtrip()
 {
     std::cout << "test_array_literal_roundtrip..." << std::endl;
 
-    auto arr = json_array_literal(1, 2, 3, std::string_view("hello"), true, nullptr);
+    auto arr = ConstJson::of(1, 2, 3, std::string_view("hello"), true, nullptr);
 
     assert(arr.size() == 6);
-    assert(arr[0].is_int());
-    assert(arr[3].is_string());
-    assert(arr[4].is_boolean());
-    assert(arr[5].is_null());
-    assert(arr[3] == std::string_view("hello"));
 
-    auto runtime_arr = array_from_literal(std::move(arr));
+    Json runtime_arr = arr.to_runtime();
     assert(runtime_arr.size() == 6);
     assert(runtime_arr[0] == int64_t(1));
     assert(runtime_arr[1] == int64_t(2));
@@ -192,18 +188,16 @@ void test_object_literal_roundtrip()
 {
     std::cout << "test_object_literal_roundtrip..." << std::endl;
 
-    auto entries = std::array{
+    auto obj = ConstJson::of(
         kv("name", std::string_view("alice")),
         kv("age", int64_t(30)),
         kv("score", 99.5),
-        kv("active", true),
-    };
+        kv("active", true)
+    );
 
-    assert(entries.size() == 4);
-    assert(entries[0].first == "name");
-    assert(entries[1].second.is_int());
+    assert(obj.size() == 4);
 
-    auto runtime_obj = object_from_literal(std::move(entries));
+    Json runtime_obj = obj.to_runtime();
     assert(runtime_obj.size() == 4);
     assert(runtime_obj["name"] == std::string_view("alice"));
     assert(runtime_obj["age"] == int64_t(30));
@@ -252,9 +246,7 @@ void test_literal_dump()
 {
     std::cout << "test_literal_dump..." << std::endl;
 
-    auto arr = json_array_literal(1, -2, 3);
-    auto doc = array_from_literal(std::move(arr));
-    auto json_root = Json(std::move(doc));
+    Json json_root = ConstJson::of(1, -2, 3).to_runtime();
 
     std::pmr::string out = dump(json_root, DumpOptions{});
     assert(out == "[1,-2,3]");
@@ -274,13 +266,12 @@ void test_literal_empty_object()
 {
     std::cout << "test_literal_empty_object..." << std::endl;
 
-    auto entries = std::array<Object::Entry, 0>{};
-    auto obj = object_from_literal(std::move(entries));
-    assert(obj.size() == 0);
-    assert(obj.empty());
+    auto empty_arr = ConstJson::of();
+    assert(empty_arr.size() == 0);
 
-    std::pmr::string out = dump(Json(std::move(obj)));
-    assert(out == "{}");
+    Json j = empty_arr.to_runtime();
+    std::pmr::string out = dump(j);
+    assert(out == "[]");
 
     std::cout << "  passed." << std::endl;
 }

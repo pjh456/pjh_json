@@ -6,6 +6,8 @@
 namespace pjh::json
 {
     class Json;
+    struct ConstJson;
+    struct ConstEntry;
 }
 
 #endif // INCLUDE_PJH_JSON_FWD_HPP
