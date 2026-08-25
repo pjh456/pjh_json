@@ -21,7 +21,9 @@ set(PJH_JSON_PGO OFF CACHE STRING "PGO mode: OFF, GENERATE, or USE")
 # dependency
 # -------------------------
 set(XSIMD_SKIP_INSTALL ON CACHE BOOL "Skip xsimd install" FORCE)
-add_subdirectory(thirdparty/xsimd)
+if(NOT TARGET xsimd)
+    add_subdirectory(thirdparty/xsimd)
+endif()
 
 # -------------------------
 # source files
@@ -45,7 +47,8 @@ target_include_directories(pjh_json
     $<INSTALL_INTERFACE:include>
 )
 
-target_compile_features(pjh_json PUBLIC cxx_std_20)
+set_target_properties(pjh_json PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+target_compile_options(pjh_json PRIVATE -std=c++20)
 
 # -------------------------
 # Compiler Optimizations
