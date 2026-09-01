@@ -8,6 +8,9 @@ project(
 # export cmake compile commands
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
 # -------------------------
 # option
 # -------------------------
@@ -44,7 +47,7 @@ target_include_directories(pjh_json
     PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/xsimd/include>
-    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 set_target_properties(pjh_json PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
@@ -105,6 +108,30 @@ target_link_libraries(pjh_json
     PUBLIC
     xsimd
 )
+
+# -------------------------
+# install / export
+# -------------------------
+set(pjh_json_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/cmake/pjh_json)
+
+install(TARGETS pjh_json xsimd EXPORT pjh_jsonTargets)
+install(EXPORT pjh_jsonTargets
+    FILE pjh_jsonTargets.cmake
+    DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY thirdparty/xsimd/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+configure_package_config_file(cmake/pjh_jsonConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfig.cmake
+    INSTALL_DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfigVersion.cmake
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion)
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfig.cmake
+    ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfigVersion.cmake
+    DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
 
 # -------------------------
 # tests/examples
