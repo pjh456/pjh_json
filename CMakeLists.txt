@@ -67,6 +67,17 @@ if(PJH_JSON_ENABLE_OPTIMIZATIONS)
     check_ipo_supported(RESULT _ipo_supported LANGUAGES CXX)
     if(_ipo_supported)
         set_property(TARGET pjh_json PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        # INTERPROCEDURAL_OPTIMIZATION 只作用于本目标自身的编译/链接，
+        # 不会把 LTO 链接选项传播给消费者。若不加 INTERFACE 链接选项，
+        # 消费者的链接命令将缺少 -flto，GNU ld 遇到静态库中的 LLVM
+        # bitcode 目标会报 "file format not recognized"。
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            target_link_options(pjh_json INTERFACE -flto=thin)
+        elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+            target_link_options(pjh_json INTERFACE -flto)
+        elseif(MSVC)
+            target_link_options(pjh_json INTERFACE /LTCG)
+        endif()
     endif()
 endif()
 
