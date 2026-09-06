@@ -57,6 +57,85 @@ namespace pjh::json
         return *this;
     }
 
+    // --- as_variant ---
+
+    /*
+     * Visitor dispatch: 8-way switch over m_type into a variant of
+     * std::reference_wrapper payload aliases.
+     *
+     * 1. Raw references are not valid variant alternatives
+     *    ([variant.requirements]: non-array object types only); the
+     *    reference_wrapper<T> spellings carry the same aliasing semantics
+     *    (extract the referent with .get()).
+     * 2. StringView and StringOwned both yield std::string_view (the
+     *    user-facing "string" is one type, same as as_string()). The two
+     *    case labels stay stacked — 8-way = every tag covered, not
+     *    case-label count (clone() shape, :83-84).
+     * 3. The alternatives alias *this — the returned variant is valid only
+     *    while *this is alive and unmutated (doxygen @warning).
+     * 4. Exhaustive case list; the trailing return is unreachable
+     *    (clone() idiom, :111).
+     */
+    std::variant<std::monostate,
+                 std::reference_wrapper<const bool>,
+                 std::reference_wrapper<const int64_t>,
+                 std::reference_wrapper<const double>,
+                 std::string_view,
+                 std::reference_wrapper<const Array>,
+                 std::reference_wrapper<const Object>>
+    Json::as_variant() const noexcept
+    {
+        switch (m_type)
+        {
+        case Type::Null:
+            return std::monostate{};
+        case Type::Boolean:
+            return m_data.boolean;
+        case Type::Integer:
+            return m_data.integer;
+        case Type::Floating:
+            return m_data.floating;
+        case Type::StringView:
+        case Type::StringOwned:
+            return as_string();
+        case Type::ArrayType:
+            return *static_cast<const Array *>(m_data.heap);
+        case Type::ObjectType:
+            return *static_cast<const Object *>(m_data.heap);
+        }
+        return std::monostate{};
+    }
+
+    std::variant<std::monostate,
+                 std::reference_wrapper<bool>,
+                 std::reference_wrapper<int64_t>,
+                 std::reference_wrapper<double>,
+                 std::string_view,
+                 std::reference_wrapper<Array>,
+                 std::reference_wrapper<Object>>
+    Json::as_variant() noexcept
+    {
+        switch (m_type)
+        {
+        case Type::Null:
+            return std::monostate{};
+        case Type::Boolean:
+            return m_data.boolean;
+        case Type::Integer:
+            return m_data.integer;
+        case Type::Floating:
+            return m_data.floating;
+        case Type::StringView:
+        case Type::StringOwned:
+            return as_string();
+        case Type::ArrayType:
+            return *static_cast<Array *>(m_data.heap);
+        case Type::ObjectType:
+            return *static_cast<Object *>(m_data.heap);
+        }
+        return std::monostate{};
+    }
+
     // --- clone ---
 
     /*

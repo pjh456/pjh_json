@@ -5,6 +5,8 @@
 #include <pjh_json/writer.hpp>
 #include <limits>
 #include <memory_resource>
+#include <functional>
+#include <variant>
 
 using namespace pjh::json;
 
@@ -1149,4 +1151,269 @@ TEST_CASE("Json: keys()/values() dispatch") {
         ++v;
     }
     REQUIRE(v == 3);
+}
+
+// --- task 20: visit / as_variant (8-way tag dispatch, v2 wrapper payload) ---
+// Payload: std::variant over std::reference_wrapper<T> alternatives
+// (raw references are not valid variant alternatives —
+// [variant.requirements]). Extract the referent with .get().
+
+TEST_CASE("Json: visit 8-way dispatch") {
+    // 8 slots = the 8 Type tags exactly once (task-19 make_slots: slot
+    // 0 = Null, 1 = Boolean, 2 = Integer, 3 = Floating, 4 = StringView,
+    // 5 = StringOwned, 6 = Array, 7 = Object).
+    Array slots = make_slots();
+    // visit reaches exactly the expected alternative per tag (8 case hits
+    // = the 8-way coverage pin; the const overload is exercised here).
+    const char *expected[8] = {"null", "bool", "int", "double", "string",
+                               "string", "array", "object"};
+    for (size_t i = 0; i < slots.size(); ++i)
+    {
+        const Json &j = slots[i];
+        REQUIRE(j.visit([](auto &&v) -> const char *
+        {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::same_as<T, std::monostate>)
+                return "null";
+            else if constexpr (std::same_as<T, std::reference_wrapper<const bool>>)
+                return "bool";
+            else if constexpr (std::same_as<T, std::reference_wrapper<const int64_t>>)
+                return "int";
+            else if constexpr (std::same_as<T, std::reference_wrapper<const double>>)
+                return "double";
+            else if constexpr (std::same_as<T, std::string_view>)
+                return "string";
+            else if constexpr (std::same_as<T, std::reference_wrapper<const Array>>)
+                return "array";
+            else
+                return "object";
+        }) == expected[i]);
+        // Alternative identity + value (the two string tags share the
+        // single std::string_view alternative: 8 tags -> 7 alternatives).
+        const auto v = j.as_variant();
+        switch (i)
+        {
+        case 0:
+            REQUIRE(std::holds_alternative<std::monostate>(v));
+            break;
+        case 1:
+            REQUIRE(std::holds_alternative<std::reference_wrapper<const bool>>(v));
+            REQUIRE(std::get<std::reference_wrapper<const bool>>(v).get());
+            break;
+        case 2:
+            REQUIRE(std::holds_alternative<std::reference_wrapper<const int64_t>>(v));
+            REQUIRE(std::get<std::reference_wrapper<const int64_t>>(v).get() == (int64_t)7);
+            break;
+        case 3:
+            REQUIRE(std::holds_alternative<std::reference_wrapper<const double>>(v));
+            REQUIRE(std::get<std::reference_wrapper<const double>>(v).get() == 1.5);
+            break;
+        case 4:
+        case 5:
+            REQUIRE(std::holds_alternative<std::string_view>(v));
+            REQUIRE(std::get<std::string_view>(v) == "s");
+            break;
+        case 6:
+            REQUIRE(std::holds_alternative<std::reference_wrapper<const Array>>(v));
+            REQUIRE(std::get<std::reference_wrapper<const Array>>(v).get().empty());
+            break;
+        case 7:
+            REQUIRE(std::holds_alternative<std::reference_wrapper<const Object>>(v));
+            REQUIRE(std::get<std::reference_wrapper<const Object>>(v).get().empty());
+            break;
+        }
+    }
+}
+
+TEST_CASE("Json: visit null is monostate") {
+    Json j(nullptr);
+    REQUIRE(std::holds_alternative<std::monostate>(j.as_variant()));
+    // The monostate overload is the one the null tag dispatches to.
+    REQUIRE(j.visit([](auto &&v) -> int
+    {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::same_as<T, std::monostate>)
+            return 42;
+        else
+            return -1;
+    }) == 42);
+}
+
+TEST_CASE("Json: as_variant payload table") {
+    // The 7-alternative spellings, compile-pinned: the 8-tag -> 7-alt
+    // collapse is a language constraint (variant alternatives must be
+    // pairwise distinct non-array object types — raw references rejected,
+    // plan 20 v2 §2.1), not a design choice.
+    using ConstAlt = decltype(std::declval<const Json &>().as_variant());
+    static_assert(std::is_same_v<ConstAlt,
+        std::variant<std::monostate,
+                     std::reference_wrapper<const bool>,
+                     std::reference_wrapper<const int64_t>,
+                     std::reference_wrapper<const double>,
+                     std::string_view,
+                     std::reference_wrapper<const Array>,
+                     std::reference_wrapper<const Object>>>);
+    using NonConstAlt = decltype(std::declval<Json &>().as_variant());
+    static_assert(std::is_same_v<NonConstAlt,
+        std::variant<std::monostate,
+                     std::reference_wrapper<bool>,
+                     std::reference_wrapper<int64_t>,
+                     std::reference_wrapper<double>,
+                     std::string_view,
+                     std::reference_wrapper<Array>,
+                     std::reference_wrapper<Object>>>);
+    // Both overloads noexcept (trivial getter precedent).
+    static_assert(noexcept(std::declval<const Json &>().as_variant()));
+    static_assert(noexcept(std::declval<Json &>().as_variant()));
+}
+
+TEST_CASE("Json: visit non-const mutation") {
+    // int64 patch: 5 -> 7 through the reference_wrapper<int64_t>
+    // alternative (the tag itself can never change — R6 pin).
+    Json i((int64_t)5);
+    i.visit([](auto &&v)
+    {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::same_as<T, std::reference_wrapper<int64_t>>)
+            v.get() = (int64_t)7;
+    });
+    REQUIRE(i.as_int() == (int64_t)7);
+    REQUIRE(i.is_int());
+
+    // bool flip through the reference_wrapper<bool> alternative
+    Json b(true);
+    b.visit([](auto &&v)
+    {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::same_as<T, std::reference_wrapper<bool>>)
+            v.get() = !v.get();
+    });
+    REQUIRE(b.as_boolean() == false);
+    REQUIRE(b.is_boolean());
+
+    // Array patch: push_back through the reference_wrapper<Array>
+    // alternative
+    Json a(Array::of(Json((int64_t)1)));
+    REQUIRE(a.size() == 1);
+    a.visit([](auto &&v)
+    {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::same_as<T, std::reference_wrapper<Array>>)
+            v.get().push_back(Json((int64_t)2));
+    });
+    REQUIRE(a.size() == 2);
+    REQUIRE(a[1] == (int64_t)2);
+    REQUIRE(a.is_array());
+}
+
+TEST_CASE("Json: visit overload-set visitor") {
+    // The non-generic form of the std::visit protocol: 7-overload struct
+    // over the wrapper/value payload types (lambdas cannot carry
+    // overloads — the doxygen @note). Non-const Json -> non-const
+    // wrappers.
+    struct V
+    {
+        long null = 0, boolean = 0, integer = 0, floating = 0,
+             string = 0, array = 0, object = 0;
+
+        void operator()(std::monostate) { ++null; }
+        void operator()(std::reference_wrapper<bool>) { ++boolean; }
+        void operator()(std::reference_wrapper<int64_t>) { ++integer; }
+        void operator()(std::reference_wrapper<double>) { ++floating; }
+        void operator()(std::string_view) { ++string; }
+        void operator()(std::reference_wrapper<Array>) { ++array; }
+        void operator()(std::reference_wrapper<Object>) { ++object; }
+    };
+
+    V v;
+    Json i((int64_t)7);
+    i.visit(v);
+    REQUIRE(v.integer == 1);
+    REQUIRE(v.null + v.boolean + v.floating + v.string
+            + v.array + v.object == 0);
+
+    Json o(Object{});
+    o.visit(v);
+    REQUIRE(v.object == 1);
+    REQUIRE(v.integer == 1); // untouched by the second visit
+}
+
+// The json.hpp visit() @code block, verbatim at FILE SCOPE: the doxygen
+// example must compile and run (8 values, one per tag) — no rot.
+// RULING (2026-09-06 green-gate stop): the original in-TEST_CASE-body
+// placement of `render` is a nested function definition — ill-formed C++
+// on every host ("function definition is not allowed here"); the
+// doxygen @code block itself shows file scope, so file scope (anonymous
+// namespace, directly above the TEST_CASE, byte-identical body) is the
+// faithful form. Placement fix only: no protocol/payload/doxygen change.
+namespace {
+std::string render(const Json &j)
+{
+        return j.visit([](auto &&v) -> std::string
+        {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::same_as<T, std::monostate>)
+                return "null";
+            else if constexpr (std::same_as<T, std::reference_wrapper<const bool>>)
+                return v.get() ? "true" : "false";
+            else if constexpr (std::same_as<T, std::reference_wrapper<const int64_t>>)
+                return std::to_string(v.get());
+            else if constexpr (std::same_as<T, std::reference_wrapper<const double>>)
+                return std::to_string(v.get());
+            else if constexpr (std::same_as<T, std::string_view>)
+                return std::string(v);
+            else if constexpr (std::same_as<T, std::reference_wrapper<const Array>>)
+                return "[" + std::to_string(v.get().size()) + "]";
+            else
+                return "{" + std::to_string(v.get().size()) + "}";
+        });
+    }
+} // namespace
+
+TEST_CASE("Json: visit doxygen example runs") {
+    REQUIRE(render(Json(nullptr)) == "null");
+    REQUIRE(render(Json(true)) == "true");
+    REQUIRE(render(Json((int64_t)7)) == "7");
+    REQUIRE(render(Json(1.5)) == std::to_string(1.5));
+    REQUIRE(render(Json("hello")) == "hello");
+    REQUIRE(render(Json::own("world")) == "world");
+    REQUIRE(render(Json(Array::of(Json((int64_t)1), Json((int64_t)2)))) == "[2]");
+    // RULING (2026-09-06 third stop, runtime red): the @code example's
+    // Object branch is SIZE-BASED ("{" + to_string(size) + "}") — an
+    // empty Object renders "{0}", not JSON "{}"; the plan family's
+    // example and case-6 expectation never co-executed until this gate
+    // (plan 20 carried both texts; the example is the sacred object,
+    // the pin pins reality — test-side literal only, doxygen untouched).
+    REQUIRE(render(Json(Object{})) == "{0}"); // size-based, not JSON
+}
+
+TEST_CASE("Json: as_variant lifetime window") {
+    // Valid-window pin (plan 20 §5 R1): the variant is used while the
+    // Json — and the borrowed string's source buffer — stay alive. The
+    // StringView alternative is white-box pinned to point AT the source
+    // buffer (data() identity). Dangling is UB: untestable, not pinned.
+    std::string buf = "s";
+    // RULING (2026-09-06 second green-gate stop): the original
+    // `Json j(std::string_view(buf));` is the MOST VEXING PARSE — the
+    // grammar reads it as a function declaration (param
+    // std::string_view named buf), so j.as_variant()/j.visit() fail and
+    // -Wvexing-parse fires; host-independent (clang + g++ repro,
+    // /tmp/opencode/task20-mvp/). Brace form = single-element list-init
+    // into the SAME single-arg ctor, identical overload resolution,
+    // verified 0 errors 0 warnings on both hosts:
+    Json j{std::string_view(buf)};
+    {
+        auto v = j.as_variant(); // variant declared
+        REQUIRE(std::get<std::string_view>(v).data() == buf.data());
+        REQUIRE(std::get<std::string_view>(v) == "s");
+        REQUIRE(j.visit([](auto &&x) -> bool
+        {
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::same_as<T, std::string_view>)
+                return x == "s";
+            else
+                return false;
+        })); // used, Json alive throughout
+    }
+    REQUIRE(j.is_string()); // Json still alive after the window
 }

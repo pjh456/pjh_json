@@ -10,6 +10,7 @@
 #include <memory_resource>
 #include <type_traits>
 #include <utility>
+#include <functional>
 #include <variant>
 #include <concepts>
 #include <new>
@@ -1083,6 +1084,133 @@ namespace pjh::json
          * @return true if holds equal Object
          */
         [[nodiscard]] bool operator==(const Object &val) const;
+        /**@}*/
+
+    public:
+        /** @name Visitor dispatch (8-way over the Type tags) */
+        /**@{*/
+
+        /**
+         * @brief The 8-way tag dispatch as a std::variant of payload aliases.
+         *
+         * Dispatches on m_type over all 8 Type tags; the two string tags
+         * (StringView / StringOwned) share the single std::string_view
+         * alternative, mirroring is_string()/as_string(). Scalar and
+         * container payloads are std::reference_wrapper<T> (a raw reference
+         * is not a valid variant alternative — [variant.requirements]:
+         * alternatives must be non-array object types).
+         *
+         * | m_type      | const payload                      | non-const payload                |
+         * |-------------|------------------------------------|----------------------------------|
+         * | Null        | std::monostate                     | std::monostate                   |
+         * | Boolean     | reference_wrapper<const bool>     | reference_wrapper<bool>         |
+         * | Integer     | reference_wrapper<const int64_t>  | reference_wrapper<int64_t>       |
+         * | Floating    | reference_wrapper<const double>    | reference_wrapper<double>       |
+         * | StringView  | std::string_view                   | std::string_view                |
+         * | StringOwned | std::string_view                   | std::string_view                |
+         * | ArrayType   | reference_wrapper<const Array>     | reference_wrapper<Array>        |
+         * | ObjectType  | reference_wrapper<const Object>    | reference_wrapper<Object>       |
+         *
+         * @return A prvalue variant whose alternatives alias *this. The
+         *         variant is copyable — a copy of the returned variant is
+         *         another alias to the same storage (the wrapper
+         *         alternatives copy the reference, not the referent), not
+         *         a deep copy.
+         * @warning Valid only while *this is alive and unmutated: any
+         *          operator=, move, or destructor call on *this invalidates
+         *          every alias. The string_view alternative additionally
+         *          requires its source buffer to stay alive (same contract
+         *          as as_string()).
+         * @note Strict-by-construction: dispatch is on the tag itself, so
+         *       only the active union member is ever read (no debug_check
+         *       needed — there is nothing to check). The as_* name without
+         *       a debug_check body is a deliberate track deviation (the
+         *       exhaustive tag dispatch reads only the active member).
+         */
+        [[nodiscard]] std::variant<std::monostate,
+                                   std::reference_wrapper<const bool>,
+                                   std::reference_wrapper<const int64_t>,
+                                   std::reference_wrapper<const double>,
+                                   std::string_view,
+                                   std::reference_wrapper<const Array>,
+                                   std::reference_wrapper<const Object>>
+        as_variant() const noexcept;
+
+        /**
+         * @brief Non-const as_variant — the referenced payloads are patchable
+         *        in place (v.get() = ...); the tag itself can never change.
+         *        See the const overload for the table and the lifetime
+         *        contract.
+         */
+        [[nodiscard]] std::variant<std::monostate,
+                                   std::reference_wrapper<bool>,
+                                   std::reference_wrapper<int64_t>,
+                                   std::reference_wrapper<double>,
+                                   std::string_view,
+                                   std::reference_wrapper<Array>,
+                                   std::reference_wrapper<Object>>
+        as_variant() noexcept;
+
+        /**
+         * @brief Visit *this with any callable invocable with each of the
+         *        as_variant() payload types (the std::visit protocol: a
+         *        generic lambda with if-constexpr, or an overload set).
+         *
+         * The payload passed to f is the variant's active alternative:
+         * std::monostate, std::string_view (by value), or
+         * std::reference_wrapper<T> — extract the referent with .get().
+         *
+         * @tparam F Visitor callable type
+         * @param f Visitor (forwarded)
+         * @return Whatever f returns (decltype(auto) propagation)
+         * @note Equivalent to std::visit(std::forward<F>(f), as_variant()).
+         *       Mutating the *referenced* payload through the non-const
+         *       overload is the .get() = ... spelling only
+         *       (reference_wrapper has no operator=(T&) — `v = x` does not
+         *       compile; it is a safe failure, not a silent miss). The tag
+         *       itself can never change. The if-constexpr wrapper spellings
+         *       must match the overload's constness (const visit ->
+         *       reference_wrapper<const T> spellings): a mismatched spelling
+         *       compiles as a no-op, not an error. A 7-parameter non-generic
+         *       lambda cannot work (lambdas have no overloads).
+         * @code
+         * std::string render(const Json &j)
+         * {
+         *     return j.visit([](auto &&v) -> std::string
+         *     {
+         *         using T = std::decay_t<decltype(v)>;
+         *         if constexpr (std::same_as<T, std::monostate>)
+         *             return "null";
+         *         else if constexpr (std::same_as<T, std::reference_wrapper<const bool>>)
+         *             return v.get() ? "true" : "false";
+         *         else if constexpr (std::same_as<T, std::reference_wrapper<const int64_t>>)
+         *             return std::to_string(v.get());
+         *         else if constexpr (std::same_as<T, std::reference_wrapper<const double>>)
+         *             return std::to_string(v.get());
+         *         else if constexpr (std::same_as<T, std::string_view>)
+         *             return std::string(v);
+         *         else if constexpr (std::same_as<T, std::reference_wrapper<const Array>>)
+         *             return "[" + std::to_string(v.get().size()) + "]";
+         *         else
+         *             return "{" + std::to_string(v.get().size()) + "}";
+         *     });
+         * }
+         * @endcode
+         */
+        template <typename F>
+        auto visit(F &&f) const
+        {
+            return std::visit(std::forward<F>(f), as_variant());
+        }
+
+        /**
+         * @brief Non-const visit — see the const overload for the protocol.
+         */
+        template <typename F>
+        auto visit(F &&f)
+        {
+            return std::visit(std::forward<F>(f), as_variant());
+        }
         /**@}*/
     };
 
