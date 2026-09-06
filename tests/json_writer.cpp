@@ -5,6 +5,9 @@
 #include <cstring>
 #include <limits>
 #include <sstream>
+#include <cstdio>
+#include <fstream>
+#include <iterator>
 
 #include <pjh_json/document.hpp>
 #include <pjh_json/writer.hpp>
@@ -158,6 +161,51 @@ TEST_CASE("Writer: dump ostream") {
     std::ostringstream os;
     dump_to(os, d.root());
     REQUIRE(os.str() == R"({"a":1})");
+}
+
+TEST_CASE("Writer: dump_file open failure") {
+    // Parent directory missing -> is_open() false -> JsonError at the open check
+    CHECK_THROWS_WITH(
+        (void)dump_file("pjh_no_such_dir_xyz/out.json", Json(true)),
+        "Failed to open file for writing: pjh_no_such_dir_xyz/out.json");
+}
+
+TEST_CASE("Writer: dump_file round trip") {
+    // Success path: the close() state check must not misfire (R2)
+    const std::string f = "pjh_dump_roundtrip.json";
+    auto d = parse_copy(R"({"a":1,"b":[true,null,"x"]})");
+    dump_file(f, d.root());
+    auto back = parse_file(f);
+    REQUIRE(dump(back.root()) == dump(d.root()));
+    std::remove(f.c_str());
+}
+
+TEST_CASE("Writer: dump_jsonl_file round trip") {
+    // dump_jsonl_file inherits write_file -> close check pinned on success path
+    const std::string f = "pjh_dump_roundtrip.jsonl";
+    auto arr = Array::of(Json(1), Json("x"), Json(true));
+    dump_jsonl_file(f, arr);
+    std::ifstream in(f, std::ios::binary);
+    REQUIRE(in.is_open());
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    REQUIRE(content == "1\n\"x\"\ntrue\n");
+    auto back = parse_jsonl(content);
+    REQUIRE(back.root().size() == 3);
+    std::remove(f.c_str());
+}
+
+TEST_CASE("Writer: dump ostream failure") {
+    // Permanently failing streambuf (empty put area + overflow->eof) so
+    // os.write sets failbit and the stream-state check throws
+    struct FailBuf : std::streambuf
+    {
+        FailBuf() { setp(nullptr, nullptr); }
+        int overflow(int ch) override { (void)ch; return traits_type::eof(); }
+    };
+    FailBuf buf;
+    std::ostream os(&buf);
+    auto d = parse_copy(R"({"a":1})");
+    CHECK_THROWS_WITH((void)dump_to(os, d.root()), "Failed to write to stream");
 }
 
 TEST_CASE("Writer: max depth") {

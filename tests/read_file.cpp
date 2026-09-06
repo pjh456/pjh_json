@@ -41,3 +41,47 @@ TEST_CASE("File: parsing failure") {
         REQUIRE(e.offset() == 0); // context-free: no position
     }
 }
+
+TEST_CASE("File: truncated mid-object") {
+    const std::string f = "pjh_trunc_obj.json";
+    {
+        std::ofstream out(f, std::ios::binary);
+        out << R"({"a": 1)"; // 7 bytes: valid prefix, cut inside the object
+    }
+    try {
+        (void)parse_file(f);
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 7); // "Unexpected end of object" @ content end
+    }
+    std::remove(f.c_str());
+}
+
+TEST_CASE("File: truncated string") {
+    const std::string f = "pjh_trunc_str.json";
+    {
+        std::ofstream out(f, std::ios::binary);
+        out << R"("abc)"; // 4 bytes, no closing quote
+    }
+    try {
+        (void)parse_file(f);
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 4); // "Unterminated string" @ content end
+    }
+    std::remove(f.c_str());
+}
+
+TEST_CASE("File: empty file") {
+    const std::string f = "pjh_empty.json";
+    {
+        std::ofstream out(f, std::ios::binary);
+    }
+    try {
+        (void)parse_file(f);
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 0); // "Unexpected end of input" @ content start
+    }
+    std::remove(f.c_str());
+}

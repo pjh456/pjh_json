@@ -63,18 +63,19 @@ namespace pjh::json
      * @brief Serialize to output stream
      * @param os    Output stream
      * @param value Json tree to serialize
-     * @param opts  Formatting options
-     * @throws JsonError if value contains non-finite double (NaN/Inf)
-     */
-    void dump_to(std::ostream &os, const Json &value, const DumpOptions &opts = {});
+      * @param opts  Formatting options
+      * @throws JsonError if value contains non-finite double (NaN/Inf), or the
+      *                   stream write fails
+      */
+     void dump_to(std::ostream &os, const Json &value, const DumpOptions &opts = {});
 
     /**
      * @brief Serialize and write to file
      * @param path  File path
      * @param value Json tree to serialize
      * @param opts  Formatting options
-     * @throws JsonError if file cannot be opened or written, or value contains
-     *                   non-finite double
+      * @throws JsonError if file cannot be opened, written, or closed, or value
+      *                   contains non-finite double
      */
     void dump_file(std::string_view path, const Json &value, const DumpOptions &opts = {});
     /**@}*/
@@ -102,9 +103,9 @@ namespace pjh::json
     /**
      * @brief Write JSONL to file
      * @param path File path
-     * @param arr  Array of values
-     * @throws JsonError if file cannot be opened or written
-     */
+      * @param arr  Array of values
+      * @throws JsonError if file cannot be opened, written, or closed
+      */
     void dump_jsonl_file(std::string_view path, const Array &arr);
     /**@}*/
 
@@ -139,9 +140,9 @@ namespace pjh::json
     /**
      * @brief Write raw data to file
      * @param path File path
-     * @param data Bytes to write
-     * @throws JsonError if file cannot be opened or written
-     */
+      * @param data Bytes to write
+      * @throws JsonError if file cannot be opened, written, or closed
+      */
     void write_file(std::string_view path, std::string_view data);
     /**@}*/
 }

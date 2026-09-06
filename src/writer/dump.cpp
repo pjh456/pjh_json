@@ -76,6 +76,8 @@ namespace pjh::json
         {
             char buf[24];
             auto [end, ec] = std::to_chars(buf, buf + sizeof(buf), *i);
+            if (ec != std::errc{})
+                throw JsonError("Failed to format integer");
             sink.append(buf, end - buf);
         }
         else if (auto f = value.try_as_float())
@@ -180,6 +182,8 @@ namespace pjh::json
     {
         std::pmr::string out = dump(value, opts);
         os.write(out.data(), static_cast<std::streamsize>(out.size()));
+        if (!os)
+            throw JsonError("Failed to write to stream");
     }
 
     /*
@@ -216,6 +220,9 @@ namespace pjh::json
         file.write(data.data(), static_cast<std::streamsize>(data.size()));
         if (!file)
             throw JsonError("Failed to write file: " + std::string(path));
+        file.close();
+        if (!file)
+            throw JsonError("Failed to close file: " + std::string(path));
     }
 
     /*
