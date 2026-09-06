@@ -191,7 +191,7 @@ TEST_CASE("Parser: strict strings and escapes") {
 
 TEST_CASE("Parser: view") {
     std::string content = R"({"name": "pjh", "items": [1, 2, 3], "active": true})";
-    std::string buf(content.size() + 64, '\0');
+    std::string buf(content.size() + kPaddingWidth, '\0');
     memcpy(buf.data(), content.data(), content.size());
 
     auto doc = parse_view(buf.data(), content.size());
@@ -203,7 +203,7 @@ TEST_CASE("Parser: view") {
     REQUIRE(doc.root()["items"].size() == 3);
 
     std::string esc_content = R"({"msg": "hello\nworld"})";
-    std::string esc_buf(esc_content.size() + 64, '\0');
+    std::string esc_buf(esc_content.size() + kPaddingWidth, '\0');
     memcpy(esc_buf.data(), esc_content.data(), esc_content.size());
 
     auto doc2 = parse_view(esc_buf.data(), esc_content.size());
@@ -422,4 +422,49 @@ TEST_CASE("Parser: duplicate keys last-wins") {
     // round trip: dump emits the single last-wins entry
     auto out = dump(d1.root());
     REQUIRE(out == R"({"a":2})");
+}
+
+TEST_CASE("Parser: in_situ padding") {
+    using std::pmr::get_default_resource;
+
+    auto make_padded = [](char tail)
+    {
+        std::pmr::string buf(get_default_resource());
+        buf.assign(R"({"a":1})");
+        buf.append(kPaddingWidth - 1, '\0');
+        buf.push_back(tail); // '\0' = compliant; 'x' = contract broken
+        return buf;
+    };
+
+    // Positive case: compliant padding parses (parse_file takes the same
+    // path: resize(n, '\0') zero-fills the tail, so the new check must pass)
+    auto doc = parse_in_situ(make_padded('\0'));
+    REQUIRE(doc.root()["a"] == (int64_t)1);
+
+    // size < kPaddingWidth rejected (pre-existing check, pinned)
+    std::pmr::string small(get_default_resource());
+    small.assign("{}", 2);
+    small.append(60, '\0'); // total 62
+    CHECK_THROWS_AS((void)parse_in_situ(std::move(small)), ParseError);
+
+    // Non-NUL tail rejected (NEW check: pre-fix this parsed silently)
+    CHECK_THROWS_AS((void)parse_in_situ(make_padded('x')), ParseError);
+    #ifndef NDEBUG
+    CHECK_THROWS_WITH((void)parse_in_situ(make_padded('x')),
+                      "In-situ buffer padding must be NUL bytes");
+    #endif
+}
+
+TEST_CASE("Parser: padding width contract") {
+    // The documented contract (parser.hpp / document.hpp) says 64 NUL bytes;
+    // pin the public constant so a padding change (task 15: 2x batch) must
+    // update this test and the docs in lockstep.
+    static_assert(kPaddingWidth == 64);
+    // Behavioral side: a view with exactly kPaddingWidth padding works
+    // (regression pin)
+    std::string content = R"([1,2,3])";
+    std::string buf(content.size() + kPaddingWidth, '\0');
+    memcpy(buf.data(), content.data(), content.size());
+    auto doc = parse_view(buf.data(), content.size());
+    REQUIRE(doc.root().size() == 3);
 }

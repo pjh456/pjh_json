@@ -137,13 +137,17 @@ namespace pjh::json
     };
 
     /**
-     * @brief Parse buffer with trailing 64-byte padding (moves buffer ownership)
-     * @param buffer Padded pmr::string (must have 64 extra NUL bytes)
+     * @brief Parse buffer with trailing kPaddingWidth-byte padding
+     *        (moves buffer ownership)
+     * @param buffer Padded pmr::string (must have kPaddingWidth extra NUL
+     *               bytes)
      * @param storage Allocation strategy (default: global config)
      * @return Document owning the parsed tree and buffer
-     * @throws ParseError on invalid JSON
+     * @throws ParseError on invalid JSON, or if the trailing kPaddingWidth
+     *         bytes are not all NUL (runtime-checked)
      * @note buffer is consumed (moved into Document). Strings borrow from it.
-     * @note buffer.size() must be >= 64; the final 64 bytes are NUL sentinels.
+     * @note buffer.size() must be >= kPaddingWidth; the final kPaddingWidth
+     *       bytes are NUL sentinels.
      */
     [[nodiscard]] Document parse_in_situ(
         std::pmr::string &&buffer,
@@ -164,14 +168,17 @@ namespace pjh::json
     /**
      * @brief Parse string view (no copy, caller retains data lifetime)
      * @param data Pointer to JSON text
-     * @param content_len Length of JSON text (data must have 64 extra NUL bytes
-     *                    past content_len)
+     * @param content_len Length of JSON text (data must have kPaddingWidth
+     *                    extra NUL bytes past content_len)
      * @param storage Allocation strategy (default: global config)
      * @return Document with root pointing into caller's memory
      * @throws ParseError on invalid JSON
      * @note Strings in the parsed tree borrow from data. Caller must keep
      *       data alive for the lifetime of Document and all derived Json/Array
      *       /Object/String values.
+     * @note The library cannot verify this padding (reading past content_len
+     *       would itself overread); a violation is UB - use an ASan build in
+     *       development to catch it.
      */
     [[nodiscard]] Document parse_view(
         const char *data, size_t content_len,

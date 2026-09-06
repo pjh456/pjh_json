@@ -42,12 +42,20 @@ namespace pjh::json
         {
             return arena ? arena.get() : std::pmr::new_delete_resource();
         }
+
+        // n + kPaddingWidth must not wrap size_t (pathological ~16 EB inputs).
+        void check_padded_fits(size_t n)
+        {
+            if (n > SIZE_MAX - kPaddingWidth)
+                throw ParseError("Input too large to pad");
+        }
     }
 
     /*
      * Parse a complete JSON value from the padded input.
      *
-     * 1. Verify input has 64-byte NUL padding (SIMD safety).
+     * 1. Reject if the caller did not promise NUL padding (flag only -
+     *    parse() never inspects padding bytes).
      * 2. Parse the top-level value (skips leading whitespace).
      * 3. Skip trailing whitespace.
      * 4. Reject extra characters after the parsed value.
@@ -56,8 +64,8 @@ namespace pjh::json
     {
         if (!m_assume_padded)
             throw ParseError(
-                "Parser requires 64-byte '\\0' padding;"
-                " use parse_copy/parse_file/parse_in_situ");
+                "Parser requires NUL padding (kPaddingWidth trailing"
+                " NUL bytes); use the parse_* entry points");
         Json result = parse_value();
         skip_whitespace();
         if (m_curr < m_end)
@@ -68,8 +76,9 @@ namespace pjh::json
     /*
      * Parse a pre-padded buffer in-place (moves buffer ownership)
      *
-     * 1. Validate buffer has >= 64 bytes (content + padding).
-     * 2. Compute content size (total - 64).
+     * 1. Validate buffer has >= kPaddingWidth bytes (content + padding).
+     * 2. Verify the trailing kPaddingWidth bytes are NUL (contract check);
+     *    compute content size (total - kPaddingWidth).
      * 3. Create arena and parser, then parse.
      * 4. Return Document owning arena, tree, and buffer.
      *
@@ -78,10 +87,22 @@ namespace pjh::json
      */
     Document parse_in_situ(std::pmr::string &&buffer, Storage storage)
     {
-        if (buffer.size() < 64)
+        if (buffer.size() < kPaddingWidth)
             throw ParseError("Buffer too small for in-situ parse");
 
-        size_t size = buffer.size() - 64;
+        // The contract (document.hpp) requires the trailing kPaddingWidth
+        // bytes to be NUL. They are inside the buffer, hence readable:
+        // verify. A non-NUL tail means the caller broke the contract;
+        // without this check the parser would silently read phantom
+        // content.
+        const char *pad = buffer.data() + (buffer.size() - kPaddingWidth);
+        for (size_t i = 0; i < kPaddingWidth; ++i)
+        {
+            if (pad[i] != '\0')
+                throw ParseError("In-situ buffer padding must be NUL bytes");
+        }
+
+        size_t size = buffer.size() - kPaddingWidth;
         size_t block = arena_block_for(size);
         auto arena = Document::make_arena(storage, block, false);
         Parser p(std::string_view(buffer.data(), size), arena_res(arena), true);
@@ -94,7 +115,7 @@ namespace pjh::json
      * Parse a copy of the input (input is padded internally)
      *
      * 1. Create arena.
-     * 2. Allocate a buffer large enough for input + 64 NUL bytes.
+     * 2. Allocate a buffer large enough for input + kPaddingWidth NUL bytes.
      * 3. Copy input into the buffer.
      * 4. Parse from the padded buffer.
      * 5. Return Document owning arena, tree, and buffer copy.
@@ -105,8 +126,10 @@ namespace pjh::json
         auto arena = Document::make_arena(storage, block, false);
         std::pmr::memory_resource *res = arena_res(arena);
 
+        check_padded_fits(json.size());
+
         std::pmr::string buffer(res);
-        buffer.resize(json.size() + 64, '\0');
+        buffer.resize(json.size() + kPaddingWidth, '\0');
         std::memcpy(buffer.data(), json.data(), json.size());
 
         Parser p(std::string_view(buffer.data(), json.size()), res, true);
@@ -152,8 +175,10 @@ namespace pjh::json
         std::pmr::memory_resource *res = arena_res(arena);
 
         // single padded buffer owned by Document; each line borrows into it
+        check_padded_fits(input.size());
+
         std::pmr::string buffer(res);
-        buffer.resize(input.size() + 64, '\0');
+        buffer.resize(input.size() + kPaddingWidth, '\0');
         std::memcpy(buffer.data(), input.data(), input.size());
 
         Array arr(res);
@@ -206,7 +231,7 @@ namespace pjh::json
      * Parse a JSON file
      *
      * 1. Open file in binary mode, seek to end for total size.
-     * 2. Allocate a buffer with 64-byte padding.
+     * 2. Allocate a buffer with kPaddingWidth-byte padding.
      * 3. Read the entire file into the buffer.
      * 4. Delegate to parse_in_situ for parsing.
      */
@@ -222,8 +247,10 @@ namespace pjh::json
             throw ParseError("Failed to get file size: " + path);
         file.seekg(0, std::ios::beg);
 
+        check_padded_fits(static_cast<size_t>(size));
+
         std::pmr::string buffer;
-        buffer.resize(size + 64, '\0');
+        buffer.resize(size + kPaddingWidth, '\0');
 
         if (!file.read(buffer.data(), size))
             throw ParseError("Failed to read file: " + path);

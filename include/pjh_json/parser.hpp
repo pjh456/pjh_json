@@ -17,9 +17,12 @@ namespace pjh::json
      * @brief Recursive-descent JSON parser (requires padded buffer)
      *
      * Uses SIMD (via xsimd) for whitespace skipping and string scanning.
-     * Requires input with 64 trailing NUL bytes for SIMD overread safety.
-     * Use parse_copy(), parse_file(), or parse_in_situ() to create correctly
-     * padded inputs automatically.
+     * The SIMD scan may read up to one batch (kPaddingWidth NUL bytes) past
+     * the content, so the input range must carry that much NUL padding.
+     * parse_copy(), parse_file() and parse_jsonl() pad automatically;
+     * parse_in_situ() and parse_view() require caller-provided padding
+     * (parse_in_situ verifies the tail, parse_view cannot — see
+     * kPaddingWidth).
      */
     class Parser
     {
@@ -28,7 +31,7 @@ namespace pjh::json
         const char *m_curr;         // Current parse position
         const char *m_end;          // End of input data
         std::pmr::memory_resource *m_resource;  // Allocator for parsed values
-        bool m_assume_padded;       // If true, caller guarantees 64 trailing NUL bytes
+        bool m_assume_padded;       // If true, caller guarantees kPaddingWidth trailing NUL bytes
         size_t m_depth = 0;         // Current nesting depth (open containers)
         size_t m_max_depth;         // Captured depth limit (0 = unlimited)
 
@@ -37,9 +40,12 @@ namespace pjh::json
          * @brief Construct parser over a JSON text range
          * @param json Text to parse
          * @param res Allocator for parsed values (default: global config resource)
-         * @param assume_padded If true, caller guarantees 64 trailing NUL bytes
+         * @param assume_padded If true, caller guarantees kPaddingWidth
+         *                      trailing NUL bytes
          * @note If assume_padded is false, parse() will immediately throw ParseError.
-         *       parse_copy/parse_file/parse_in_situ set it to true.
+         *       All five parse_* entry points set it to true:
+         *       parse_copy/parse_file/parse_jsonl over self-padded buffers,
+         *       parse_in_situ/parse_view over caller-padded buffers.
          */
         explicit Parser(
             std::string_view json,

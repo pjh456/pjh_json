@@ -16,7 +16,7 @@ namespace pjh::json
      *    1-byte fast path).
      * 2. SIMD loop: load a batch, mark lanes equal to one of the 4 bytes.
      * 3. Find the first non-WS byte via ctz on the complement mask.
-     * 4. Advance cursor past it and return. The 64-byte NUL padding
+     * 4. Advance cursor past it and return. The kPaddingWidth NUL padding
      *    always stops the loop (NUL is not WS).
      */
     void Parser::skip_whitespace()
@@ -29,6 +29,9 @@ namespace pjh::json
         static_assert(
             batch_type::size <= 64,
             "batch_size too large for uint64_t mask");
+        static_assert(
+            batch_type::size <= kPaddingWidth,
+            "padding must cover one full SIMD batch overread");
 
         auto space = xsimd::broadcast<uint8_t>(0x20);
         auto tab = xsimd::broadcast<uint8_t>(0x09);

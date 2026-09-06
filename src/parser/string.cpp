@@ -34,6 +34,9 @@ namespace pjh::json
         static_assert(
             batch_type::size <= 64,
             "batch_size too large for uint64_t mask");
+        static_assert(
+            batch_type::size <= kPaddingWidth,
+            "padding must cover one full SIMD batch overread");
         auto quote = xsimd::broadcast<uint8_t>('"');
         auto escape = xsimd::broadcast<uint8_t>('\\');
         auto ctrl = xsimd::broadcast<uint8_t>(0x20);
