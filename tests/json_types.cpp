@@ -46,6 +46,21 @@ namespace
         long long m_outstanding = 0;
         size_t m_last_bytes = 0;
     };
+
+    // True iff f() throws TypeError (other exceptions propagate => case fails)
+    template <typename F>
+    bool threw_type_error(F &&f)
+    {
+        try
+        {
+            f();
+        }
+        catch (const TypeError &)
+        {
+            return true;
+        }
+        return false;
+    }
 }
 
 TEST_CASE("Json: simple value") {
@@ -1443,4 +1458,106 @@ TEST_CASE("Json: const array range-for iterates") {
     }
     REQUIRE(n == 3); // pre-fix red: n stays 0 — zero iterations, not a crash
     REQUIRE(ca.begin() != ca.end()); // R2 wall: non-empty => distinct
+}
+
+// --- task 22: as_*_strict (type check throws in both build modes) ---
+
+TEST_CASE("Json: strict accessors match passthrough") {
+    Array slots = make_slots();
+    // Per-family value identity on the match slot (both build modes; the
+    // guard passes on a matching tag, so no gate is needed here).
+    REQUIRE(slots[0].as_null_strict() == nullptr);
+    REQUIRE(slots[1].as_boolean_strict() == true);
+    REQUIRE(slots[2].as_int_strict() == (int64_t)7);
+    REQUIRE(slots[3].as_float_strict() == 1.5);
+    REQUIRE(slots[4].as_string_strict() == "s");
+    REQUIRE(slots[5].as_string_strict() == "s"); // StringOwned arm
+    REQUIRE(slots[6].as_array_strict().size() == 0);
+    REQUIRE(slots[7].as_object_strict().size() == 0);
+
+    // Cross-pin against the as_* fast path (match slots are safe in both
+    // modes: the tag confirms the active slot before any read).
+    REQUIRE(slots[0].as_null() == slots[0].as_null_strict());
+    REQUIRE(slots[1].as_boolean() == slots[1].as_boolean_strict());
+    REQUIRE(slots[2].as_int() == slots[2].as_int_strict());
+    REQUIRE(slots[3].as_float() == slots[3].as_float_strict());
+    REQUIRE(slots[4].as_string() == slots[4].as_string_strict());
+    REQUIRE(slots[5].as_string() == slots[5].as_string_strict());
+    REQUIRE(slots[6].as_array().size() == slots[6].as_array_strict().size());
+    REQUIRE(slots[7].as_object().size() == slots[7].as_object_strict().size());
+
+    // Const-overload callability (compile pin): each const twin resolves on
+    // a const slot — the 7 const overloads (the 5 non-const ones are
+    // exercised by the value pins above; 12 overloads in total).
+    const Json &cj = slots[2];
+    REQUIRE(cj.as_int_strict() == (int64_t)7);
+    const Json &cnull = slots[0];
+    REQUIRE(cnull.as_null_strict() == nullptr);
+    const Json &cbool = slots[1];
+    REQUIRE(cbool.as_boolean_strict() == true);
+    const Json &cfloat = slots[3];
+    REQUIRE(cfloat.as_float_strict() == 1.5);
+    const Json &cstr1 = slots[4];
+    REQUIRE(cstr1.as_string_strict() == "s");
+    const Json &cstr2 = slots[5];
+    REQUIRE(cstr2.as_string_strict() == "s");
+    const Json &carr = slots[6];
+    REQUIRE(carr.as_array_strict().size() == 0);
+    const Json &cobj = slots[7];
+    REQUIRE(cobj.as_object_strict().size() == 0);
+
+    // Non-const reference writability: patch through the strict reference
+    // (size +1, tag unchanged).
+    size_t before = slots[6].size();
+    slots[6].as_array_strict().push_back(Json((int64_t)1));
+    REQUIRE(slots[6].size() == before + 1);
+    REQUIRE(slots[6].is_array());
+}
+
+TEST_CASE("Json: strict accessors throw on mismatch") {
+    Array slots = make_slots();
+
+    // Named worst-class pins: every one of these call sites is exactly the
+    // release wrong-slot-read UB site of the as_* twin (garbage-pointer
+    // deref for array/object, {ptr,len} skew for string, denormal bit
+    // pattern for float) — _strict must THROW, not crash.
+    REQUIRE_THROWS_AS((void)slots[2].as_array_strict(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[3].as_object_strict(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[2].as_string_strict(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[2].as_float_strict(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[4].as_boolean_strict(), TypeError);
+
+    // Consistency law (8 slots x 7 families = 56 pins): is_X false iff
+    // as_X_strict throws — the family self-consistency wall.
+    for (const Json &j : slots)
+    {
+        REQUIRE(j.is_null() == !threw_type_error([&] { (void)j.as_null_strict(); }));
+        REQUIRE(j.is_boolean() == !threw_type_error([&] { (void)j.as_boolean_strict(); }));
+        REQUIRE(j.is_int() == !threw_type_error([&] { (void)j.as_int_strict(); }));
+        REQUIRE(j.is_float() == !threw_type_error([&] { (void)j.as_float_strict(); }));
+        REQUIRE(j.is_string() == !threw_type_error([&] { (void)j.as_string_strict(); }));
+        REQUIRE(j.is_array() == !threw_type_error([&] { (void)j.as_array_strict(); }));
+        REQUIRE(j.is_object() == !threw_type_error([&] { (void)j.as_object_strict(); }));
+    }
+}
+
+TEST_CASE("Json: as_* debug check throws") {
+#ifndef NDEBUG
+    // Debug-only pins (the gate is a UB-avoidance obligation, not a test
+    // split): in debug the as_* fast path checks the tag first
+    // (debug_check_type throws TypeError) and only then reads the slot.
+    // In release (NDEBUG) these same six calls would read an inactive
+    // union member — undefined behavior, the class as_*_strict closes —
+    // so they are deliberately NOT executed under NDEBUG (the ungated
+    // mismatch pins live in "Json: strict accessors throw on mismatch").
+    Array slots = make_slots();
+    REQUIRE_THROWS_AS((void)slots[4].as_boolean(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[3].as_int(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[2].as_float(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[2].as_string(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[2].as_array(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[3].as_object(), TypeError);
+#else
+    // release: fast path unchecked by contract (as_* @note) — no pins
+#endif
 }

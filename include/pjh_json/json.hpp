@@ -510,11 +510,19 @@ namespace pjh::json
 
         /**
          * @brief Get null value
+         * @note Performs no type check in any build mode (returns nullptr for
+         *       any held value) and reads no union member; use
+         *       as_null_strict() for the checked form.
          */
         [[nodiscard]] constexpr std::nullptr_t as_null() const noexcept { return nullptr; }
 
         /**
          * @brief Get bool reference
+         * @note Unchecked fast path: in release builds (NDEBUG) the type check
+         *       is compiled away and a mismatched value reads an inactive union
+         *       member (undefined behavior). Use as_boolean_strict() for a
+         *       check that throws in both modes, or try_as_boolean() for the
+         *       nullopt form.
          */
         [[nodiscard]] bool &as_boolean() PJH_JSON_NOEXCEPT
         {
@@ -523,6 +531,7 @@ namespace pjh::json
         }
         /**
          * @brief Get const bool reference
+         * @note Unchecked like the non-const overload (release: UB on mismatch).
          */
         [[nodiscard]] const bool &as_boolean() const PJH_JSON_NOEXCEPT
         {
@@ -532,6 +541,11 @@ namespace pjh::json
 
         /**
          * @brief Get int64 reference
+         * @note Unchecked fast path: in release builds (NDEBUG) the type check
+         *       is compiled away and a mismatched value reads an inactive union
+         *       member (undefined behavior). Use as_int_strict() for a
+         *       check that throws in both modes, or try_as_int() for the
+         *       nullopt form.
          */
         [[nodiscard]] int64_t &as_int() PJH_JSON_NOEXCEPT
         {
@@ -540,6 +554,7 @@ namespace pjh::json
         }
         /**
          * @brief Get const int64 reference
+         * @note Unchecked like the non-const overload (release: UB on mismatch).
          */
         [[nodiscard]] const int64_t &as_int() const PJH_JSON_NOEXCEPT
         {
@@ -549,6 +564,11 @@ namespace pjh::json
 
         /**
          * @brief Get double reference
+         * @note Unchecked fast path: in release builds (NDEBUG) the type check
+         *       is compiled away and a mismatched value reads an inactive union
+         *       member (undefined behavior). Use as_float_strict() for a
+         *       check that throws in both modes, or try_as_float() for the
+         *       nullopt form.
          */
         [[nodiscard]] double &as_float() PJH_JSON_NOEXCEPT
         {
@@ -557,6 +577,7 @@ namespace pjh::json
         }
         /**
          * @brief Get const double reference
+         * @note Unchecked like the non-const overload (release: UB on mismatch).
          */
         [[nodiscard]] const double &as_float() const PJH_JSON_NOEXCEPT
         {
@@ -571,6 +592,11 @@ namespace pjh::json
          * For StringOwned, returns a view of the heap-allocated pmr::string.
          *
          * @return View of the string content
+         * @note Unchecked fast path: in release builds (NDEBUG) the type check
+         *       is compiled away and a mismatched value reads an inactive union
+         *       member (undefined behavior). Use as_string_strict() for a
+         *       check that throws in both modes, or try_as_string() for the
+         *       nullopt form.
          */
         [[nodiscard]] std::string_view as_string() const PJH_JSON_NOEXCEPT
         {
@@ -582,6 +608,11 @@ namespace pjh::json
 
         /**
          * @brief Get array reference
+         * @note Unchecked fast path: in release builds (NDEBUG) the type check
+         *       is compiled away and a mismatched value reads an inactive union
+         *       member (undefined behavior). Use as_array_strict() for a
+         *       check that throws in both modes, or try_as_array() for the
+         *       nullopt form.
          */
         [[nodiscard]] Array &as_array() PJH_JSON_NOEXCEPT
         {
@@ -590,6 +621,7 @@ namespace pjh::json
         }
         /**
          * @brief Get const array reference
+         * @note Unchecked like the non-const overload (release: UB on mismatch).
          */
         [[nodiscard]] const Array &as_array() const PJH_JSON_NOEXCEPT
         {
@@ -599,6 +631,11 @@ namespace pjh::json
 
         /**
          * @brief Get object reference
+         * @note Unchecked fast path: in release builds (NDEBUG) the type check
+         *       is compiled away and a mismatched value reads an inactive union
+         *       member (undefined behavior). Use as_object_strict() for a
+         *       check that throws in both modes, or try_as_object() for the
+         *       nullopt form.
          */
         [[nodiscard]] Object &as_object() PJH_JSON_NOEXCEPT
         {
@@ -607,10 +644,166 @@ namespace pjh::json
         }
         /**
          * @brief Get const object reference
+         * @note Unchecked like the non-const overload (release: UB on mismatch).
          */
         [[nodiscard]] const Object &as_object() const PJH_JSON_NOEXCEPT
         {
             debug_check_type(m_type, Type::ObjectType, "object");
+            return *static_cast<const Object *>(m_data.heap);
+        }
+        /**@}*/
+
+    public:
+        /**
+         * @name Strict access (type check throws in both build modes)
+         *
+         * Checked twins of as_*: identical return types; the type guard
+         * is active in debug AND release (plain if + throw — no
+         * PJH_JSON_NOEXCEPT, no #ifdef), throwing TypeError on mismatch.
+         * The as_* fast path stays unchecked by design (in release,
+         * you own the tag — see each as_* @note); this family is the
+         * safe API for code that does not. For the nullopt/nullptr
+         * form use try_as_* (already safe in both modes).
+         */
+        /**@{*/
+
+        /**
+         * @brief Checked null access
+         * @throws TypeError if not null (debug AND release)
+         * @note as_null() performs no type check in any build mode and
+         *       reads no union member; this twin adds the check for
+         *       family completeness (not an UB fix).
+         */
+        [[nodiscard]] std::nullptr_t as_null_strict() const
+        {
+            check_type_strict(m_type, Type::Null, "null_strict");
+            return nullptr;
+        }
+
+        /**
+         * @brief Checked bool reference (throws on mismatch, both modes)
+         * @throws TypeError if not Boolean (debug AND release),
+         *         "type mismatch in as_boolean_strict()"
+         * @note Identical to as_boolean() except the guard never
+         *       compiles away.
+         */
+        [[nodiscard]] bool &as_boolean_strict()
+        {
+            check_type_strict(m_type, Type::Boolean, "boolean_strict");
+            return m_data.boolean;
+        }
+        /**
+         * @brief Checked const bool reference
+         * @throws TypeError if not Boolean (debug AND release)
+         */
+        [[nodiscard]] const bool &as_boolean_strict() const
+        {
+            check_type_strict(m_type, Type::Boolean, "boolean_strict");
+            return m_data.boolean;
+        }
+
+        /**
+         * @brief Checked int64 reference (throws on mismatch, both modes)
+         * @throws TypeError if not Integer (debug AND release),
+         *         "type mismatch in as_int_strict()"
+         * @note Identical to as_int() except the guard never compiles away.
+         */
+        [[nodiscard]] int64_t &as_int_strict()
+        {
+            check_type_strict(m_type, Type::Integer, "int_strict");
+            return m_data.integer;
+        }
+        /**
+         * @brief Checked const int64 reference
+         * @throws TypeError if not Integer (debug AND release)
+         */
+        [[nodiscard]] const int64_t &as_int_strict() const
+        {
+            check_type_strict(m_type, Type::Integer, "int_strict");
+            return m_data.integer;
+        }
+
+        /**
+         * @brief Checked double reference (throws on mismatch, both modes)
+         * @throws TypeError if not Floating (debug AND release),
+         *         "type mismatch in as_float_strict()"
+         * @note Identical to as_float() except the guard never compiles away.
+         */
+        [[nodiscard]] double &as_float_strict()
+        {
+            check_type_strict(m_type, Type::Floating, "float_strict");
+            return m_data.floating;
+        }
+        /**
+         * @brief Checked const double reference
+         * @throws TypeError if not Floating (debug AND release)
+         */
+        [[nodiscard]] const double &as_float_strict() const
+        {
+            check_type_strict(m_type, Type::Floating, "float_strict");
+            return m_data.floating;
+        }
+
+        /**
+         * @brief Checked string view (throws on mismatch, both modes)
+         *
+         * For StringView, returns a view of the inline {ptr, len} pair;
+         * for StringOwned, a view of the heap-allocated pmr::string
+         * (same body as as_string(), both tags accepted).
+         *
+         * @return View of the string content
+         * @throws TypeError if not a string (debug AND release),
+         *         "type mismatch in as_string_strict()"
+         * @note Identical to as_string() except the guard never compiles away.
+         */
+        [[nodiscard]] std::string_view as_string_strict() const
+        {
+            check_type_strict2(m_type, Type::StringView, Type::StringOwned,
+                                "string_strict");
+            if (m_type == Type::StringView)
+                return std::string_view(m_data.str_view.data, m_data.str_view.length);
+            return *static_cast<std::pmr::string *>(m_data.heap);
+        }
+
+        /**
+         * @brief Checked array reference (throws on mismatch, both modes)
+         * @throws TypeError if not ArrayType (debug AND release),
+         *         "type mismatch in as_array_strict()"
+         * @note Identical to as_array() except the guard never compiles away.
+         */
+        [[nodiscard]] Array &as_array_strict()
+        {
+            check_type_strict(m_type, Type::ArrayType, "array_strict");
+            return *static_cast<Array *>(m_data.heap);
+        }
+        /**
+         * @brief Checked const array reference
+         * @throws TypeError if not ArrayType (debug AND release)
+         */
+        [[nodiscard]] const Array &as_array_strict() const
+        {
+            check_type_strict(m_type, Type::ArrayType, "array_strict");
+            return *static_cast<const Array *>(m_data.heap);
+        }
+
+        /**
+         * @brief Checked object reference (throws on mismatch, both modes)
+         * @throws TypeError if not ObjectType (debug AND release),
+         *         "type mismatch in as_object_strict()"
+         * @note Identical to as_object() except the guard never compiles away.
+         */
+        [[nodiscard]] Object &as_object_strict()
+        {
+            check_type_strict(m_type, Type::ObjectType, "object_strict");
+            return *static_cast<Object *>(m_data.heap);
+        }
+        /**
+         * @brief Checked const object reference
+         * @throws TypeError if not ObjectType (debug AND release)
+         */
+        [[nodiscard]] const Object &as_object_strict() const
+        {
+            check_type_strict(m_type, Type::ObjectType, "object_strict");
             return *static_cast<const Object *>(m_data.heap);
         }
         /**@}*/
