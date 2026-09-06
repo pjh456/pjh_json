@@ -19,6 +19,12 @@ namespace pjh::json
 {
     class Json;
 
+    // Key/value projection views (defined in json.hpp, after class Json —
+    // the value iterators need the complete Json type).
+    class KeysView;
+    class ValuesView;
+    class ConstValuesView;
+
     /**
      * @brief JSON object type (ordered map of string -> Json)
      *
@@ -283,6 +289,35 @@ namespace pjh::json
          * @throws std::out_of_range if key not found
          */
         const Json &at(std::string_view key) const;
+        /**@}*/
+
+    public:
+        /** @name Key/value projections */
+        /**@{*/
+        /**
+         * @brief The object's keys, in entry (insertion) order
+         * @return Zero-allocation view (a single pointer into the entry
+         *         vector)
+         * @note Read-only keys: the key is lookup identity and has no
+         *       mutation path; for mutable values use values().
+         * @note A duplicate-key overwrite keeps the first occurrence's
+         *       position (last-wins semantics, task 10).
+         * @code
+         * for (std::string_view k : obj.keys())
+         *     log(k);
+         * @endcode
+         */
+        [[nodiscard]] KeysView keys() const noexcept;
+        /**
+         * @brief The object's values (mutable), in entry order
+         * @return Zero-allocation view; the loop variable is a Json &
+         */
+        [[nodiscard]] ValuesView values() noexcept;
+        /**
+         * @brief The object's values (read-only), in entry order
+         * @return Zero-allocation view; the loop variable is a const Json &
+         */
+        [[nodiscard]] ConstValuesView values() const noexcept;
         /**@}*/
 
     public:

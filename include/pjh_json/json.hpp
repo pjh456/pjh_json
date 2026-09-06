@@ -10,6 +10,7 @@
 #include <memory_resource>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <concepts>
 #include <new>
 
@@ -20,6 +21,11 @@
 
 namespace pjh::json
 {
+
+    // Forward declarations for the range-for iterator types. Defined after
+    // class Json (their variant alternatives need the complete Json type).
+    class JsonIterator;
+    class ConstJsonIterator;
 
     /**
      * @brief Core JSON value type — custom tagged union, 24 bytes.
@@ -954,6 +960,81 @@ namespace pjh::json
         /**@}*/
 
     public:
+        /** @name Iteration (range-for) */
+        /**@{*/
+        /**
+         * @brief Iterator over the value's children (range-for support)
+         *
+         * | active tag | loop variable (auto &&e)                    |
+         * |------------|---------------------------------------------|
+         * | ArrayType  | EntryView: e.key = empty view, e.value = element |
+         * | ObjectType | EntryView: e.key = entry key, e.value = entry value |
+         *
+         * @return Iterator at the first child (== end() on an empty container)
+         * @throws TypeError if *this is a scalar (both build modes;
+         *         the at()/operator[] family)
+         * @note The key is read-only: patch values through e.value, never
+         *       keys. For an array element e.key is always the empty view —
+         *       test is_array()/is_object(), not e.key.empty(), to tell an
+         *       element from an empty-string-keyed entry.
+         * @note The loop variable is bound to a per-step prvalue view:
+         *       use auto &&e, auto e, or const auto &e (a plain auto &e
+         *       cannot bind the prvalue yield).
+         * @warning Iterators are invalidated by any storage-changing
+         *          operation on the container (Array push_back/resize/erase/
+         *          clear; Object insert/remove/clear) — the std::vector
+         *          contract. Dereferencing end() is undefined.
+         * @code
+         * auto doc = parse_copy(R"({"nums":[1,2,3]})");
+         * for (auto &&e : doc.root()["nums"])
+         *     e.value = Json(e.value.as_int() * 2);
+         * @endcode
+         */
+        [[nodiscard]] JsonIterator begin();
+        /**
+         * @brief Iterator past the last child — see begin()
+         * @throws TypeError if *this is a scalar
+         */
+        [[nodiscard]] JsonIterator end();
+        /**
+         * @brief Const iterator over the value's children
+         * @return ConstJsonIterator (loop variable: ConstEntryView,
+         *         e.value = const Json &)
+         * @throws TypeError if *this is a scalar
+         */
+        [[nodiscard]] ConstJsonIterator begin() const;
+        /**
+         * @brief Const iterator past the last child — see begin() const
+         * @throws TypeError if *this is a scalar
+         */
+        [[nodiscard]] ConstJsonIterator end() const;
+
+        /**
+         * @brief The object's keys, in entry (insertion) order
+         * @return Zero-allocation view (a single pointer into the entry
+         *         vector)
+         * @throws TypeError if *this is not an Object (both build modes)
+         * @note A duplicate-key overwrite keeps the first occurrence's
+         *       position (last-wins semantics, task 10).
+         * @note size() on a scalar is 1 (cardinality); keys() does not
+         *       follow that contract: a scalar has no children, it throws.
+         */
+        [[nodiscard]] KeysView keys() const;
+        /**
+         * @brief The object's values (mutable), in entry order
+         * @return Zero-allocation view; the loop variable is a Json &
+         * @throws TypeError if *this is not an Object
+         */
+        [[nodiscard]] ValuesView values();
+        /**
+         * @brief The object's values (read-only), in entry order
+         * @return Zero-allocation view; the loop variable is a const Json &
+         * @throws TypeError if *this is not an Object
+         */
+        [[nodiscard]] ConstValuesView values() const;
+        /**@}*/
+
+    public:
         /** @name Comparison */
         /**@{*/
         /**
@@ -1003,6 +1084,254 @@ namespace pjh::json
          */
         [[nodiscard]] bool operator==(const Object &val) const;
         /**@}*/
+    };
+
+    /**
+     * @brief One iteration step of a Json range-for (non-const track).
+     *
+     * key is a read-only view into the owning object's key String (the
+     * empty view for an array element); value references the child Json
+     * in place. A pure projection: owns no state of its own.
+     */
+    struct EntryView
+    {
+        std::string_view key;  ///< empty for an array element
+        Json &value;            ///< the child, in place (patchable)
+    };
+
+    /**
+     * @brief One iteration step of a Json range-for (const track).
+     * Same shape as EntryView with a const value reference.
+     */
+    struct ConstEntryView
+    {
+        std::string_view key;  ///< empty for an array element
+        const Json &value;     ///< the child, read-only
+    };
+
+    /**
+     * @brief Iterator returned by Json::begin()/end() (non-const track).
+     *
+     * Wraps either the Array's vector iterator or the Object's entry
+     * iterator (chosen at construction by Json::begin()); operator*
+     * synthesizes an EntryView (key = the entry's key, or the empty view
+     * for an array element; value = the child, in place).
+     * Designed for range-for only: no iterator_traits typedefs;
+     * std::distance/advance are not supported.
+     */
+    class JsonIterator
+    {
+    public:
+        /**
+         * @brief The child at the cursor (prvalue view into the container)
+         */
+        [[nodiscard]] EntryView operator*() const noexcept
+        {
+            return std::visit(
+                [](auto &it) -> EntryView
+                {
+                    using It = std::decay_t<decltype(it)>;
+                    if constexpr (std::same_as<It, Array::Vec::iterator>)
+                        return EntryView{std::string_view{}, *it};
+                    else
+                        return EntryView{static_cast<std::string_view>(it->first),
+                                          it->second};
+                },
+                m_it);
+        }
+
+        /**
+         * @brief Advance one child (undefined past end)
+         */
+        JsonIterator &operator++() noexcept
+        {
+            std::visit([](auto &it) { ++it; }, m_it);
+            return *this;
+        }
+
+        /**
+         * @brief Iterator equality (same container and same position)
+         */
+        friend bool operator==(const JsonIterator &a, const JsonIterator &b) noexcept
+        {
+            return a.m_it == b.m_it;
+        }
+        friend bool operator!=(const JsonIterator &a, const JsonIterator &b) noexcept
+        {
+            return a.m_it != b.m_it;
+        }
+
+    private:
+        friend class Json;
+        explicit JsonIterator(Array::Vec::iterator it) : m_it(std::move(it)) {}
+        explicit JsonIterator(Object::iterator it) : m_it(std::move(it)) {}
+
+        std::variant<Array::Vec::iterator, Object::iterator> m_it;
+    };
+
+    /**
+     * @brief Iterator returned by Json::begin() const / end() const.
+     * Same mechanism as JsonIterator with a const value reference.
+     */
+    class ConstJsonIterator
+    {
+    public:
+        /**
+         * @brief The child at the cursor (prvalue view into the container)
+         */
+        [[nodiscard]] ConstEntryView operator*() const noexcept
+        {
+            return std::visit(
+                [](auto &it) -> ConstEntryView
+                {
+                    using It = std::decay_t<decltype(it)>;
+                    if constexpr (std::same_as<It, Array::Vec::const_iterator>)
+                        return ConstEntryView{std::string_view{}, *it};
+                    else
+                        return ConstEntryView{static_cast<std::string_view>(it->first),
+                                               it->second};
+                },
+                m_it);
+        }
+
+        /**
+         * @brief Advance one child (undefined past end)
+         */
+        ConstJsonIterator &operator++() noexcept
+        {
+            std::visit([](auto &it) { ++it; }, m_it);
+            return *this;
+        }
+
+        /**
+         * @brief Iterator equality (same container and same position)
+         */
+        friend bool operator==(const ConstJsonIterator &a, const ConstJsonIterator &b) noexcept
+        {
+            return a.m_it == b.m_it;
+        }
+        friend bool operator!=(const ConstJsonIterator &a, const ConstJsonIterator &b) noexcept
+        {
+            return a.m_it != b.m_it;
+        }
+
+    private:
+        friend class Json;
+        explicit ConstJsonIterator(Array::Vec::const_iterator it) : m_it(std::move(it)) {}
+        explicit ConstJsonIterator(Object::Vec::const_iterator it) : m_it(std::move(it)) {}
+
+        std::variant<Array::Vec::const_iterator, Object::Vec::const_iterator> m_it;
+    };
+
+    /**
+     * @brief Zero-allocation view of an Object's keys (insertion order).
+     *
+     * Holds a single pointer into the Object's entry vector; keys are
+     * yielded as std::string_view by value through the nested iterator.
+     * Valid while the Object's storage stays stable (a move-assign of the
+     * Object invalidates the view — the std::vector contract).
+     */
+    class KeysView
+    {
+    public:
+        /**
+         * @brief Keys iterator: *it = a std::string_view into the key
+         */
+        class KeyIt
+        {
+        public:
+            [[nodiscard]] std::string_view operator*() const noexcept
+            {
+                return static_cast<std::string_view>(m->first);
+            }
+            KeyIt &operator++() noexcept { ++m; return *this; }
+            friend bool operator==(const KeyIt &a, const KeyIt &b) noexcept { return a.m == b.m; }
+            friend bool operator!=(const KeyIt &a, const KeyIt &b) noexcept { return a.m != b.m; }
+        private:
+            friend class KeysView;
+            using VecIt = Object::Vec::const_iterator;
+            explicit KeyIt(VecIt it) noexcept : m(it) {}
+            VecIt m;
+        };
+
+        /**
+         * @brief First key (== end() on an empty object)
+         */
+        [[nodiscard]] KeyIt begin() const noexcept { return KeyIt(m->begin()); }
+        /**
+         * @brief Past the last key
+         */
+        [[nodiscard]] KeyIt end() const noexcept { return KeyIt(m->end()); }
+
+    private:
+        friend class Object;
+        explicit KeysView(const Object::Vec *v) noexcept : m(v) {}
+        const Object::Vec *m{nullptr};
+    };
+
+    /**
+     * @brief Zero-allocation view of an Object's values (mutable track).
+     *
+     * Same mechanism as KeysView; the nested iterator yields Json &
+     * (patch in place). Order = entry order.
+     */
+    class ValuesView
+    {
+    public:
+        /**
+         * @brief Values iterator: *it = Json & (the child, in place)
+         */
+        class ValueIt
+        {
+        public:
+            [[nodiscard]] Json &operator*() const noexcept { return m->second; }
+            ValueIt &operator++() noexcept { ++m; return *this; }
+            friend bool operator==(const ValueIt &a, const ValueIt &b) noexcept { return a.m == b.m; }
+            friend bool operator!=(const ValueIt &a, const ValueIt &b) noexcept { return a.m != b.m; }
+        private:
+            friend class ValuesView;
+            using VecIt = Object::Vec::iterator;
+            explicit ValueIt(VecIt it) noexcept : m(it) {}
+            VecIt m;
+        };
+
+        [[nodiscard]] ValueIt begin() noexcept { return ValueIt(m->begin()); }
+        [[nodiscard]] ValueIt end() noexcept { return ValueIt(m->end()); }
+
+    private:
+        friend class Object;
+        explicit ValuesView(Object::Vec *v) noexcept : m(v) {}
+        Object::Vec *m{nullptr};
+    };
+
+    /**
+     * @brief Zero-allocation view of an Object's values (const track).
+     * Same as ValuesView yielding const Json &.
+     */
+    class ConstValuesView
+    {
+    public:
+        class ValueIt
+        {
+        public:
+            [[nodiscard]] const Json &operator*() const noexcept { return m->second; }
+            ValueIt &operator++() noexcept { ++m; return *this; }
+            friend bool operator==(const ValueIt &a, const ValueIt &b) noexcept { return a.m == b.m; }
+            friend bool operator!=(const ValueIt &a, const ValueIt &b) noexcept { return a.m != b.m; }
+        private:
+            friend class ConstValuesView;
+            using VecIt = Object::Vec::const_iterator;
+            explicit ValueIt(VecIt it) noexcept : m(it) {}
+            VecIt m;
+        };
+
+        [[nodiscard]] ValueIt begin() const noexcept { return ValueIt(m->begin()); }
+        [[nodiscard]] ValueIt end() const noexcept { return ValueIt(m->end()); }
+
+    private:
+        friend class Object;
+        explicit ConstValuesView(const Object::Vec *v) noexcept : m(v) {}
+        const Object::Vec *m{nullptr};
     };
 
 }

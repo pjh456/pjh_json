@@ -917,3 +917,236 @@ TEST_CASE("Json: get compile pins") {
     static_assert(!can_get<uint64_t>::value);       // no unsigned slot
     static_assert(!can_try_get<std::string>::value);
 }
+
+// --- task 21: Json range-for + Object::keys()/values() ---
+
+TEST_CASE("Json: range-for over array") {
+    Json two = Json(Array::of(Json((int64_t)1), Json((int64_t)2), Json((int64_t)3)));
+    size_t count = 0;
+    int64_t sum = 0;
+    for (auto &&e : two)
+    {
+        REQUIRE(e.key.empty());  // array element: the key side is always the empty view
+        sum += e.value.as_int();
+        ++count;
+    }
+    REQUIRE(count == 3);
+    REQUIRE(sum == 6);
+
+    // In-loop patch: e.value is a true reference (non-const value side)
+    for (auto &&e : two)
+        e.value = Json((int64_t)99);
+    REQUIRE(two[0] == (int64_t)99);
+
+    // plan 21 §3.1c @code example (folded in verbatim — the doxygen
+    // example cannot rot)
+    auto doc = parse_copy(R"({"nums":[1,2,3]})");
+    for (auto &&e : doc.root()["nums"])
+        e.value = Json(e.value.as_int() * 2);
+    REQUIRE(doc.root()["nums"][0] == (int64_t)2);
+    REQUIRE(doc.root()["nums"][1] == (int64_t)4);
+    REQUIRE(doc.root()["nums"][2] == (int64_t)6);
+}
+
+TEST_CASE("Json: range-for over object entries") {
+    Object o;
+    o.insert("a", Json((int64_t)1));
+    o.insert("b", Json((int64_t)2));
+    o.insert("c", Json((int64_t)3));
+    Json j(std::move(o));
+
+    std::vector<std::string> keys;
+    for (auto &&e : j)
+    {
+        keys.emplace_back(e.key);      // key: read-only consumption
+        e.value = Json((int64_t)42);   // in-loop value patch
+    }
+    REQUIRE(keys.size() == 3);
+    REQUIRE(keys[0] == "a");  // entry order = vector (insertion) order
+    REQUIRE(keys[1] == "b");
+    REQUIRE(keys[2] == "c");
+    REQUIRE(j.at("a") == (int64_t)42);  // patch visible after the loop
+    REQUIRE(j.at("b") == (int64_t)42);
+    REQUIRE(j.at("c") == (int64_t)42);
+}
+
+TEST_CASE("Json: entry view const track (compile pins)") {
+    // Iterator split: non-const Json vs const Json (the R2 wall)
+    static_assert(std::is_same_v<decltype(std::declval<Json &>().begin()), JsonIterator>);
+    static_assert(std::is_same_v<decltype(std::declval<const Json &>().begin()), ConstJsonIterator>);
+    // Value side: patchable on the non-const track, sealed on the const track
+    static_assert(std::is_same_v<decltype(std::declval<EntryView &>().value), Json &>);
+    static_assert(std::is_same_v<decltype(std::declval<ConstEntryView &>().value), const Json &>);
+    // Key side: read-only view on both tracks
+    static_assert(std::is_same_v<decltype(std::declval<EntryView &>().key), std::string_view>);
+    static_assert(std::is_same_v<decltype(std::declval<ConstEntryView &>().key), std::string_view>);
+    // Views are single-pointer projections (zero allocation)
+    static_assert(sizeof(KeysView) == sizeof(const void *));
+    static_assert(sizeof(ValuesView) == sizeof(const void *));
+    static_assert(sizeof(ConstValuesView) == sizeof(const void *));
+    // Layout zero change: Json stays 24 bytes
+    static_assert(sizeof(Json) == 24);
+
+    // Runtime: the const track is usable (compiles AND runs on const Json)
+    auto doc = parse_copy(R"({"a":1,"b":2})");
+    const Json &cj = doc.root();
+    size_t n = 0;
+    int64_t sum = 0;
+    for (const auto &e : cj)
+    {
+        sum += e.value.as_int();
+        ++n;
+    }
+    REQUIRE(n == 2);
+    REQUIRE(sum == 3);
+}
+
+TEST_CASE("Json: begin() on scalar throws TypeError") {
+    Json scalars[5] = {Json(nullptr), Json(true), Json((int64_t)1),
+                       Json(1.5), Json("s")};
+    for (size_t i = 0; i < 5; ++i)
+    {
+        Json &j = scalars[i];
+        // Non-const track (both build modes throw — the at() family)
+        REQUIRE_THROWS_AS((void)j.begin(), TypeError);
+        REQUIRE_THROWS_AS((void)j.end(), TypeError);
+        REQUIRE_THROWS_AS((void)j.keys(), TypeError);
+        REQUIRE_THROWS_AS((void)j.values(), TypeError);
+        // Const track: the same throw projection
+        const Json &cj = j;
+        REQUIRE_THROWS_AS((void)cj.begin(), TypeError);
+        REQUIRE_THROWS_AS((void)cj.end(), TypeError);
+        REQUIRE_THROWS_AS((void)cj.keys(), TypeError);
+        REQUIRE_THROWS_AS((void)cj.values(), TypeError);
+    }
+    // Container but not an object: keys()/values() throw on an array too
+    Json arr = Json(Array::of(Json((int64_t)1)));
+    REQUIRE_THROWS_AS((void)arr.keys(), TypeError);
+    REQUIRE_THROWS_AS((void)arr.values(), TypeError);
+    const Json &carr = arr;
+    REQUIRE_THROWS_AS((void)carr.keys(), TypeError);
+    REQUIRE_THROWS_AS((void)carr.values(), TypeError);
+}
+
+TEST_CASE("Json: empty container range-for") {
+    Json arr = Json(Array{});
+    REQUIRE(arr.begin() == arr.end());
+    size_t n = 0;
+    for (const auto &e : arr)
+    {
+        (void)e;
+        ++n;
+    }
+    REQUIRE(n == 0);
+
+    Json obj = Json(Object{});
+    REQUIRE(obj.begin() == obj.end());
+    n = 0;
+    for (const auto &e : obj)
+    {
+        (void)e;
+        ++n;
+    }
+    REQUIRE(n == 0);
+}
+
+TEST_CASE("Object: keys() view order and shape") {
+    Object o;
+    o.insert("b", Json((int64_t)1));
+    o.insert("a", Json((int64_t)2));
+    o.insert("c", Json((int64_t)3));
+    std::vector<std::string> got;
+    for (std::string_view k : o.keys())
+        got.emplace_back(k);
+    REQUIRE(got.size() == 3);
+    REQUIRE(got[0] == "b");  // entry order = insertion order
+    REQUIRE(got[1] == "a");
+    REQUIRE(got[2] == "c");
+
+    // Duplicate-key overwrite keeps the first key position (task 10 last-wins)
+    Object d;
+    d.insert("a", Json((int64_t)1));
+    d.insert("a", Json((int64_t)2));
+    d.insert("b", Json((int64_t)3));
+    REQUIRE(d.size() == 2);
+    REQUIRE(d.at("a") == (int64_t)2);  // last value wins
+    std::vector<std::string> dk;
+    for (std::string_view k : d.keys())
+        dk.emplace_back(k);
+    REQUIRE(dk.size() == 2);
+    REQUIRE(dk[0] == "a");
+    REQUIRE(dk[1] == "b");
+
+    // Const track: callable and runnable on a const Object
+    const Object &co = o;
+    size_t n = 0;
+    for (std::string_view k : co.keys())
+    {
+        (void)k;
+        ++n;
+    }
+    REQUIRE(n == 3);
+}
+
+TEST_CASE("Object: values() view") {
+    // Yield types: Json & (mutable track) / const Json & (const track)
+    static_assert(std::is_same_v<decltype(*std::declval<ValuesView::ValueIt>()), Json &>);
+    static_assert(std::is_same_v<decltype(*std::declval<ConstValuesView::ValueIt>()), const Json &>);
+
+    Object o;
+    o.insert("x", Json((int64_t)1));
+    o.insert("y", Json((int64_t)2));
+    for (auto &v : o.values())
+        v = Json((int64_t)99);  // reference yield: patch in place
+    REQUIRE(o.at("x") == (int64_t)99);
+    REQUIRE(o.at("y") == (int64_t)99);
+
+    // Const track: read-only yield
+    const Object &co = o;
+    int seen = 0;
+    for (const auto &v : co.values())
+    {
+        REQUIRE(v == (int64_t)99);
+        ++seen;
+    }
+    REQUIRE(seen == 2);
+}
+
+TEST_CASE("Json: keys()/values() dispatch") {
+    auto doc = parse_copy(R"({"a":1,"b":2,"c":3})");
+    Json &root = doc.root();
+
+    size_t k = 0;
+    for (std::string_view kv : root.keys())
+    {
+        (void)kv;
+        ++k;
+    }
+    REQUIRE(k == 3);
+    size_t v = 0;
+    for (auto &val : root.values())
+    {
+        REQUIRE(val.is_int());
+        ++v;
+    }
+    REQUIRE(v == 3);
+
+    // Const root: the same dispatch, const projection (the §2.5 sugar is
+    // reachable at the parse entry; scalar/array negative pins live in
+    // "Json: begin() on scalar throws TypeError")
+    const Json &croot = doc.root();
+    k = 0;
+    for (std::string_view kv : croot.keys())
+    {
+        (void)kv;
+        ++k;
+    }
+    REQUIRE(k == 3);
+    v = 0;
+    for (const auto &val : croot.values())
+    {
+        REQUIRE(val.is_int());
+        ++v;
+    }
+    REQUIRE(v == 3);
+}

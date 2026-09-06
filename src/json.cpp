@@ -273,6 +273,72 @@ namespace pjh::json
         return as_object().at(key);
     }
 
+    // --- begin/end/keys/values ---
+
+    /*
+     * Range-for dispatch: the container tag picks the iterator's underlying
+     * storage. A scalar has no children — TypeError in both build modes
+     * (the at()/operator[] family; deliberately NOT the as_* debug_check
+     * track: a range-for on a scalar is a user error, not an unchecked
+     * access). size() is a different contract (cardinality, scalar = 1).
+     */
+    JsonIterator Json::begin()
+    {
+        if (is_array())
+            return JsonIterator(as_array().begin());
+        if (is_object())
+            return JsonIterator(as_object().begin());
+        throw TypeError("expected array or object");
+    }
+
+    JsonIterator Json::end()
+    {
+        if (is_array())
+            return JsonIterator(as_array().end());
+        if (is_object())
+            return JsonIterator(as_object().end());
+        throw TypeError("expected array or object");
+    }
+
+    ConstJsonIterator Json::begin() const
+    {
+        if (is_array())
+            return ConstJsonIterator(as_array().begin());
+        if (is_object())
+            return ConstJsonIterator(as_object().begin());
+        throw TypeError("expected array or object");
+    }
+
+    ConstJsonIterator Json::end() const
+    {
+        if (is_array())
+            return ConstJsonIterator(as_array().begin());
+        if (is_object())
+            return ConstJsonIterator(as_object().end());
+        throw TypeError("expected array or object");
+    }
+
+    KeysView Json::keys() const
+    {
+        if (!is_object())
+            throw TypeError("expected object");
+        return as_object().keys();
+    }
+
+    ValuesView Json::values()
+    {
+        if (!is_object())
+            throw TypeError("expected object");
+        return as_object().values();
+    }
+
+    ConstValuesView Json::values() const
+    {
+        if (!is_object())
+            throw TypeError("expected object");
+        return as_object().values();
+    }
+
     // --- operator== ---
 
     /*

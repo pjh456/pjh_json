@@ -397,4 +397,16 @@ namespace pjh::json
     Object::iterator Object::end() noexcept { return iterator{m_data.end()}; }
     Object::Vec::const_iterator Object::begin() const noexcept { return m_data.begin(); }
     Object::Vec::const_iterator Object::end() const noexcept { return m_data.end(); }
+
+    /*
+     * Zero-allocation projection views over the entry vector.
+     *
+     * Order = the vector order (insertion order; a duplicate-key overwrite
+     * keeps the first occurrence's position — the last-wins semantics).
+     * The views hold a pointer into m_data: any storage-changing operation
+     * (insert/remove/clear, a move-assign) invalidates them.
+     */
+    KeysView Object::keys() const noexcept { return KeysView{&m_data}; }
+    ValuesView Object::values() noexcept { return ValuesView{&m_data}; }
+    ConstValuesView Object::values() const noexcept { return ConstValuesView{&m_data}; }
 }
