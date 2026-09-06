@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 #include <pjh_json/json.hpp>
 #include <pjh_json/document.hpp>
+#include <pjh_json/path.hpp>
 #include <pjh_json/writer.hpp>
 #include <memory_resource>
 
@@ -379,5 +380,140 @@ TEST_CASE("Object: same-res move assign keeps source adoptable") {
     }
     REQUIRE(j.is_object());
     REQUIRE(j.size() == 0);
+    REQUIRE(j.empty());
     REQUIRE(dump(j) == "{}");
+}
+
+TEST_CASE("Path: at_path success") {
+    auto doc = parse_copy(R"({"a":{"b":[10,20,{"c":true}]}})");
+    auto &root = doc.root();
+    REQUIRE(root.at_path("a.b[2].c") == true);
+    REQUIRE(root.at_path("a.b[0]") == (int64_t)10);
+    REQUIRE(root.at_path("a.b[1]") == (int64_t)20);
+    REQUIRE(root.at_path("a").is_object());
+    REQUIRE(root.at_path("") == root); // empty path = the root itself
+
+    // Bracket tail-chain over a real path in the doc
+    auto d2 = parse_copy(R"({"m":[[1,2],[3,4]]})");
+    REQUIRE(d2.root().at_path("m[1][0]") == (int64_t)3);
+
+    // Const track: both const overloads must be callable (compile-time pin)
+    const Json &cj = doc.root();
+    REQUIRE(cj.at_path("a.b[1]") == (int64_t)20);
+    REQUIRE(cj.at_path(Path{}) == cj);
+}
+
+TEST_CASE("Path: at_path throws per hop class") {
+    auto doc = parse_copy(R"({"x":5})");
+    auto &root = doc.root();
+    REQUIRE_THROWS_AS((void)root.at_path("y"), std::out_of_range); // missing key
+    REQUIRE_THROWS_AS((void)root.at_path("x.y"), TypeError); // scalar mid-walk, key hop
+    REQUIRE_THROWS_AS((void)root.at_path("x[0]"), TypeError); // scalar mid-walk, index hop
+
+    auto d2 = parse_copy(R"({"a":[1,2,3]})");
+    REQUIRE_THROWS_AS((void)d2.root().at_path("a[9]"), std::out_of_range); // OOB index
+    REQUIRE_THROWS_AS((void)d2.root().at_path("a.x"), std::out_of_range); // key on array, non-digit
+
+    REQUIRE_THROWS_AS((void)root.at_path("a[3"), std::invalid_argument); // malformed DSL
+}
+
+TEST_CASE("Path: find_path found and miss") {
+    auto doc = parse_copy(R"({"a":{"b":[10,20,{"c":true}]}})");
+    auto &root = doc.root();
+    REQUIRE(root.find_path("a.b[2].c") != nullptr);
+    REQUIRE(*root.find_path("a.b[0]") == (int64_t)10);
+    REQUIRE(root.find_path("a.b[9]") == nullptr); // OOB index
+    REQUIRE(root.find_path("z") == nullptr); // missing key
+    REQUIRE(root.find_path("a.b.x") == nullptr); // key on array, non-digit
+    REQUIRE(root.find_path("") == &root); // empty path = this
+
+    auto d2 = parse_copy(R"({"x":5})");
+    REQUIRE(d2.root().find_path("x.y") == nullptr); // scalar mid-walk hop
+
+    // sv and Path overloads resolve to the same node
+    REQUIRE(root.find_path(parse_path("a.b[2].c")) == root.find_path("a.b[2].c"));
+
+    // Const overload: const Json * (compile-time pin)
+    const Json &cj = doc.root();
+    const Json *p = cj.find_path("a.b[1]");
+    REQUIRE(p != nullptr);
+    REQUIRE(*p == (int64_t)20);
+    REQUIRE(cj.find_path("a.q") == nullptr);
+
+    // Malformed grammar penetrates — a parameter error, not a miss
+    REQUIRE_THROWS_AS((void)root.find_path("a[3"), std::invalid_argument);
+}
+
+TEST_CASE("Path: contains predicate") {
+    auto doc = parse_copy(R"({"a":{"b":[10,20]}})");
+    auto &root = doc.root();
+    REQUIRE(root.contains("a.b[1]") == true);
+    REQUIRE(root.contains("a.b[9]") == false); // OOB
+    REQUIRE(root.contains("z") == false); // missing key
+    REQUIRE(root.contains("") == true); // empty path always true
+    REQUIRE(root.contains(Path{}) == true); // typed overload
+
+    // Wrong-type (scalar mid-walk) hop = false, not an error
+    auto d2 = parse_copy(R"({"x":5})");
+    REQUIRE(d2.root().contains("x.y") == false);
+    REQUIRE(d2.root().contains("x[0]") == false);
+    REQUIRE(d2.root().contains("x") == true);
+}
+
+TEST_CASE("Path: digit key parent-decides rule") {
+    auto doc = parse_copy(R"({"o":{"3":1},"a":[1,2,3]})");
+    auto &root = doc.root();
+    REQUIRE(root.at_path("o[3]") == (int64_t)1); // object parent + bracket = key "3"
+    REQUIRE(root.at_path("o.3") == (int64_t)1); // object parent + dot-digit = key "3"
+    REQUIRE(root.at_path("a.1") == (int64_t)2); // array parent + dot-digit = index 1
+    REQUIRE(root.at_path("a[1]") == (int64_t)2);
+    REQUIRE(root.contains("a.x") == false); // array parent + non-digit dot segment
+    REQUIRE_THROWS_AS((void)root.at_path("a.x"), std::out_of_range);
+
+    // Both frontends share the rule: DSL-compiled vs hand-built Path
+    REQUIRE(root.at_path(parse_path("o[3]")) == (int64_t)1);
+    Path manual;
+    manual.emplace_back(std::string_view{"o"});
+    manual.emplace_back((size_t)3);
+    REQUIRE(root.at_path(manual) == (int64_t)1);
+}
+
+TEST_CASE("Path: parse_path valid corpus") {
+    auto p = parse_path("a.b[3].c");
+    REQUIRE(p.size() == 4);
+    REQUIRE(*std::get_if<std::string_view>(&p[0]) == "a");
+    REQUIRE(*std::get_if<std::string_view>(&p[1]) == "b");
+    REQUIRE(std::get<size_t>(p[2]) == 3);
+    REQUIRE(*std::get_if<std::string_view>(&p[3]) == "c");
+
+    REQUIRE(parse_path("").empty()); // empty = root
+
+    auto p2 = parse_path("a[0][1]"); // bracket tail-chain
+    REQUIRE(p2.size() == 3);
+    REQUIRE(*std::get_if<std::string_view>(&p2[0]) == "a");
+    REQUIRE(std::get<size_t>(p2[1]) == 0);
+    REQUIRE(std::get<size_t>(p2[2]) == 1);
+
+    auto p3 = parse_path("a..b"); // interior ".." = the empty key
+    REQUIRE(p3.size() == 3);
+    REQUIRE(*std::get_if<std::string_view>(&p3[0]) == "a");
+    REQUIRE(*std::get_if<std::string_view>(&p3[1]) == "");
+    REQUIRE(*std::get_if<std::string_view>(&p3[2]) == "b");
+
+    auto p4 = parse_path("a[03]"); // leading zeros accepted
+    REQUIRE(p4.size() == 2);
+    REQUIRE(std::get<size_t>(p4[1]) == 3);
+
+    auto p5 = parse_path("[5]"); // root-level index, empty key part
+    REQUIRE(p5.size() == 1);
+    REQUIRE(std::get<size_t>(p5[0]) == 5);
+}
+
+TEST_CASE("Path: parse_path invalid corpus") {
+    const std::string_view bad[] = {
+        "a[3", "a[]", "a[-1]", "a[1.5]", "a[0]b", ".a", "a.",
+        "a[99999999999999999999]",
+    };
+    for (auto s : bad)
+        REQUIRE_THROWS_AS((void)parse_path(s), std::invalid_argument);
 }

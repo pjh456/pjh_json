@@ -688,6 +688,99 @@ namespace pjh::json
         /**@}*/
 
     public:
+        /** @name Path access */
+        /**@{*/
+        /**
+         * @brief Checked walk by path string (see parse_path for the grammar)
+         * @param path Dotted/bracket path, e.g. "a.b[3].c"; empty = the root
+         * @return Reference to the node the path resolves to
+         * @throws std::invalid_argument if the path grammar is malformed
+         * @throws TypeError if a hop's node is a scalar ("expected object"
+         *         for a key hop, "expected array" for an index hop)
+         * @throws std::out_of_range if a key is missing or an index is out
+         *         of range (hop-local messages; no full-path context)
+         * @note The parent node's runtime type decides the hop (RFC 6901):
+         *       object parent resolves any step as a key (an index step uses
+         *       its decimal string as the key name); array parent resolves
+         *       any step as an index (a key step must be all-digit).
+         * @note The empty path yields *this (the root itself).
+         */
+        [[nodiscard]] Json &at_path(std::string_view path);
+        /**
+         * @brief Const checked walk by path string
+         * @param path Dotted/bracket path; empty = the root
+         * @return Const reference to the node the path resolves to
+         * @throws std::invalid_argument, TypeError, std::out_of_range — see at_path
+         */
+        [[nodiscard]] const Json &at_path(std::string_view path) const;
+        /**
+         * @brief Checked walk by typed path (unambiguous hop kinds)
+         * @param path Sequence of key/index hops; empty = the root
+         * @return Reference to the node the path resolves to
+         * @throws TypeError, std::out_of_range — see at_path(std::string_view)
+         * @note Same parent-decides rule as the string overload; the typed
+         *       form is the escape hatch for keys containing '.', '[' or ']'
+         */
+        [[nodiscard]] Json &at_path(const Path &path);
+        /**
+         * @brief Const checked walk by typed path
+         * @param path Sequence of key/index hops; empty = the root
+         * @return Const reference to the node the path resolves to
+         * @throws TypeError, std::out_of_range — see at_path(std::string_view)
+         */
+        [[nodiscard]] const Json &at_path(const Path &path) const;
+
+        /**
+         * @brief Safe walk: nullptr on any missing or wrong-type hop
+         * @param path Dotted/bracket path; empty = the root
+         * @return Pointer to the resolved node, or nullptr on a miss
+         * @throws std::invalid_argument if the path grammar is malformed
+         *         (a parameter error, not a miss — must not be swallowed)
+         * @note try_as_* pointer convention: nullptr = miss (missing key,
+         *       OOB index, or a scalar mid-walk hop).
+         * @note The empty path yields this.
+         */
+        [[nodiscard]] Json *find_path(std::string_view path);
+        /**
+         * @brief Const safe walk by path string
+         * @param path Dotted/bracket path; empty = the root
+         * @return Const pointer to the resolved node, or nullptr on a miss
+         * @throws std::invalid_argument if the path grammar is malformed
+         */
+        [[nodiscard]] const Json *find_path(std::string_view path) const;
+        /**
+         * @brief Safe walk by typed path
+         * @param path Sequence of key/index hops; empty = the root
+         * @return Pointer to the resolved node, or nullptr on a miss
+         */
+        [[nodiscard]] Json *find_path(const Path &path);
+        /**
+         * @brief Const safe walk by typed path
+         * @param path Sequence of key/index hops; empty = the root
+         * @return Const pointer to the resolved node, or nullptr on a miss
+         */
+        [[nodiscard]] const Json *find_path(const Path &path) const;
+
+        /**
+         * @brief Predicate: does the path resolve?
+         * @param path Dotted/bracket path; empty = the root
+         * @return true if every hop succeeds; a wrong-type (scalar mid-walk)
+         *         hop is false, not an error
+         * @throws std::invalid_argument if the path grammar is malformed
+         * @note The empty path is always true. Keys containing '.', '[' or
+         *       ']' need the typed overload (the DSL is lossy there).
+         */
+        [[nodiscard]] bool contains(std::string_view path) const;
+        /**
+         * @brief Predicate by typed path (no parsing, no throw)
+         * @param path Sequence of key/index hops; empty = the root
+         * @return true if every hop succeeds; a wrong-type (scalar mid-walk)
+         *         hop is false, not an error
+         */
+        [[nodiscard]] bool contains(const Path &path) const noexcept;
+        /**@}*/
+
+    public:
         /** @name Comparison */
         /**@{*/
         /**
