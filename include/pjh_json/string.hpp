@@ -7,6 +7,8 @@
 #include <string>
 #include <type_traits>
 
+#include "config.hpp"
+
 namespace pjh::json
 {
     /**
@@ -173,10 +175,11 @@ namespace pjh::json
          * 2. If borrowed: allocate a new pmr::string from the given resource,
          *    copy the view content into it, store the pointer.
          *
-         * @param res Memory resource for the copy (default: default_resource)
+         * @param res Memory resource for the copy (default: global config
+         *        resource)
          * @note Safe to call multiple times; subsequent calls are no-ops.
          */
-        void own(std::pmr::memory_resource *res = std::pmr::get_default_resource())
+        void own(std::pmr::memory_resource *res = Config::instance().resource())
         {
             if (m_storage == Storage::View)
             {

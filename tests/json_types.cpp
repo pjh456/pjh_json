@@ -7,6 +7,44 @@
 
 using namespace pjh::json;
 
+namespace
+{
+    // Local counting resource (the library's src/counting_resource.hpp is
+    // private — not on the test include path). Upstream MUST be a
+    // make_unique'd pool resource: never unique_ptr<new_delete_resource>()
+    // (that singleton would be deleted — UB).
+    struct TestCountingResource : std::pmr::memory_resource
+    {
+        explicit TestCountingResource()
+            : m_up(std::make_unique<std::pmr::unsynchronized_pool_resource>()) {}
+
+        [[nodiscard]] long long outstanding() const noexcept { return m_outstanding; }
+        [[nodiscard]] size_t last_bytes() const noexcept { return m_last_bytes; }
+
+    protected:
+        void *do_allocate(std::size_t n, std::size_t align) override
+        {
+            ++m_outstanding;
+            m_last_bytes = n;
+            return m_up->allocate(n, align);
+        }
+        void do_deallocate(void *p, std::size_t n, std::size_t align) override
+        {
+            --m_outstanding;
+            m_up->deallocate(p, n, align);
+        }
+        bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override
+        {
+            return this == &other;
+        }
+
+    private:
+        std::unique_ptr<std::pmr::memory_resource> m_up;
+        long long m_outstanding = 0;
+        size_t m_last_bytes = 0;
+    };
+}
+
 TEST_CASE("Json: simple value") {
     Json null_val(nullptr);
     REQUIRE(null_val.is_null());
@@ -516,4 +554,91 @@ TEST_CASE("Path: parse_path invalid corpus") {
     };
     for (auto s : bad)
         REQUIRE_THROWS_AS((void)parse_path(s), std::invalid_argument);
+}
+
+TEST_CASE("Json: owned string ctor") {
+    TestCountingResource cr;
+    std::string src(48, 'a'); // > max SSO capacity (~23) => buffer must go through res
+    std::string_view sv(src);
+    {
+        Json j(sv, &cr);
+        REQUIRE(j.is_string());
+        REQUIRE(j.as_string() == sv);
+        REQUIRE(cr.outstanding() == 1);        // exactly one buffer allocation
+        REQUIRE(cr.last_bytes() >= sv.size()); // host allocates sv.size(); >= is the portable pin
+    } // ~j -> buffer deallocates back into cr
+    REQUIRE(cr.outstanding() == 0);            // return proof (destroy() through res)
+
+    // Empty sv edge (same case): SSO => zero res allocation
+    Json e(std::string_view{}, &cr);
+    REQUIRE(e.is_string());
+    REQUIRE(e.as_string().empty());
+    REQUIRE(cr.outstanding() == 0);
+}
+
+TEST_CASE("Json: owned string outlives source") {
+    std::pmr::memory_resource *mr = std::pmr::new_delete_resource();
+    Json j;
+    {
+        std::string tmp(48, 'a');
+        j = Json(std::string_view(tmp), mr);
+    } // tmp dies here; j's buffer lives on in mr
+    REQUIRE(j.is_string());
+    REQUIRE(j.as_string() == std::string(48, 'a'));
+}
+
+TEST_CASE("Json: own factory default resource") {
+    Json j;
+    {
+        std::string tmp(48, 'b');
+        j = Json::own(std::string_view(tmp)); // default res = Config global
+        REQUIRE(j.as_string().data() != tmp.data()); // anti-borrow pin: owned buffer never aliases the source
+    }
+    REQUIRE(j.is_string());
+    REQUIRE(j.as_string() == std::string(48, 'b')); // survival + content
+
+    // const char* spelling (literal -> string_view UDC)
+    static const char kLit[] = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"; // 48 b's
+    Json jl = Json::own(kLit);
+    REQUIRE(jl.is_string());
+    REQUIRE(jl.as_string() == std::string_view(kLit, 48));
+}
+
+TEST_CASE("Json: literal ctor stays borrowed") {
+    // Anti-footgun regression pin: the 1-arg spelling must still borrow
+    // (C8 identity). If the owned ctor ever steals literals, data() would
+    // become a heap address (red); if it gains a defaulted res parameter,
+    // Json("lit") becomes an ambiguous compile error (red).
+    static const char kLit[] = "cccccccccccccccccccccccccccccccccccccccccccccccc"; // 48 c's
+    Json j(kLit); // 1-arg -> C8 identity (const char*)
+    REQUIRE(j.is_string());
+    REQUIRE(j.as_string().data() == kLit); // pointer identity = zero-copy proof
+    REQUIRE(j.as_string() == std::string_view(kLit, 48));
+}
+
+TEST_CASE("Json: owned ctor from std::string") {
+    std::pmr::memory_resource *mr = std::pmr::new_delete_resource();
+    // lvalue spelling: string -> string_view UDC -> owned ctor (no
+    // by-value string ctor may exist — the house rule)
+    std::string src(48, 'd');
+    Json j(src, mr);
+    REQUIRE(j.is_string());
+    REQUIRE(j.as_string() == std::string(48, 'd'));
+
+    // rvalue spelling
+    Json j2(std::move(std::string(48, 'd')), mr);
+    REQUIRE(j2.is_string());
+    REQUIRE(j2.as_string() == std::string(48, 'd'));
+}
+
+TEST_CASE("Json: owned ctor overload set (compile pins)") {
+    // The ambiguity matrix's compile-time wall (plan 18 §2.2): the 2-arg
+    // owned ctor is the only 2-arg candidate for string-ish first args, and
+    // no non-string first arg may reach it. constructible_from (C++20) is
+    // the construct-side trait (is_invocable tests calls, not ctors).
+    static_assert(std::constructible_from<Json, std::string_view, std::pmr::memory_resource *>);
+    static_assert(std::constructible_from<Json, const char *, std::pmr::memory_resource *>);
+    static_assert(std::constructible_from<Json, std::string, std::pmr::memory_resource *>);
+    static_assert(!std::constructible_from<Json, const Json &, std::pmr::memory_resource *>);
+    static_assert(!std::constructible_from<Json, bool, std::pmr::memory_resource *>);
 }

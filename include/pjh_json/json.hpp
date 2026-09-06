@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string_view>
+#include <string>
 #include <stdexcept>
 #include <memory>
 #include <memory_resource>
@@ -203,6 +204,29 @@ namespace pjh::json
         constexpr Json(const char *str) : Json(std::string_view(str)) {}
 
         /**
+         * @brief Construct string from string_view (owned: content copied into res)
+         * @param sv Source view — content is copied; the source may die
+         *        afterwards (unlike Json(std::string_view), which borrows)
+         * @param res Resource for the string's heap buffer. Required
+         *        (no default: a defaulted parameter would make every 1-arg
+         *        Json(std::string_view) call ambiguous). nullptr falls back
+         *        to the global config resource. Must outlive this Json —
+         *        the buffer deallocates back into res on destruction.
+         * @note The pmr::string object lives on global new/delete; only
+         *       its buffer goes through res (same contract as String::own).
+         *       No shared ownership: move transfers the buffer; deep-copy
+         *       with clone(res). To adopt an already-materialised String
+         *       (zero-copy) use the 1-arg Json(String&&) constructor.
+         */
+        Json(std::string_view sv, std::pmr::memory_resource *res)
+            : m_type(Type::StringOwned)
+        {
+            if (!res)
+                res = Config::instance().resource();
+            m_data.heap = new std::pmr::string(sv, res);
+        }
+
+        /**
          * @brief Construct array value (takes ownership, heap-allocated)
          * @param arr Array to move into this value
          */
@@ -292,6 +316,24 @@ namespace pjh::json
          */
         [[nodiscard]] Json clone(
             std::pmr::memory_resource *into = Config::instance().resource()) const;
+
+        /**
+         * @brief Construct an owned string value (static factory)
+         * @param sv Source view — content is copied; the source may die
+         *        afterwards
+         * @param res Resource for the string's heap buffer (default:
+         *        global config resource). Must outlive the returned Json.
+         * @note Factory: returns a Json. Not an in-place operation
+         *       (contrast String::own, which materialises *this).
+         *       Convenience spelling of Json(sv, res) for the common
+         *       global-resource case: Json::own("...") / Json::own(sv).
+         */
+        [[nodiscard]] static Json own(
+            std::string_view sv,
+            std::pmr::memory_resource *res = Config::instance().resource())
+        {
+            return Json(sv, res);
+        }
 
         /**
          * @brief Assign null
