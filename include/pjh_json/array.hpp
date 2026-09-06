@@ -59,6 +59,9 @@ namespace pjh::json
         /**
          * @brief Move construct
          * @param other Source array (left empty)
+         * @note The source keeps its resource after the move, so a
+         *       moved-from array stays adoptable (Json node allocation)
+         *       into that resource.
          */
         Array(Array &&) noexcept;
         /**
@@ -68,7 +71,9 @@ namespace pjh::json
          * @note Cross-resource move-assign moves the elements into this
          *       array's own resource; this array keeps its own resource and
          *       the source keeps an empty buffer in its own, so the
-         *       source's resource must outlive the source.
+         *       source's resource must outlive the source. On the
+         *       same-resource path the moved-from source stays bound to the
+         *       shared resource and remains adoptable (Json node).
          */
         Array &operator=(Array &&) noexcept;
 

@@ -303,3 +303,81 @@ TEST_CASE("Object: same-resource move assign steals storage") {
     REQUIRE(oA.empty());
     REQUIRE(oB.size() == 1);
 }
+
+// Same-resource move assign used to end with the moved-from source's
+// m_resource nulled (steal + assign-null), so adopting the moved-from
+// container into a Json heap_alloc's through a null resource (UB: null
+// deref in polymorphic_allocator::allocate). The moved-from container must
+// stay bound to the shared resource: its node then allocates and frees
+// through that same live resource. The move-ctor path is pinned in the same
+// case (identical defect class, same one-line fix shape).
+TEST_CASE("Array: same-res move assign keeps source adoptable") {
+    auto res = std::make_unique<std::pmr::unsynchronized_pool_resource>();
+    Json j;
+    {
+        Array a(res.get());
+        a.push_back(Json((int64_t)42));
+        a.push_back(Json((int64_t)7));
+        Array b(res.get());
+        b = std::move(a);
+        REQUIRE(b.size() == 2);
+        REQUIRE(b[0] == (int64_t)42);
+        REQUIRE(a.empty());
+        // moved-from allocator member stays bound to the shared resource
+        REQUIRE(a.data().get_allocator().resource() == res.get());
+        j = Json(std::move(a)); // pre-fix: heap_alloc(nullptr) -> UB
+    }
+    REQUIRE(j.is_array());
+    REQUIRE(j.size() == 0);
+    REQUIRE(j.empty());
+    REQUIRE(dump(j) == "[]");
+
+    {
+        Array c(res.get());
+        c.push_back(Json((int64_t)9));
+        Array d(std::move(c));
+        REQUIRE(d.size() == 1);
+        REQUIRE(d[0] == (int64_t)9);
+        REQUIRE(c.empty());
+        REQUIRE(c.data().get_allocator().resource() == res.get());
+        j = Json(std::move(c));
+    }
+    REQUIRE(j.is_array());
+    REQUIRE(j.size() == 0);
+    REQUIRE(dump(j) == "[]");
+}
+
+TEST_CASE("Object: same-res move assign keeps source adoptable") {
+    auto res = std::make_unique<std::pmr::unsynchronized_pool_resource>();
+    Json j;
+    {
+        Object oA(res.get());
+        oA.insert("k", Json((int64_t)7)); // borrowed literal key
+        Object oB(res.get());
+        oB = std::move(oA);
+        REQUIRE(oB.size() == 1);
+        REQUIRE(oB["k"] == (int64_t)7);
+        REQUIRE(oA.empty());
+        // moved-from allocator member stays bound to the shared resource
+        REQUIRE(oA.data().get_allocator().resource() == res.get());
+        j = Json(std::move(oA)); // pre-fix: heap_alloc(nullptr) -> UB
+    }
+    REQUIRE(j.is_object());
+    REQUIRE(j.size() == 0);
+    REQUIRE(j.empty());
+    REQUIRE(dump(j) == "{}");
+
+    {
+        Object oC(res.get());
+        oC.insert("m", Json((int64_t)9));
+        Object oD(std::move(oC));
+        REQUIRE(oD.size() == 1);
+        REQUIRE(oD["m"] == (int64_t)9);
+        REQUIRE(oC.empty());
+        REQUIRE(oC.data().get_allocator().resource() == res.get());
+        j = Json(std::move(oC));
+    }
+    REQUIRE(j.is_object());
+    REQUIRE(j.size() == 0);
+    REQUIRE(dump(j) == "{}");
+}

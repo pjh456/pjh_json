@@ -57,8 +57,11 @@ namespace pjh::json
      * 2. Compare allocators before the move (mirrors libstdc++'s own
      *    steal decision in vector::_M_move_assign).
      * 3. Move the vector.
-     * 4. Same resource: storage was stolen — transfer m_resource exactly as
-     *    before (value-identical; source nulled).
+     * 4. Same resource: storage was stolen and both sides stay bound to
+     *    the shared resource, so m_resource is copied (value-identical)
+     *    instead of transferred: the source keeps it too, so a moved-from
+     *    container remains adoptable (Json heap_alloc / destroy, json.hpp)
+     *    into a node allocated in that shared resource.
      *    Different resources: keep this->m_resource (== m_data's allocator
      *    resource) so the node this container later heap-allocates into
      *    (Json::heap_alloc / Json::destroy, json.hpp) frees through the
@@ -73,16 +76,20 @@ namespace pjh::json
             m_data.get_allocator() == other.m_data.get_allocator();
         m_data = std::move(other.m_data);
         if (same_resource)
-            m_resource = std::exchange(other.m_resource, nullptr);
+            m_resource = other.m_resource;
         return *this;
     }
 
     /*
-     * Move construct — steal vector and resource from source
+     * Move construct — steal vector from source
+     *
+     * The source keeps its resource: its moved-from state (allocator
+     * member still bound) stays consistent with m_resource, so it remains
+     * adoptable (Json heap_alloc / destroy, json.hpp).
      */
     Array::Array(Array &&other) noexcept
         : m_data(std::move(other.m_data)),
-          m_resource(std::exchange(other.m_resource, nullptr))
+          m_resource(other.m_resource)
     {
     }
 
