@@ -1,7 +1,6 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
 #include <optional>
-#include <ranges>
 #include <unordered_set>
 
 namespace pjh::json
@@ -87,17 +86,29 @@ namespace pjh::json
             // when the key is unseen. (When strict is ON a duplicate
             // already threw above, so a hit here is a non-strict
             // duplicate.)
-            auto it = std::ranges::find_if(
-                obj.data(),
-                [&](const auto &kv) { return kv.first == key; });
-            if (it != obj.data().end())
+            // Manual first-match scan with direct index access — same
+            // semantics as std::ranges::find_if (first equal entry
+            // wins) without iterator/lambda indirection; the common
+            // no-duplicate case is a few comparisons over the small
+            // entry vector.
+            auto &entries = obj.data();
+            size_t pos = entries.size();
+            for (size_t i = 0; i < entries.size(); ++i)
             {
-                parse_value_inplace(it->second);
+                if (entries[i].first == key)
+                {
+                    pos = i;
+                    break;
+                }
+            }
+            if (pos < entries.size())
+            {
+                parse_value_inplace(entries[pos].second);
             }
             else
             {
-                obj.data().emplace_back(std::move(key), Json(nullptr));
-                parse_value_inplace(obj.data().back().second);
+                entries.emplace_back(std::move(key), Json(nullptr));
+                parse_value_inplace(entries.back().second);
             }
 
             // Check for closing brace or comma
