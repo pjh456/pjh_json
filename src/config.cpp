@@ -85,9 +85,9 @@ namespace pjh::json
         std::lock_guard lock(m_mutex);
         m_storage = Storage::Pooled;
         m_block = 4096;
-        m_strict_duplicate_keys = false;
-        m_arena_block_size = 0;
-        m_max_depth = 0;
+        m_strict_duplicate_keys.store(false, std::memory_order_relaxed);
+        m_arena_block_size.store(0, std::memory_order_relaxed);
+        m_max_depth.store(0, std::memory_order_relaxed);
         release_locked();
     }
 
