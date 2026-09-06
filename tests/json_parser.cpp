@@ -139,6 +139,25 @@ TEST_CASE("Parser: error handling") {
     CHECK_THROWS_AS((void)parse_copy("{\"a\":1,\"a\":2}"), std::runtime_error);
 }
 
+TEST_CASE("Parser: strict strings and escapes") {
+    // Reference-side pins, dual to the consteval static_asserts in
+    // tests/literal_test.cpp "ConstJson: parse strictness"
+    CHECK_THROWS_AS((void)parse_copy("\"\\q\""), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("\"\\uD800\""), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("\"\\uDC00\""), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("\"\\uD800A\""), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("\"\\u12\""), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("\"a\nb\""), ParseError);            // raw LF
+    CHECK_THROWS_AS((void)parse_copy(std::string("\"a\x01" "b\"")), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("00"), ParseError);                   // leading zeros
+    auto ok1 = parse_copy("\"\\uD83D\\uDE00\"");
+    REQUIRE(ok1.root().as_string() == "\xF0\x9F\x98\x80");
+    auto ok2 = parse_copy("0.5");
+    REQUIRE(ok2.root().is_float());
+    auto ok3 = parse_copy(std::string("\"a\x7f" "b\""));
+    REQUIRE(ok3.root().as_string() == std::string_view("a\x7f" "b"));
+}
+
 TEST_CASE("Parser: view") {
     std::string content = R"({"name": "pjh", "items": [1, 2, 3], "active": true})";
     std::string buf(content.size() + 64, '\0');

@@ -58,11 +58,67 @@ namespace pjh::json
                 ++p;
         }
 
+        /// @brief Check whether c is one of the single-character escapes
+        ///        (" \ / b f n r t) — mirrors the handle_escape switch
+        ///        (src/parser/utils.cpp).
+        consteval bool is_short_escape(char c)
+        {
+            return c == '"' || c == '\\' || c == '/' || c == 'b' ||
+                   c == 'f' || c == 'n' || c == 'r' || c == 't';
+        }
+
+        /// @brief Decode one hex digit (0-9, a-f, A-F) into v.
+        /// @return true if c is a hex digit; v unchanged otherwise.
+        consteval bool hex_digit(char c, uint32_t &v)
+        {
+            if (c >= '0' && c <= '9')
+            {
+                v = static_cast<uint32_t>(c - '0');
+                return true;
+            }
+            if (c >= 'a' && c <= 'f')
+            {
+                v = static_cast<uint32_t>(c - 'a' + 10);
+                return true;
+            }
+            if (c >= 'A' && c <= 'F')
+            {
+                v = static_cast<uint32_t>(c - 'A' + 10);
+                return true;
+            }
+            return false;
+        }
+
+        /// @brief Scan exactly 4 hex digits at p into cp.
+        /// @param p Reference to the scan position; advanced past the 4 digits
+        ///          on success, unchanged on failure.
+        /// @param e Pointer to the end of the input buffer.
+        /// @param cp Receives the decoded 16-bit value on success.
+        /// @return true if 4 hex digits were consumed.
+        consteval bool scan_hex4(const char *&p, const char *e, uint32_t &cp)
+        {
+            if (e - p < 4)
+                return false;
+            cp = 0;
+            for (int i = 0; i < 4; ++i)
+            {
+                uint32_t d = 0;
+                if (!hex_digit(p[i], d))
+                    return false;
+                cp = (cp << 4) | d;
+            }
+            p += 4;
+            return true;
+        }
+
         /// @brief Validate a JSON string literal ("...").
         ///
-        /// Handles escape sequences by skipping the escaped character.
-        /// Does not validate the escape sequence content — any character
-        /// following a backslash is accepted.
+        /// Handles escape sequences strictly: only the single-character
+        /// escapes " \ / b f n r t and \uXXXX are accepted.  \uXXXX requires
+        /// exactly 4 hex digits; a high surrogate (U+D800–U+DBFF) must be
+        /// immediately followed by \u + a low surrogate (U+DC00–U+DFFF), and a
+        /// lone low surrogate is rejected (RFC 8259 §7).  Raw C0 control
+        /// characters (bytes 0x00–0x1F) inside the string are rejected.
         ///
         /// @param p Reference to the current parse position (must point to the
         ///          opening quote); advanced past the closing quote.
@@ -71,27 +127,64 @@ namespace pjh::json
         consteval bool scan_string(const char *&p, const char *e)
         {
             ++p; // skip opening quote
-            while (p < e && *p != '"')
+            for (;;)
             {
-                if (*p == '\\')
+                if (p >= e)
+                    return false; // unterminated
+                char c = *p;
+                if (c == '"')
                 {
-                    ++p; // skip backslash
-                    if (p >= e)
-                        return false;
+                    ++p; // closing quote
+                    return true;
                 }
-                ++p; // skip escaped character or regular character
+                if (c == '\\')
+                {
+                    if (p + 1 >= e)
+                        return false; // dangling backslash
+                    char esc = p[1];
+                    if (esc == 'u')
+                    {
+                        const char *q = p + 2; // hex digits follow 'u'
+                        uint32_t cp = 0;
+                        if (!scan_hex4(q, e, cp))
+                            return false;
+                        if (cp >= 0xD800 && cp <= 0xDBFF)
+                        {
+                            // high surrogate: must be followed by \uLLLL
+                            // (q now points just past the high surrogate's
+                            // hex digits; 6 more bytes are required)
+                            if (e - q < 6 || q[0] != '\\' || q[1] != 'u')
+                                return false;
+                            q += 2;
+                            uint32_t cp2 = 0;
+                            if (!scan_hex4(q, e, cp2))
+                                return false;
+                            if (cp2 < 0xDC00 || cp2 > 0xDFFF)
+                                return false;
+                        }
+                        else if (cp >= 0xDC00 && cp <= 0xDFFF)
+                            return false; // lone low surrogate (RFC 8259 §7)
+                        p = q;
+                    }
+                    else if (!is_short_escape(esc))
+                        return false;
+                    else
+                        p += 2;
+                }
+                else if (static_cast<unsigned char>(c) < 0x20)
+                    return false; // raw C0 control character in string
+                else
+                    ++p;
             }
-            if (p >= e)
-                return false;
-            ++p; // skip closing quote
-            return true;
         }
 
         /// @brief Validate a JSON number (integer, floating-point, or scientific).
         ///
         /// Recognises an optional leading minus, an integer part (one or more
-        /// digits), an optional fractional part (.digits), and an optional
-        /// exponent part (e or E, optional sign, digits).
+        /// digits, no leading zeros — a '0' is allowed only as the entire
+        /// integer part, RFC 8259 §8.4), an optional fractional part
+        /// (.digits), and an optional exponent part (e or E, optional sign,
+        /// digits).
         ///
         /// @param p Reference to the current parse position; advanced past the number.
         /// @param e Pointer to the end of the input buffer.
@@ -102,7 +195,10 @@ namespace pjh::json
                 ++p; // optional minus
             if (p >= e || *p < '0' || *p > '9')
                 return false;
+            const char *int_start = p;
             skip_digits(p, e); // integer part
+            if (p - int_start > 1 && *int_start == '0')
+                return false; // leading zeros (RFC 8259 §8.4; mirrors src/parser/number.cpp)
 
             // fractional part: .digits
             if (p < e && *p == '.')

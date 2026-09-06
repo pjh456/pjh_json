@@ -173,3 +173,40 @@ TEST_CASE("Literal: empty object") {
     std::pmr::string out = dump(j);
     REQUIRE(out == "[]");
 }
+
+TEST_CASE("ConstJson: parse strictness") {
+    // Leading zeros (runtime reference: src/parser/number.cpp, pinned in
+    // "Parser: error handling")
+    static_assert(!ConstJson::parse("01").valid);
+    static_assert(!ConstJson::parse("-01").valid);
+    static_assert(!ConstJson::parse("[01]").valid);
+    static_assert(!ConstJson::parse("{\"a\":01}").valid);
+    static_assert(!ConstJson::parse("012.5").valid);
+    static_assert(!ConstJson::parse("01e2").valid);
+    static_assert(ConstJson::parse("0").valid);
+    static_assert(ConstJson::parse("-0").valid);
+    static_assert(ConstJson::parse("0.5").valid);
+    static_assert(ConstJson::parse("0e1").valid);
+    // Escapes (runtime reference: src/parser/utils.cpp)
+    static_assert(!ConstJson::parse(std::string_view("\"\\q\"", 4)).valid);  // illegal single-char escape
+    static_assert(!ConstJson::parse(std::string_view("\"\\", 2)).valid);    // dangling backslash
+    static_assert(!ConstJson::parse(R"("\u12")").valid);                    // truncated \uXXXX
+    static_assert(!ConstJson::parse(R"("\uZZZZ")").valid);                  // non-hex digits
+    static_assert(!ConstJson::parse(R"("\uD800")").valid);                  // lone high surrogate
+    static_assert(!ConstJson::parse(R"("\uDC00")").valid);                  // lone low surrogate
+    static_assert(!ConstJson::parse(R"("\uD800A")").valid);                 // high not followed by \u
+    static_assert(!ConstJson::parse(R"("\uD800\u0041")").valid);            // second half not a low surrogate
+    static_assert(!ConstJson::parse(R"("\uD800\uD800")").valid);            // second half is a high surrogate
+    static_assert(ConstJson::parse(R"("\uD83D\uDE00")").valid);             // legal surrogate pair
+    static_assert(ConstJson::parse(R"("\u0000")").valid);
+    static_assert(ConstJson::parse("\"\\n\\t\\r\\b\\f\\\"\\\\\\/\"").valid); // all short escapes
+    // Raw C0 control characters in strings (runtime reference: src/parser/string.cpp)
+    static_assert(!ConstJson::parse(std::string_view("\"a\nb\"", 5)).valid);     // raw LF
+    static_assert(!ConstJson::parse(std::string_view("\"a\x01" "b\"", 5)).valid);  // raw 0x01
+    static_assert(!ConstJson::parse(std::string_view("\"a\x00" "b\"", 5)).valid);  // raw NUL
+    static_assert(ConstJson::parse(std::string_view("\"a\x7f" "b\"", 5)).valid); // DEL (0x7F) is legal in strings
+    // Whitespace set regression pins (already aligned, must not regress)
+    static_assert(ConstJson::parse(" \t\r\n 42 \t").valid);
+    static_assert(!ConstJson::parse(std::string_view("\x0b1", 2)).valid);  // VT is not whitespace
+    static_assert(!ConstJson::parse(std::string_view("1\x0b", 2)).valid);
+}
