@@ -226,3 +226,80 @@ TEST_CASE("Json: object parse-insert semantics unified") {
     REQUIRE(d.root()["a"] == (int64_t)2);
     REQUIRE(Json(std::move(o)) == d.root());
 }
+
+// Cross-resource move-assign: pmr allocators never propagate, so libstdc++
+// element-wise moves into this container's own buffer; the moved-in node
+// must stay bound to this container's resource, not the source's. The
+// source arena is destroyed BEFORE ~j to pin the UAF (ASan-only red).
+TEST_CASE("Array: cross-resource move assign") {
+    auto resA = std::make_unique<std::pmr::unsynchronized_pool_resource>();
+    auto resB = std::make_unique<std::pmr::unsynchronized_pool_resource>();
+    Json j; // declared last so ~j runs while both pools are still alive
+    {
+        Array a(resA.get());
+        a.push_back(Json((int64_t)42));
+        a.push_back(Json((int64_t)7));
+        Array b(resB.get());
+        b = std::move(a);
+        REQUIRE(b.size() == 2);
+        REQUIRE(b[1] == (int64_t)7);
+        REQUIRE(a.empty());
+        // Storage ownership white-box pin: b's buffer lives in resB
+        REQUIRE(b.data().get_allocator().resource() == resB.get());
+        j = Json(std::move(b));
+    }
+    resA.reset(); // source arena dies before ~j
+    REQUIRE(j.is_array());
+    REQUIRE(j.size() == 2);
+    REQUIRE(j[0] == (int64_t)42);
+}
+
+TEST_CASE("Object: cross-resource move assign") {
+    auto resA = std::make_unique<std::pmr::unsynchronized_pool_resource>();
+    auto resB = std::make_unique<std::pmr::unsynchronized_pool_resource>();
+    Json j; // declared last so ~j runs while both pools are still alive
+    {
+        Object oA(resA.get());
+        oA.insert("k", Json((int64_t)7)); // borrowed literal key
+        Object oB(resB.get());
+        oB = std::move(oA);
+        REQUIRE(oB.size() == 1);
+        REQUIRE(oB["k"] == (int64_t)7);
+        REQUIRE(oA.empty());
+        // Storage ownership white-box pin: oB's buffer lives in resB
+        REQUIRE(oB.data().get_allocator().resource() == resB.get());
+        j = Json(std::move(oB));
+    }
+    resA.reset(); // source arena dies before ~j
+    REQUIRE(j.is_object());
+    REQUIRE(j.size() == 1);
+    REQUIRE(j["k"] == (int64_t)7);
+}
+
+// Control group: same-resource move assign must keep stealing the storage
+// buffer zero-cost (buffer pointer unchanged) — guards against any future
+// "unify on element-wise move" simplification regressing the hot path.
+TEST_CASE("Array: same-resource move assign steals storage") {
+    auto res = std::make_unique<std::pmr::unsynchronized_pool_resource>();
+    Array a(res.get());
+    a.reserve(8);
+    a.push_back(Json((int64_t)1));
+    Json *buf = a.data().data();
+    Array b(res.get());
+    b = std::move(a);
+    REQUIRE(b.data().data() == buf);
+    REQUIRE(a.empty());
+    REQUIRE(b.size() == 1);
+}
+
+TEST_CASE("Object: same-resource move assign steals storage") {
+    auto res = std::make_unique<std::pmr::unsynchronized_pool_resource>();
+    Object oA(res.get());
+    oA.insert("k", Json((int64_t)1));
+    auto *buf = oA.data().data();
+    Object oB(res.get());
+    oB = std::move(oA);
+    REQUIRE(oB.data().data() == buf);
+    REQUIRE(oA.empty());
+    REQUIRE(oB.size() == 1);
+}

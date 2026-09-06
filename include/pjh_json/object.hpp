@@ -78,6 +78,10 @@ namespace pjh::json
          * @brief Move assign
          * @param other Source object (left empty)
          * @return *this
+         * @note Cross-resource move-assign moves the entries into this
+         *       object's own resource; this object keeps its own resource
+         *       and the source keeps an empty buffer in its own, so the
+         *       source's resource must outlive the source.
          */
         Object &operator=(Object &&) noexcept;
 

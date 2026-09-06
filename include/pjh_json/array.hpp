@@ -65,6 +65,10 @@ namespace pjh::json
          * @brief Move assign
          * @param other Source array (left empty)
          * @return *this
+         * @note Cross-resource move-assign moves the elements into this
+         *       array's own resource; this array keeps its own resource and
+         *       the source keeps an empty buffer in its own, so the
+         *       source's resource must outlive the source.
          */
         Array &operator=(Array &&) noexcept;
 

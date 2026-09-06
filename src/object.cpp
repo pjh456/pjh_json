@@ -61,18 +61,37 @@ namespace pjh::json
     }
 
     /*
-     * Move ownership, null out source resource
+     * Move assign
+     *
+     * pmr allocators never propagate on move-assign (all
+     * propagate_on_container_* traits are false), so libstdc++ steals the
+     * source's storage only when the allocators compare equal; otherwise it
+     * element-wise moves into a fresh buffer allocated by this container's
+     * own allocator, leaving the source with its own (now empty) buffer.
+     * m_data's allocator member is self-consistent in both cases, so only
+     * the wrapper's m_resource bookkeeping must be guarded:
      *
      * 1. Guard against self-assignment.
-     * 2. Move the internal vector.
-     * 3. Transfer resource pointer, null out source.
+     * 2. Compare allocators before the move (mirrors libstdc++'s own
+     *    steal decision in vector::_M_move_assign).
+     * 3. Move the vector.
+     * 4. Same resource: storage was stolen — transfer m_resource exactly as
+     *    before (value-identical; source nulled).
+     *    Different resources: keep this->m_resource (== m_data's allocator
+     *    resource) so the node this container later heap-allocates into
+     *    (Json::heap_alloc / Json::destroy, json.hpp) frees through the
+     *    resource that owns this container's storage. The source keeps its
+     *    m_resource because it keeps an empty buffer in that resource.
      */
     Object &Object::operator=(Object &&other) noexcept
     {
         if (this == &other)
             return *this;
+        const bool same_resource =
+            m_data.get_allocator() == other.m_data.get_allocator();
         m_data = std::move(other.m_data);
-        m_resource = std::exchange(other.m_resource, nullptr);
+        if (same_resource)
+            m_resource = std::exchange(other.m_resource, nullptr);
         return *this;
     }
 
