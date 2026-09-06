@@ -660,6 +660,8 @@ namespace pjh::json
          * @param key Field name
          * @throws TypeError if not an Object
          * @note Missing key is default-constructed in place.
+         * @note The key is borrowed on insert; for keys that must outlive
+         *       their source use Object::insert(key, val, res).
          */
         Json &operator[](std::string_view key);
         /**

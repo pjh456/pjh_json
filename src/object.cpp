@@ -192,6 +192,37 @@ namespace pjh::json
         m_data.emplace_back(key, std::move(val));
     }
 
+    /*
+     * Insert or overwrite by key, owning the key
+     *
+     * 1. Resolve resource (null falls back to global config resource).
+     * 2. Search for existing key (content compare, mode-agnostic).
+     * 3. If found, overwrite its value; keep the old key.
+     * 4. If not found, copy the key into an owned String via own(res) and
+     *    append. The key buffer is freed back into res at destruction, so
+     *    res must outlive this Object.
+     */
+    void Object::insert(std::string_view key, Json val,
+                        std::pmr::memory_resource *res)
+    {
+        if (!res)
+            res = Config::instance().resource();
+
+        auto it = std::ranges::find_if(
+            m_data,
+            [&](auto &kv) { return kv.first == key; });
+
+        if (it != m_data.end())
+        {
+            it->second = std::move(val);
+            return;
+        }
+
+        String owned{key};
+        owned.own(res);
+        m_data.emplace_back(std::move(owned), std::move(val));
+    }
+
     void Object::insert(Entry entry)
     {
         auto it = std::ranges::find_if(

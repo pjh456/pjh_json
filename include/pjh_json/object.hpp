@@ -24,6 +24,13 @@ namespace pjh::json
      *
      * Backed by std::pmr::vector<Entry> for insertion-order preservation.
      * Copy disabled -- use clone().
+     *
+     * @note Key lifetime: keys inserted via insert(string_view, Json) or
+     *       operator[] are borrowed views, valid only while their source
+     *       memory is alive (the owning Document's buffer, or the caller's
+     *       data for parse_view); a destroyed, moved or reset() source
+     *       leaves them dangling. To make a key independent of its source,
+     *       use insert(key, val, res) (owned, copied into res) or clone().
      */
     class Object
     {
@@ -156,6 +163,8 @@ namespace pjh::json
          * @param key Field name
          * @return Mutable reference to Json for key
          * @note If key does not exist, default-constructed Json is inserted.
+         * @note The key is borrowed on insert; for keys that must outlive
+         *       their source use insert(key, val, res).
          */
         Json &operator[](std::string_view key);
         /**
@@ -187,8 +196,23 @@ namespace pjh::json
          * @brief Insert or overwrite key-value pair
          * @param key Field name
          * @param val Value to assign
+         * @note The key is borrowed: it must stay valid for the Object's
+         *       lifetime. Do not pass a temporary std::string or a document
+         *       buffer that may die before the Object; use
+         *       insert(key, val, res) to own the key.
          */
         void insert(std::string_view key, Json val);
+        /**
+         * @brief Insert or overwrite key-value pair (owns the key)
+         * @param key Field name — content is copied into res; safe to let
+         *        the source memory die afterwards
+         * @param val Value to assign
+         * @param res Resource for the key's heap buffer (pass
+         *        Config::instance().resource() for the global default).
+         *        Must outlive the Object — the key buffer deallocates back
+         *        into res when the key is destroyed.
+         */
+        void insert(std::string_view key, Json val, std::pmr::memory_resource *res);
         /**
          * @brief Insert or overwrite entry
          * @param entry Pair of (String key, Json value)

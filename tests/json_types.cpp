@@ -1,6 +1,8 @@
 #include <doctest/doctest.h>
 #include <pjh_json/json.hpp>
 #include <pjh_json/document.hpp>
+#include <pjh_json/writer.hpp>
+#include <memory_resource>
 
 using namespace pjh::json;
 
@@ -153,4 +155,60 @@ TEST_CASE("Json: clone") {
     REQUIRE(cloned["name"] == "pjh");
     REQUIRE(cloned["nums"].size() == 3);
     REQUIRE(cloned["nums"][2] == (int64_t)3);
+}
+
+TEST_CASE("Object: owned key insert") {
+    std::pmr::memory_resource *mr = std::pmr::new_delete_resource();
+    Object obj;
+    obj.insert("owned-key", Json((int64_t)7), Config::instance().resource());
+    obj.insert("mr-key", Json((int64_t)8), mr);
+    REQUIRE(obj.size() == 2);
+    REQUIRE(obj.contains("owned-key"));
+    REQUIRE(obj.at("owned-key") == (int64_t)7);
+    REQUIRE(obj.at("mr-key") == (int64_t)8);
+    REQUIRE(obj.begin()->first.is_owned());
+
+    // Content equality across storage modes: ref keeps borrowed literal keys
+    Object ref;
+    ref.insert("owned-key", Json((int64_t)7));
+    ref.insert("mr-key", Json((int64_t)8));
+    REQUIRE(ref.begin()->first.is_owned() == false);
+    REQUIRE(obj == ref);
+
+    // Writer path over owned keys
+    std::pmr::string out = dump(Json(std::move(obj)));
+    REQUIRE(out.find("\"owned-key\":7") != std::pmr::string::npos);
+    REQUIRE(out.find("\"mr-key\":8") != std::pmr::string::npos);
+
+    // Overwrite keeps the old (owned) key, last value wins
+    Object obj2;
+    obj2.insert("k", Json((int64_t)1), mr);
+    obj2.insert("k", Json((int64_t)2), mr);
+    REQUIRE(obj2.size() == 1);
+    REQUIRE(obj2.at("k") == (int64_t)2);
+    REQUIRE(obj2.begin()->first.is_owned());
+    REQUIRE(obj2.remove("k") == true);
+}
+
+TEST_CASE("Object: owned key outlives source") {
+    // (a) Temporary key source dies at the end of the inner scope
+    Object obj;
+    {
+        std::string tmp = "temp-key";
+        obj.insert(std::string_view(tmp), Json((int64_t)1),
+                   Config::instance().resource());
+    }
+    REQUIRE(obj.contains("temp-key"));
+    REQUIRE(obj.at("temp-key") == (int64_t)1);
+    REQUIRE(obj.begin()->first.is_owned());
+
+    // (b) Cross-document key: source document's buffer is reset afterwards
+    Document doc = parse_copy(R"({"dyn":"v"})");
+    Object obj2;
+    for (const auto &[k, v] : doc.root().as_object())
+        obj2.insert(static_cast<std::string_view>(k), v.clone(),
+                    Config::instance().resource());
+    doc.reset();
+    REQUIRE(obj2.contains("dyn"));
+    REQUIRE(obj2.at("dyn") == "v");
 }
