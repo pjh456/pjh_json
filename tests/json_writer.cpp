@@ -256,20 +256,23 @@ TEST_CASE("Writer: result entry") {
     // non-finite double (write_double): writer channel E = base JsonError
     auto bad = Json(std::numeric_limits<double>::quiet_NaN());
     auto r = dump_result(bad);
-    REQUIRE(!r.has_value());
-    REQUIRE(r.error().category() == Category::Json);
-    REQUIRE(dynamic_cast<const JsonError *>(&r.error()) != nullptr);
+    REQUIRE(r.is_err());
+    JsonError e = r.unwrap_err();
+    REQUIRE(e.category() == Category::Json);
+    REQUIRE(dynamic_cast<const JsonError *>(&e) != nullptr);
 #endif
     // Success path + payload content
     auto d = parse_copy(R"({"a":1})");
     auto ok = dump_result(d.root());
-    REQUIRE(ok.has_value());
-    REQUIRE(ok.value() == R"({"a":1})");
+    REQUIRE(ok.is_ok());
+    std::pmr::string s = std::move(ok).unwrap();
+    REQUIRE(s == R"({"a":1})");
     // File shell (parent dir missing -> is_open false, cross-platform
     // deterministic)
     auto rf = dump_file_result("pjh_no_such_dir_xyz/out.json", d.root());
-    REQUIRE(!rf.has_value());
-    REQUIRE(rf.error().category() == Category::Json);
+    REQUIRE(rf.is_err());
+    JsonError ef = rf.unwrap_err();
+    REQUIRE(ef.category() == Category::Json);
 }
 
 TEST_CASE("Writer: document result entry") {
@@ -278,18 +281,20 @@ TEST_CASE("Writer: document result entry") {
     // Success: the Document overload serializes the root value (payload pin)
     auto d = parse_copy("[[]]");
     auto ok = dump_result(d);
-    REQUIRE(ok.has_value());
-    REQUIRE(sv(ok.value()) == "[[]]");
+    REQUIRE(ok.is_ok());
+    auto s = std::move(ok).unwrap();
+    REQUIRE(sv(s) == "[[]]");
 
     // Failing path: a max_depth violation is a base JsonError (not a
     // ParseError) with the context-free writer message
     Config::instance().set_max_depth(1);
     auto er = dump_result(d);
-    REQUIRE(!er.has_value());
-    REQUIRE(er.error().category() == Category::Json);
-    REQUIRE(dynamic_cast<const JsonError *>(&er.error()) != nullptr);
-    REQUIRE(dynamic_cast<const ParseError *>(&er.error()) == nullptr);
-    REQUIRE(std::string(er.error().what()) ==
+    REQUIRE(er.is_err());
+    JsonError e = er.unwrap_err();
+    REQUIRE(e.category() == Category::Json);
+    REQUIRE(dynamic_cast<const JsonError *>(&e) != nullptr);
+    REQUIRE(dynamic_cast<const ParseError *>(&e) == nullptr);
+    REQUIRE(std::string(e.what()) ==
             "Maximum nesting depth exceeded during dump");
 
     Config::instance().set_max_depth(0); // restore
@@ -304,20 +309,22 @@ TEST_CASE("Writer: jsonl result entry") {
         "[1,2,3]\n";
     auto doc = parse_jsonl(input);
     auto r = dump_jsonl_result(doc.root().as_array());
-    REQUIRE(r.has_value());
+    REQUIRE(r.is_ok());
     const char *expected =
         "{\"id\":1,\"msg\":\"hi\"}\n"
         "{\"id\":2,\"msg\":\"line\\ntwo\"}\n"
         "[1,2,3]\n";
-    REQUIRE(sv(r.value()) == expected);
+    auto s = std::move(r).unwrap();
+    REQUIRE(sv(s) == expected);
 
 #ifndef __FAST_MATH__
     // Non-finite element: writer channel E = base JsonError
     auto bad = Array::of(Json(std::numeric_limits<double>::quiet_NaN()));
     auto er = dump_jsonl_result(bad);
-    REQUIRE(!er.has_value());
-    REQUIRE(er.error().category() == Category::Json);
-    REQUIRE(dynamic_cast<const JsonError *>(&er.error()) != nullptr);
+    REQUIRE(er.is_err());
+    JsonError e = er.unwrap_err();
+    REQUIRE(e.category() == Category::Json);
+    REQUIRE(dynamic_cast<const JsonError *>(&e) != nullptr);
 #endif
 }
 
@@ -327,8 +334,9 @@ TEST_CASE("Writer: jsonl file result entry") {
     const std::string f = "pjh_result_jsonl.jsonl";
     auto arr = Array::of(Json(1), Json("x"), Json(true));
     auto r = dump_jsonl_file_result(f, arr);
-    REQUIRE(r.has_value());
-    REQUIRE(sv(r.value()) == "1\n\"x\"\ntrue\n");
+    REQUIRE(r.is_ok());
+    auto s = std::move(r).unwrap();
+    REQUIRE(sv(s) == "1\n\"x\"\ntrue\n");
     std::ifstream in(f, std::ios::binary);
     REQUIRE(in.is_open());
     std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -337,7 +345,8 @@ TEST_CASE("Writer: jsonl file result entry") {
 
     // Failing path: parent dir missing -> open check throws the base JsonError
     auto er = dump_jsonl_file_result("pjh_no_such_dir_xyz/out.jsonl", arr);
-    REQUIRE(!er.has_value());
-    REQUIRE(er.error().category() == Category::Json);
-    REQUIRE(dynamic_cast<const JsonError *>(&er.error()) != nullptr);
+    REQUIRE(er.is_err());
+    JsonError e = er.unwrap_err();
+    REQUIRE(e.category() == Category::Json);
+    REQUIRE(dynamic_cast<const JsonError *>(&e) != nullptr);
 }

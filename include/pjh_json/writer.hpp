@@ -7,7 +7,7 @@
 #include <iosfwd>
 
 #include "document.hpp"
-#include "expected.hpp"
+#include <pjh_result/result.hpp>
 
 namespace pjh::json
 {
@@ -56,13 +56,13 @@ namespace pjh::json
      * @param value Json tree to serialize
      * @param opts  Formatting options
      * @param res   Memory resource for output string (default: global config)
-     * @return expected holding the serialized string on success, or the
+     * @return Result holding the serialized string on success, or the
      *         JsonError (copied by value) on failure
      * @throws Only non-JsonError exceptions (e.g. std::bad_alloc) escape;
      *         all writer failures are JsonError by construction
      * @note Same contract as dump; thin catch-and-wrap shell.
      */
-    [[nodiscard]] expected<std::pmr::string, JsonError> dump_result(
+    [[nodiscard]] pjh::result::Result<std::pmr::string, JsonError> dump_result(
         const Json &value,
         const DumpOptions &opts = {},
         std::pmr::memory_resource *res = Config::instance().resource());
@@ -72,13 +72,13 @@ namespace pjh::json
      * @param doc  Document whose root is serialized
      * @param opts Formatting options
      * @param res  Memory resource for output string (default: global config)
-     * @return expected holding the serialized string on success, or the
+     * @return Result holding the serialized string on success, or the
      *         JsonError (copied by value) on failure
      * @throws Only non-JsonError exceptions (e.g. std::bad_alloc) escape;
      *         all writer failures are JsonError by construction
      * @note Same contract as dump(Document); thin catch-and-wrap shell.
      */
-    [[nodiscard]] expected<std::pmr::string, JsonError> dump_result(
+    [[nodiscard]] pjh::result::Result<std::pmr::string, JsonError> dump_result(
         const Document &doc,
         const DumpOptions &opts = {},
         std::pmr::memory_resource *res = Config::instance().resource());
@@ -117,14 +117,14 @@ namespace pjh::json
      * @param path  File path
      * @param value Json tree to serialize
      * @param opts  Formatting options
-     * @return expected holding the serialized content written to the file on
+     * @return Result holding the serialized content written to the file on
      *         success, or the JsonError (copied by value) on failure
      * @throws Only non-JsonError exceptions (e.g. std::bad_alloc) escape;
      *         all writer failures are JsonError by construction
      * @note Same contract as dump_file; thin catch-and-wrap shell. On success
      *       the payload IS the content written to the file.
      */
-    [[nodiscard]] expected<std::pmr::string, JsonError> dump_file_result(
+    [[nodiscard]] pjh::result::Result<std::pmr::string, JsonError> dump_file_result(
         std::string_view path, const Json &value, const DumpOptions &opts = {});
     /**@}*/
 
@@ -145,13 +145,13 @@ namespace pjh::json
      * @brief Serialize array as JSONL (result form)
      * @param arr Array of values (each becomes one line)
      * @param res Memory resource for output string (default: global config)
-     * @return expected holding the JSONL string on success, or the JsonError
+     * @return Result holding the JSONL string on success, or the JsonError
      *         (copied by value) on failure
      * @throws Only non-JsonError exceptions (e.g. std::bad_alloc) escape;
      *         all writer failures are JsonError by construction
      * @note Same contract as dump_jsonl; thin catch-and-wrap shell.
      */
-    [[nodiscard]] expected<std::pmr::string, JsonError> dump_jsonl_result(
+    [[nodiscard]] pjh::result::Result<std::pmr::string, JsonError> dump_jsonl_result(
         const Array &arr,
         std::pmr::memory_resource *res = Config::instance().resource());
 
@@ -174,14 +174,14 @@ namespace pjh::json
      * @brief Write JSONL to file (result form)
      * @param path File path
      * @param arr  Array of values
-     * @return expected holding the serialized content written to the file on
+     * @return Result holding the serialized content written to the file on
      *         success, or the JsonError (copied by value) on failure
      * @throws Only non-JsonError exceptions (e.g. std::bad_alloc) escape;
      *         all writer failures are JsonError by construction
      * @note Same contract as dump_jsonl_file; thin catch-and-wrap shell. On
      *       success the payload IS the content written to the file.
      */
-    [[nodiscard]] expected<std::pmr::string, JsonError> dump_jsonl_file_result(
+    [[nodiscard]] pjh::result::Result<std::pmr::string, JsonError> dump_jsonl_file_result(
         std::string_view path, const Array &arr);
     /**@}*/
 

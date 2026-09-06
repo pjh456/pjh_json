@@ -89,10 +89,11 @@ TEST_CASE("File: empty file") {
 TEST_CASE("File: result entry") {
     // Missing file: context-free ParseError in the error channel (offset 0)
     auto r = parse_file_result("this_file_absolutely_does_not_exist_999.json");
-    REQUIRE(!r.has_value());
-    REQUIRE(r.error().offset() == 0);
-    REQUIRE(r.error().category() == Category::Parse);
-    REQUIRE(dynamic_cast<const ParseError *>(&r.error()) != nullptr);
+    REQUIRE(r.is_err());
+    ParseError e = r.unwrap_err();
+    REQUIRE(e.offset() == 0);
+    REQUIRE(e.category() == Category::Parse);
+    REQUIRE(dynamic_cast<const ParseError *>(&e) != nullptr);
 
     // Success path (mirrors "File: parsing success")
     const std::string f = "pjh_result_file.json";
@@ -101,7 +102,8 @@ TEST_CASE("File: result entry") {
         out << R"({"ok":1})";
     }
     auto ok = parse_file_result(f);
-    REQUIRE(ok.has_value());
-    REQUIRE(ok.value().root()["ok"] == (int64_t)1);
+    REQUIRE(ok.is_ok());
+    Document d = std::move(ok).unwrap();
+    REQUIRE(d.root()["ok"] == (int64_t)1);
     std::remove(f.c_str());
 }

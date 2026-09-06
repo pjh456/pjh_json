@@ -268,15 +268,15 @@ namespace pjh::json
      * std::bad_alloc and other non-JsonError exceptions escape unconverted.
      */
 
-    expected<Document, ParseError> parse_in_situ_result(std::pmr::string &&buffer, Storage storage)
+    pjh::result::Result<Document, ParseError> parse_in_situ_result(std::pmr::string &&buffer, Storage storage)
     {
         try
         {
-            return expected<Document, ParseError>(parse_in_situ(std::move(buffer), storage));
+            return pjh::result::Result<Document, ParseError>::Ok(parse_in_situ(std::move(buffer), storage));
         }
         catch (const ParseError &e)
         {
-            return expected<Document, ParseError>(e);
+            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
         }
         catch (const JsonError &)
         {
@@ -284,15 +284,15 @@ namespace pjh::json
         }
     }
 
-    expected<Document, ParseError> parse_copy_result(std::string_view json, Storage storage)
+    pjh::result::Result<Document, ParseError> parse_copy_result(std::string_view json, Storage storage)
     {
         try
         {
-            return expected<Document, ParseError>(parse_copy(json, storage));
+            return pjh::result::Result<Document, ParseError>::Ok(parse_copy(json, storage));
         }
         catch (const ParseError &e)
         {
-            return expected<Document, ParseError>(e);
+            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
         }
         catch (const JsonError &)
         {
@@ -300,15 +300,15 @@ namespace pjh::json
         }
     }
 
-    expected<Document, ParseError> parse_view_result(const char *data, size_t content_len, Storage storage)
+    pjh::result::Result<Document, ParseError> parse_view_result(const char *data, size_t content_len, Storage storage)
     {
         try
         {
-            return expected<Document, ParseError>(parse_view(data, content_len, storage));
+            return pjh::result::Result<Document, ParseError>::Ok(parse_view(data, content_len, storage));
         }
         catch (const ParseError &e)
         {
-            return expected<Document, ParseError>(e);
+            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
         }
         catch (const JsonError &)
         {
@@ -316,15 +316,15 @@ namespace pjh::json
         }
     }
 
-    expected<Document, ParseError> parse_jsonl_result(std::string_view input, Storage storage)
+    pjh::result::Result<Document, ParseError> parse_jsonl_result(std::string_view input, Storage storage)
     {
         try
         {
-            return expected<Document, ParseError>(parse_jsonl(input, storage));
+            return pjh::result::Result<Document, ParseError>::Ok(parse_jsonl(input, storage));
         }
         catch (const ParseError &e)
         {
-            return expected<Document, ParseError>(e);
+            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
         }
         catch (const JsonError &)
         {
@@ -332,15 +332,15 @@ namespace pjh::json
         }
     }
 
-    expected<Document, ParseError> parse_file_result(std::string_view filepath, Storage storage)
+    pjh::result::Result<Document, ParseError> parse_file_result(std::string_view filepath, Storage storage)
     {
         try
         {
-            return expected<Document, ParseError>(parse_file(filepath, storage));
+            return pjh::result::Result<Document, ParseError>::Ok(parse_file(filepath, storage));
         }
         catch (const ParseError &e)
         {
-            return expected<Document, ParseError>(e);
+            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
         }
         catch (const JsonError &)
         {

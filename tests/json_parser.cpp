@@ -485,24 +485,26 @@ TEST_CASE("Parser: padding width contract") {
 
 TEST_CASE("Parser: result entry success") {
     auto r = parse_copy_result(R"({"a":1,"b":[true,null]})");
-    REQUIRE(r.has_value());
-    REQUIRE(r.value().root()["a"].is_int());
-    REQUIRE(r.value().root()["b"].is_array());
-    // value() hands out a reference; the expected itself stays usable
-    REQUIRE(r.value().root()["b"].size() == 2);
-    REQUIRE(static_cast<bool>(r));
+    REQUIRE(r.is_ok());
+    Document d = std::move(r).unwrap();
+    REQUIRE(d.root()["a"].is_int());
+    REQUIRE(d.root()["b"].is_array());
+    // unwrap() moves the Document out of the channel; the Result enters the
+    // Moved state (see the moved-state case), pins land on the local
+    REQUIRE(d.root()["b"].size() == 2);
 }
 
 TEST_CASE("Parser: result entry positioned error") {
     auto r = parse_copy_result("{"); // "Expected string key in object"
-    REQUIRE(!r.has_value());
-    REQUIRE(r.error().offset() == 1); // '{' consumed, cursor at padding NUL
-    REQUIRE(r.error().category() == Category::Parse);
+    REQUIRE(r.is_err());
+    ParseError e = r.unwrap_err();
+    REQUIRE(e.offset() == 1); // '{' consumed, cursor at padding NUL
+    REQUIRE(e.category() == Category::Parse);
     // no-slicing pin: the channel still holds the full ParseError (dynamic
     // type + machine channel survive the by-value copy; what() carries the
     // offset segment, task 13 shape, mode-independent)
-    REQUIRE(dynamic_cast<const ParseError *>(&r.error()) != nullptr);
-    REQUIRE(std::string(r.error().what()).find(" at offset 1") != std::string::npos);
+    REQUIRE(dynamic_cast<const ParseError *>(&e) != nullptr);
+    REQUIRE(std::string(e.what()).find(" at offset 1") != std::string::npos);
 }
 
 TEST_CASE("Parser: result entry context-free error") {
@@ -513,30 +515,34 @@ TEST_CASE("Parser: result entry context-free error") {
     std::pmr::string small;
     small.resize(10, '\0');
     auto r1 = parse_in_situ_result(std::move(small));
-    REQUIRE(!r1.has_value());
-    REQUIRE(r1.error().offset() == 0);
-    REQUIRE(r1.error().category() == Category::Parse);
+    REQUIRE(r1.is_err());
+    ParseError e1 = r1.unwrap_err();
+    REQUIRE(e1.offset() == 0);
+    REQUIRE(e1.category() == Category::Parse);
 
     // strict duplicate key (offset 0, context-free)
     auto r2 = parse_copy_result(R"({"a":1,"a":2})");
-    REQUIRE(!r2.has_value());
-    REQUIRE(r2.error().offset() == 0);
-    REQUIRE(r2.error().category() == Category::Parse);
+    REQUIRE(r2.is_err());
+    ParseError e2 = r2.unwrap_err();
+    REQUIRE(e2.offset() == 0);
+    REQUIRE(e2.category() == Category::Parse);
 }
 
 TEST_CASE("Parser: jsonl result entry") {
     // Line 2 fails: offset is RELATIVE TO THE LINE, not the whole input
     // ('x' sits at whole-input offset 7 but line offset 3)
     auto r = parse_jsonl_result("[1]\n[2 x]\n[3]");
-    REQUIRE(!r.has_value());
-    REQUIRE(r.error().category() == Category::Parse);
-    REQUIRE(r.error().offset() == 3);
-    REQUIRE(dynamic_cast<const ParseError *>(&r.error()) != nullptr);
+    REQUIRE(r.is_err());
+    ParseError e = r.unwrap_err();
+    REQUIRE(e.category() == Category::Parse);
+    REQUIRE(e.offset() == 3);
+    REQUIRE(dynamic_cast<const ParseError *>(&e) != nullptr);
 
     // All lines legal -> one Array with one element per line
     auto ok = parse_jsonl_result("[1]\n[2]\n[3]");
-    REQUIRE(ok.has_value());
-    REQUIRE(ok.value().root().as_array().size() == 3);
+    REQUIRE(ok.is_ok());
+    Document d = std::move(ok).unwrap();
+    REQUIRE(d.root().as_array().size() == 3);
 }
 
 TEST_CASE("Parser: view result entry") {
@@ -547,9 +553,10 @@ TEST_CASE("Parser: view result entry") {
     std::string buf(content.size() + kPaddingWidth, '\0');
     memcpy(buf.data(), content.data(), content.size());
     auto r = parse_view_result(buf.data(), content.size());
-    REQUIRE(r.has_value());
-    REQUIRE(r.value().is_view());
-    REQUIRE(r.value().root()["a"] == (int64_t)1);
+    REQUIRE(r.is_ok());
+    Document d = std::move(r).unwrap();
+    REQUIRE(d.is_view());
+    REQUIRE(d.root()["a"] == (int64_t)1);
 
     // Truncated string at the content end: positioned ParseError in the
     // channel, offset == content_len (NUL padding stops the SIMD scan)
@@ -557,10 +564,24 @@ TEST_CASE("Parser: view result entry") {
     std::string bad_buf(bad.size() + kPaddingWidth, '\0');
     memcpy(bad_buf.data(), bad.data(), bad.size());
     auto er = parse_view_result(bad_buf.data(), bad.size());
-    REQUIRE(!er.has_value());
-    REQUIRE(er.error().offset() == 4); // "Unterminated string" @ content end
-    REQUIRE(er.error().category() == Category::Parse);
-    REQUIRE(dynamic_cast<const ParseError *>(&er.error()) != nullptr);
+    REQUIRE(er.is_err());
+    ParseError e = er.unwrap_err();
+    REQUIRE(e.offset() == 4); // "Unterminated string" @ content end
+    REQUIRE(e.category() == Category::Parse);
+    REQUIRE(dynamic_cast<const ParseError *>(&e) != nullptr);
+}
+
+TEST_CASE("Parser: result moved state") {
+    auto r = parse_copy_result(R"({"a":1})");
+    REQUIRE(r.is_ok());
+    Document d = std::move(r).unwrap(); // moves the Document out; r enters Moved
+    REQUIRE(r.is_moved());
+    REQUIRE(d.root()["a"].is_int());
+    // wrong-state extractors on a Moved Result throw (stricter than the old
+    // precondition contract; bad_result_access per pjh_result)
+    // void-cast: the extractors are [[nodiscard]], the throw is the pin
+    REQUIRE_THROWS_AS(static_cast<void>(r.unwrap()), pjh::result::bad_result_access);
+    REQUIRE_THROWS_AS(static_cast<void>(r.expect("moved")), pjh::result::bad_result_access);
 }
 
 TEST_CASE("Error: category") {

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.20)
 project(
     pjh_json
     VERSION 0.01
@@ -27,6 +27,9 @@ set(XSIMD_SKIP_INSTALL ON CACHE BOOL "Skip xsimd install" FORCE)
 if(NOT TARGET xsimd)
     add_subdirectory(thirdparty/xsimd)
 endif()
+if(NOT TARGET pjh_result)
+    add_subdirectory(thirdparty/pjh_result)
+endif()
 
 # CXX_STANDARD is a per-target property and does not propagate from pjh_json
 # to consumer targets; set the directory-scope default (after xsimd so its
@@ -53,6 +56,7 @@ target_include_directories(pjh_json
     PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/xsimd/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/pjh_result/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
@@ -123,6 +127,7 @@ endif()
 target_link_libraries(pjh_json
     PUBLIC
     xsimd
+    pjh_result
 )
 
 # -------------------------
@@ -130,12 +135,13 @@ target_link_libraries(pjh_json
 # -------------------------
 set(pjh_json_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/cmake/pjh_json)
 
-install(TARGETS pjh_json xsimd EXPORT pjh_jsonTargets)
+install(TARGETS pjh_json xsimd EXPORT pjh_jsonTargets)   # pjh_result 不入集（文件级守卫全有全无）
 install(EXPORT pjh_jsonTargets
     FILE pjh_jsonTargets.cmake
     DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY thirdparty/xsimd/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY thirdparty/pjh_result/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
 configure_package_config_file(cmake/pjh_jsonConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfig.cmake

@@ -35,31 +35,31 @@ namespace pjh::json
      * the JSONL writer throws only the base JsonError.
      */
 
-    expected<std::pmr::string, JsonError> dump_jsonl_result(
+    pjh::result::Result<std::pmr::string, JsonError> dump_jsonl_result(
         const Array &arr, std::pmr::memory_resource *res)
     {
         try
         {
-            return expected<std::pmr::string, JsonError>(dump_jsonl(arr, res));
+            return pjh::result::Result<std::pmr::string, JsonError>::Ok(dump_jsonl(arr, res));
         }
         catch (const JsonError &e)
         {
-            return expected<std::pmr::string, JsonError>(e);
+            return pjh::result::Result<std::pmr::string, JsonError>::Err(JsonError(e));
         }
     }
 
-    expected<std::pmr::string, JsonError> dump_jsonl_file_result(
+    pjh::result::Result<std::pmr::string, JsonError> dump_jsonl_file_result(
         std::string_view path, const Array &arr)
     {
         try
         {
             std::pmr::string out = dump_jsonl(arr);
             write_file(path, out);
-            return expected<std::pmr::string, JsonError>(std::move(out));
+            return pjh::result::Result<std::pmr::string, JsonError>::Ok(std::move(out));
         }
         catch (const JsonError &e)
         {
-            return expected<std::pmr::string, JsonError>(e);
+            return pjh::result::Result<std::pmr::string, JsonError>::Err(JsonError(e));
         }
     }
 }

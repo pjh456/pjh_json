@@ -5,7 +5,7 @@
 #include <memory_resource>
 #include <string_view>
 
-#include "expected.hpp"
+#include <pjh_result/result.hpp>
 #include "json.hpp"
 #include "literal.hpp"
 
@@ -214,7 +214,7 @@ namespace pjh::json
      * @param buffer Padded pmr::string (must have kPaddingWidth extra NUL
      *               bytes)
      * @param storage Allocation strategy (default: global config)
-     * @return expected holding the Document on success, or the ParseError
+     * @return Result holding the Document on success, or the ParseError
      *         (copied by value, offset preserved) on failure
      * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
      *         escaping the parse core (unreachable in the current core) is
@@ -223,7 +223,7 @@ namespace pjh::json
      *       runtime-checked); the throwing entry remains the core, this is a
      *       thin catch-and-wrap shell.
      */
-    [[nodiscard]] expected<Document, ParseError> parse_in_situ_result(
+    [[nodiscard]] pjh::result::Result<Document, ParseError> parse_in_situ_result(
         std::pmr::string &&buffer,
         Storage storage = Config::instance().storage());
 
@@ -231,14 +231,14 @@ namespace pjh::json
      * @brief Parse copy of json string (padded internally, result form)
      * @param json UTF-8 JSON text (copied and padded internally)
      * @param storage Allocation strategy (default: global config)
-     * @return expected holding the Document on success, or the ParseError
+     * @return Result holding the Document on success, or the ParseError
      *         (copied by value, offset preserved) on failure
      * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
      *         escaping the parse core (unreachable in the current core) is
      *         rethrown
      * @note Same contract as parse_copy; thin catch-and-wrap shell.
      */
-    [[nodiscard]] expected<Document, ParseError> parse_copy_result(
+    [[nodiscard]] pjh::result::Result<Document, ParseError> parse_copy_result(
         std::string_view json,
         Storage storage = Config::instance().storage());
 
@@ -248,7 +248,7 @@ namespace pjh::json
      * @param content_len Length of JSON text (data must have kPaddingWidth
      *                    extra NUL bytes past content_len)
      * @param storage Allocation strategy (default: global config)
-     * @return expected holding the Document on success, or the ParseError
+     * @return Result holding the Document on success, or the ParseError
      *         (copied by value, offset preserved) on failure
      * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
      *         escaping the parse core (unreachable in the current core) is
@@ -256,7 +256,7 @@ namespace pjh::json
      * @note Same caller-padding contract as parse_view; thin catch-and-wrap
      *       shell.
      */
-    [[nodiscard]] expected<Document, ParseError> parse_view_result(
+    [[nodiscard]] pjh::result::Result<Document, ParseError> parse_view_result(
         const char *data, size_t content_len,
         Storage storage = Config::instance().storage());
 
@@ -264,7 +264,7 @@ namespace pjh::json
      * @brief Parse newline-delimited JSON (result form)
      * @param input Multi-line text, each non-blank line is one JSON value
      * @param storage Allocation strategy (default: global config)
-     * @return expected holding the Document (root = Array of per-line values)
+     * @return Result holding the Document (root = Array of per-line values)
      *         on success, or the first failing line's ParseError (copied by
      *         value) on failure
      * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
@@ -274,7 +274,7 @@ namespace pjh::json
      *       input (same as the throwing parse_jsonl). First error wins: the
      *       document is discarded when any line fails.
      */
-    [[nodiscard]] expected<Document, ParseError> parse_jsonl_result(
+    [[nodiscard]] pjh::result::Result<Document, ParseError> parse_jsonl_result(
         std::string_view input,
         Storage storage = Config::instance().storage());
 
@@ -282,7 +282,7 @@ namespace pjh::json
      * @brief Parse JSON from file (result form)
      * @param filepath Path to file
      * @param storage Allocation strategy (default: global config)
-     * @return expected holding the Document on success, or the ParseError
+     * @return Result holding the Document on success, or the ParseError
      *         (copied by value; file I/O failures are context-free, offset 0)
      *         on failure
      * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
@@ -290,7 +290,7 @@ namespace pjh::json
      *         rethrown
      * @note Same contract as parse_file; thin catch-and-wrap shell.
      */
-    [[nodiscard]] expected<Document, ParseError> parse_file_result(
+    [[nodiscard]] pjh::result::Result<Document, ParseError> parse_file_result(
         std::string_view filepath,
         Storage storage = Config::instance().storage());
 

@@ -1,5 +1,8 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+find_dependency(pjh_result)
+
 include("${CMAKE_CURRENT_LIST_DIR}/pjh_jsonTargets.cmake")
 
 check_required_components(pjh_json)
