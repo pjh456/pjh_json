@@ -7,6 +7,7 @@
 
 #include <pjh_json/document.hpp>
 #include <pjh_json/parser.hpp>
+#include <pjh_json/writer.hpp>
 
 using namespace pjh::json;
 
@@ -388,4 +389,39 @@ TEST_CASE("Parser: 19-digit integer boundary") {
     REQUIRE(jl.root()[0].is_int());
     REQUIRE(jl.root()[0].as_int() == std::numeric_limits<int64_t>::max());
     REQUIRE(jl.root()[1].is_float());
+}
+
+TEST_CASE("Parser: duplicate keys last-wins") {
+    // strict off (default): last-wins, matching Object::insert
+    auto d1 = parse_copy(R"({"a":1,"a":2})");
+    REQUIRE(d1.root().is_object());
+    REQUIRE(d1.root().size() == 1);
+    REQUIRE(d1.root()["a"] == (int64_t)2);
+
+    // in-place overwrite: first position and key preserved
+    auto d2 = parse_copy(R"({"a":1,"b":2,"a":3})");
+    REQUIRE(d2.root().size() == 2);
+    REQUIRE(d2.root().as_object().begin()->first == "a");
+    REQUIRE(d2.root()["b"] == (int64_t)2);
+    REQUIRE(d2.root()["a"] == (int64_t)3);
+
+    // container value replaced in place (old object destroyed mid-parse)
+    auto d3 = parse_copy(R"({"k":{"x":1},"k":[1,2]})");
+    REQUIRE(d3.root()["k"].is_array());
+    REQUIRE(d3.root()["k"].size() == 2);
+
+    // triple duplicate collapses to the last value
+    auto d4 = parse_copy(R"({"a":1,"a":2,"a":3})");
+    REQUIRE(d4.root().size() == 1);
+    REQUIRE(d4.root()["a"] == (int64_t)3);
+
+    // jsonl shares the same object path
+    auto jl = parse_jsonl("{\"a\":1,\"a\":2}\n");
+    REQUIRE(jl.root().is_array());
+    REQUIRE(jl.root().size() == 1);
+    REQUIRE(jl.root()[0]["a"] == (int64_t)2);
+
+    // round trip: dump emits the single last-wins entry
+    auto out = dump(d1.root());
+    REQUIRE(out == R"({"a":2})");
 }

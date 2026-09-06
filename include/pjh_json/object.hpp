@@ -200,6 +200,9 @@ namespace pjh::json
          *       lifetime. Do not pass a temporary std::string or a document
          *       buffer that may die before the Object; use
          *       insert(key, val, res) to own the key.
+         * @note The parser applies the same last-wins rule for duplicate
+         *       keys unless strict_duplicate_keys is on
+         *       (Config::set_strict_duplicate_keys).
          */
         void insert(std::string_view key, Json val);
         /**

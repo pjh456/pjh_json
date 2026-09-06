@@ -1,6 +1,7 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
 #include <optional>
+#include <ranges>
 #include <unordered_set>
 
 namespace pjh::json
@@ -31,7 +32,9 @@ namespace pjh::json
      *    a. Parse a string key.
      *    b. Conditionally check for duplicate keys.
      *    c. Expect and consume ':' separator.
-     *    d. Parse the value in-place.
+     *    d. Parse the value in-place; if the key already exists (strict
+     *       off) overwrite the first occurrence's value, preserving its
+     *       key and position — last-wins, as in Object::insert.
      *    e. Check for ',' (continue) or '}' (done).
      */
     void Parser::parse_object_inplace(Json &out)
@@ -78,9 +81,24 @@ namespace pjh::json
                 throw_parse_error("Expected ':' in object", m_curr, m_begin);
             ++m_curr;
 
-            // Parse value
-            obj.data().emplace_back(std::move(key), Json(nullptr));
-            parse_value_inplace(obj.data().back().second);
+            // Parse value — last-wins duplicate policy, mirroring
+            // Object::insert: the first occurrence keeps its key and
+            // position, its value is overwritten in place; append only
+            // when the key is unseen. (When strict is ON a duplicate
+            // already threw above, so a hit here is a non-strict
+            // duplicate.)
+            auto it = std::ranges::find_if(
+                obj.data(),
+                [&](const auto &kv) { return kv.first == key; });
+            if (it != obj.data().end())
+            {
+                parse_value_inplace(it->second);
+            }
+            else
+            {
+                obj.data().emplace_back(std::move(key), Json(nullptr));
+                parse_value_inplace(obj.data().back().second);
+            }
 
             // Check for closing brace or comma
             skip_whitespace();

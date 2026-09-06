@@ -212,3 +212,17 @@ TEST_CASE("Object: owned key outlives source") {
     REQUIRE(obj2.contains("dyn"));
     REQUIRE(obj2.at("dyn") == "v");
 }
+
+TEST_CASE("Json: object parse-insert semantics unified") {
+    // insert-on-existing and parse-duplicate-key must agree: last-wins
+    Object o;
+    o.insert("a", Json((int64_t)1));
+    o.insert("a", Json((int64_t)2));
+    REQUIRE(o.size() == 1);
+    REQUIRE(o.at("a") == (int64_t)2);
+
+    auto d = parse_copy(R"({"a":1,"a":2})");
+    REQUIRE(d.root().size() == 1);
+    REQUIRE(d.root()["a"] == (int64_t)2);
+    REQUIRE(Json(std::move(o)) == d.root());
+}

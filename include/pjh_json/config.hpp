@@ -63,8 +63,12 @@ namespace pjh::json
 
         /**
          * @brief Enable/disable duplicate key detection during parse
-         * @note Default: false (skip check for performance). JSON spec
-         *       does not mandate rejection of duplicate keys.
+         * @note Default: false. When off, duplicate keys are allowed and
+         *       resolve last-wins: the first occurrence keeps its key and
+         *       position, its value is overwritten in place — the same
+         *       semantics as Object::insert. When on, a duplicate key
+         *       throws ParseError. JSON spec does not mandate rejection
+         *       of duplicate keys.
          */
         void set_strict_duplicate_keys(bool enable) noexcept { m_strict_duplicate_keys = enable; }
         [[nodiscard]] bool strict_duplicate_keys() const noexcept { return m_strict_duplicate_keys; }
