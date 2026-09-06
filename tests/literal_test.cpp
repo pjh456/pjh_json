@@ -95,23 +95,25 @@ TEST_CASE("Literal: magic constants") {
 TEST_CASE("Literal: throw_parse_error") {
     CHECK_THROWS_AS(throw_parse_error("test error", "xxx", "xxx"), ParseError);
 
-#ifdef NDEBUG
+    // Task 13: one definition for all build modes — "<msg> at offset N"
+    // (release no longer flattens to the literal "parse error").
+    char data[] = "hello world";
     try {
-        const char b[] = "xxx";
-        throw_parse_error("test error", b, b);
-        REQUIRE(false);
-    } catch (const ParseError &e) {
-        REQUIRE(std::string(e.what()) == "parse error");
-    }
-#else
-    try {
-        char data[] = "hello world";
         throw_parse_error("test error", data + 4, data);
         REQUIRE(false);
     } catch (const ParseError &e) {
         REQUIRE(std::string(e.what()).find("test error at offset 4") != std::string::npos);
+        REQUIRE(e.offset() == 4);
     }
-#endif
+
+    const char b[] = "xxx";
+    try {
+        throw_parse_error("test error", b, b);
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(std::string(e.what()).find("test error at offset 0") != std::string::npos);
+        REQUIRE(e.offset() == 0);
+    }
 }
 
 TEST_CASE("Literal: array literal roundtrip") {

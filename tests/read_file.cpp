@@ -34,5 +34,10 @@ TEST_CASE("File: parsing success") {
 }
 
 TEST_CASE("File: parsing failure") {
-    REQUIRE_THROWS_AS(parse_file("this_file_absolutely_does_not_exist_999.json"), std::runtime_error);
+    try {
+        parse_file("this_file_absolutely_does_not_exist_999.json");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 0); // context-free: no position
+    }
 }

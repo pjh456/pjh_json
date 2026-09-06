@@ -294,10 +294,8 @@ TEST_CASE("Parser: max depth") {
     auto doc10 = parse_copy(deep(10, '[', ']'));
     REQUIRE(depth_of(doc10.root()) == 10);
     CHECK_THROWS_AS((void)parse_copy(deep(11, '[', ']')), ParseError);
-#ifndef NDEBUG
     CHECK_THROWS_WITH((void)parse_copy(deep(11, '[', ']')),
                       "Maximum nesting depth exceeded at offset 10");
-#endif
 
     // Object path counts symmetrically with arrays
     Config::instance().set_max_depth(2);
