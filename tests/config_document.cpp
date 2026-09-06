@@ -2,6 +2,8 @@
 #include <string>
 #include <string_view>
 
+#include <xsimd/xsimd.hpp>
+
 #include <pjh_json/document.hpp>
 #include <pjh_json/config.hpp>
 #include <pjh_json/writer.hpp>
@@ -47,7 +49,9 @@ TEST_CASE("Document: move assignment no UAF") {
     REQUIRE(d2.root()["k"].size() == 3);
     REQUIRE(d2.root()["n"] == (int64_t)42);
     REQUIRE(d2.is_view() == false);
-    REQUIRE(d2.buffer().size() >= 64);
+    // Exact allocation-site pin: buffer is content + kPaddingWidth, and the
+    // contract pins kPaddingWidth to 2x the SIMD batch (32-byte content).
+    REQUIRE(d2.buffer().size() == 32 + 2 * xsimd::batch<uint8_t>::size);
     REQUIRE(d1.root().is_null());
     REQUIRE(d1.buffer().empty());
 
@@ -74,7 +78,8 @@ TEST_CASE("Document: move ctor no UAF") {
         // moved-to is self-contained (semantics intact, dump intact)
         REQUIRE(b.root()["k"].size() == 3);
         REQUIRE(b.root()["n"] == (int64_t)42);
-        REQUIRE(b.buffer().size() >= 64);
+        // Exact allocation-site pin (same 32-byte content + 2x-batch padding)
+        REQUIRE(b.buffer().size() == 32 + 2 * xsimd::batch<uint8_t>::size);
         REQUIRE(b.is_view() == false);
         REQUIRE(dump(b) == R"({"k":[1,2,3],"s":"hello","n":42})");
         // moved-from surface state
