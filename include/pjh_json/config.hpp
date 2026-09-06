@@ -50,6 +50,9 @@ namespace pjh::json
         /**
          * @brief Get current arena resource (never null)
          * @return Pointer to the global memory_resource
+         * @note Lock-free in the common case: the pointer is cached atomically
+         *       and only invalidated by release()/reset(); the shared lock is
+         *       taken solely to re-cache after such an invalidation.
          */
         [[nodiscard]] std::pmr::memory_resource *resource() noexcept;
         /**
@@ -110,6 +113,10 @@ namespace pjh::json
         std::atomic<Storage> m_storage{Storage::Pooled};
         size_t m_block = 4096;
         std::unique_ptr<Document> m_global;
+        // Fast-path cache of m_global->resource(): read lock-free in resource(),
+        // invalidated by release()/reset() while holding m_mutex (reset()
+        // rebuilds the arena, so the pointer changes).
+        std::atomic<std::pmr::memory_resource *> m_cached_resource{nullptr};
         std::shared_mutex m_mutex;
     };
 }
