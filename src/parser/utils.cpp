@@ -7,10 +7,17 @@ namespace pjh::json
     /*
      * Skip whitespace using SIMD
      *
-     * 1. Quick scalar check: if current byte > 0x20, it is not WS -> return.
-     * 2. SIMD loop: load a batch, compute WS mask (bytes <= 0x20 and != 0).
+     * RFC 8259 §2: whitespace is exactly SPACE (0x20), TAB (0x09),
+     * LF (0x0A), CR (0x0D) — no other byte, in particular no other
+     * C0 control character.
+     *
+     * 1. Quick scalar check: if current byte > 0x20, it is not WS ->
+     *    return (every legal WS byte is <= 0x20, so this stays a
+     *    1-byte fast path).
+     * 2. SIMD loop: load a batch, mark lanes equal to one of the 4 bytes.
      * 3. Find the first non-WS byte via ctz on the complement mask.
-     * 4. Advance cursor past it and return.
+     * 4. Advance cursor past it and return. The 64-byte NUL padding
+     *    always stops the loop (NUL is not WS).
      */
     void Parser::skip_whitespace()
     {
@@ -23,14 +30,16 @@ namespace pjh::json
             batch_type::size <= 64,
             "batch_size too large for uint64_t mask");
 
-        auto ctrl_space = xsimd::broadcast<uint8_t>(0x20);
-        auto zero = xsimd::broadcast<uint8_t>(0);
+        auto space = xsimd::broadcast<uint8_t>(0x20);
+        auto tab = xsimd::broadcast<uint8_t>(0x09);
+        auto nl = xsimd::broadcast<uint8_t>(0x0A);
+        auto cr = xsimd::broadcast<uint8_t>(0x0D);
 
         while (true)
         {
             auto b = batch_type::load_unaligned(
                 reinterpret_cast<const uint8_t *>(m_curr));
-            auto is_ws = (b <= ctrl_space) & (b != zero);
+            auto is_ws = (b == space) | (b == tab) | (b == nl) | (b == cr);
 
             uint64_t mask = is_ws.mask();
             uint64_t non_ws_mask = ~mask;

@@ -157,5 +157,55 @@ TEST_CASE("Parser: view") {
 
     auto doc2 = parse_view(esc_buf.data(), esc_content.size());
     REQUIRE(doc2.is_view());
+    REQUIRE(doc2.root().is_object());
     REQUIRE(doc2.root()["msg"] == "hello\nworld");
+}
+
+TEST_CASE("Parser: whitespace rejects C0 control bytes") {
+    // RFC 8259 §2: whitespace is exactly space (0x20), tab (0x09),
+    // LF (0x0A), CR (0x0D). Every other C0 control byte is illegal in
+    // both value-before and value-after positions.
+    for (int c = 1; c < 0x20; ++c)
+    {
+        if (c == 0x09 || c == 0x0A || c == 0x0D)
+            continue;
+        std::string lead = std::string(1, static_cast<char>(c)) + "1";
+        CHECK_THROWS_AS((void)parse_copy(lead), std::runtime_error);
+        std::string trail = "1";
+        trail += static_cast<char>(c);
+        CHECK_THROWS_AS((void)parse_copy(trail), std::runtime_error);
+    }
+    // container-internal positions (object key->value gap, array element gap)
+    std::string obj = std::string("{\"k\" ") + static_cast<char>(0x0B) + " : 1}";
+    CHECK_THROWS_AS((void)parse_copy(obj), std::runtime_error);
+    std::string arr = std::string("[1 ") + static_cast<char>(0x1B) + " , 2]";
+    CHECK_THROWS_AS((void)parse_copy(arr), std::runtime_error);
+}
+
+TEST_CASE("Parser: NUL and DEL are not whitespace") {
+    CHECK_THROWS_AS((void)parse_copy(std::string(1, '\0') + "1"), std::runtime_error);
+    CHECK_THROWS_AS((void)parse_copy(std::string("1") + std::string(1, '\0')), std::runtime_error);
+    CHECK_THROWS_AS((void)parse_copy(std::string(1, char(0x7F))), std::runtime_error);
+}
+
+TEST_CASE("Parser: jsonl control byte line rejected") {
+    // A line made of an illegal control byte must error, not silently hop
+    // into the next line and duplicate its value.
+    CHECK_THROWS_AS(
+        (void)parse_jsonl(std::string(1, char(0x0B)) + "\n[1]\n"),
+        std::runtime_error);
+    CHECK_THROWS_AS(
+        (void)parse_jsonl(std::string(1, '\0') + "\n[1]\n"),
+        std::runtime_error);
+    // A whitespace-only line (CR/space) is blank: skipped, not duplicated.
+    auto doc_ws = parse_jsonl(std::string("\r \r\n[1]\n"));
+    REQUIRE(doc_ws.root().is_array());
+    REQUIRE(doc_ws.root().size() == 1);
+    REQUIRE(doc_ws.root()[0][0] == (int64_t)1);
+    // Legal jsonl still parses.
+    auto doc = parse_jsonl("1\n2\n");
+    REQUIRE(doc.root().is_array());
+    REQUIRE(doc.root().size() == 2);
+    REQUIRE(doc.root()[0] == (int64_t)1);
+    REQUIRE(doc.root()[1] == (int64_t)2);
 }

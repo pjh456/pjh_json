@@ -173,12 +173,16 @@ namespace pjh::json
             if (len > 0 && base[i + len - 1] == '\r')
                 --len;
 
-            // Skip blank/whitespace-only lines
+            // Skip blank/whitespace-only lines. The set must match
+            // Parser::skip_whitespace (RFC 8259: space, tab, CR, LF;
+            // LF cannot occur inside a line). A non-blank line therefore
+            // always contains a byte the parser rejects in-line, so the
+            // SIMD skip can never hop past this line into the next one.
             bool blank = true;
             for (size_t k = 0; k < len; ++k)
             {
                 char c = base[i + k];
-                if (c != ' ' && c != '\t')
+                if (c != ' ' && c != '\t' && c != '\r')
                 {
                     blank = false;
                     break;
