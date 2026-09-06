@@ -271,3 +271,73 @@ TEST_CASE("Writer: result entry") {
     REQUIRE(!rf.has_value());
     REQUIRE(rf.error().category() == Category::Json);
 }
+
+TEST_CASE("Writer: document result entry") {
+    Config::instance().set_max_depth(0); // defensive: clear prior case state
+
+    // Success: the Document overload serializes the root value (payload pin)
+    auto d = parse_copy("[[]]");
+    auto ok = dump_result(d);
+    REQUIRE(ok.has_value());
+    REQUIRE(sv(ok.value()) == "[[]]");
+
+    // Failing path: a max_depth violation is a base JsonError (not a
+    // ParseError) with the context-free writer message
+    Config::instance().set_max_depth(1);
+    auto er = dump_result(d);
+    REQUIRE(!er.has_value());
+    REQUIRE(er.error().category() == Category::Json);
+    REQUIRE(dynamic_cast<const JsonError *>(&er.error()) != nullptr);
+    REQUIRE(dynamic_cast<const ParseError *>(&er.error()) == nullptr);
+    REQUIRE(std::string(er.error().what()) ==
+            "Maximum nesting depth exceeded during dump");
+
+    Config::instance().set_max_depth(0); // restore
+}
+
+TEST_CASE("Writer: jsonl result entry") {
+    // Success: one compact line per element (mirrors "Writer: JSONL")
+    std::string_view input =
+        "{\"id\":1,\"msg\":\"hi\"}\n"
+        "{\"id\":2,\"msg\":\"line\\ntwo\"}\n"
+        "\n"
+        "[1,2,3]\n";
+    auto doc = parse_jsonl(input);
+    auto r = dump_jsonl_result(doc.root().as_array());
+    REQUIRE(r.has_value());
+    const char *expected =
+        "{\"id\":1,\"msg\":\"hi\"}\n"
+        "{\"id\":2,\"msg\":\"line\\ntwo\"}\n"
+        "[1,2,3]\n";
+    REQUIRE(sv(r.value()) == expected);
+
+#ifndef __FAST_MATH__
+    // Non-finite element: writer channel E = base JsonError
+    auto bad = Array::of(Json(std::numeric_limits<double>::quiet_NaN()));
+    auto er = dump_jsonl_result(bad);
+    REQUIRE(!er.has_value());
+    REQUIRE(er.error().category() == Category::Json);
+    REQUIRE(dynamic_cast<const JsonError *>(&er.error()) != nullptr);
+#endif
+}
+
+TEST_CASE("Writer: jsonl file result entry") {
+    // Success: the payload IS the content written to the file — read the
+    // file back and compare against the channel string
+    const std::string f = "pjh_result_jsonl.jsonl";
+    auto arr = Array::of(Json(1), Json("x"), Json(true));
+    auto r = dump_jsonl_file_result(f, arr);
+    REQUIRE(r.has_value());
+    REQUIRE(sv(r.value()) == "1\n\"x\"\ntrue\n");
+    std::ifstream in(f, std::ios::binary);
+    REQUIRE(in.is_open());
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    REQUIRE(content == "1\n\"x\"\ntrue\n");
+    std::remove(f.c_str());
+
+    // Failing path: parent dir missing -> open check throws the base JsonError
+    auto er = dump_jsonl_file_result("pjh_no_such_dir_xyz/out.jsonl", arr);
+    REQUIRE(!er.has_value());
+    REQUIRE(er.error().category() == Category::Json);
+    REQUIRE(dynamic_cast<const JsonError *>(&er.error()) != nullptr);
+}

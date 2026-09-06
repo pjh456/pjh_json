@@ -539,6 +539,30 @@ TEST_CASE("Parser: jsonl result entry") {
     REQUIRE(ok.value().root().as_array().size() == 3);
 }
 
+TEST_CASE("Parser: view result entry") {
+    // The result form never runtime-verifies caller padding (unlike
+    // parse_in_situ_result); the buffer is the contract-legal padded form,
+    // with the JSON itself truncated at the content end
+    std::string content = R"({"a":1})";
+    std::string buf(content.size() + kPaddingWidth, '\0');
+    memcpy(buf.data(), content.data(), content.size());
+    auto r = parse_view_result(buf.data(), content.size());
+    REQUIRE(r.has_value());
+    REQUIRE(r.value().is_view());
+    REQUIRE(r.value().root()["a"] == (int64_t)1);
+
+    // Truncated string at the content end: positioned ParseError in the
+    // channel, offset == content_len (NUL padding stops the SIMD scan)
+    std::string bad = R"("abc)";
+    std::string bad_buf(bad.size() + kPaddingWidth, '\0');
+    memcpy(bad_buf.data(), bad.data(), bad.size());
+    auto er = parse_view_result(bad_buf.data(), bad.size());
+    REQUIRE(!er.has_value());
+    REQUIRE(er.error().offset() == 4); // "Unterminated string" @ content end
+    REQUIRE(er.error().category() == Category::Parse);
+    REQUIRE(dynamic_cast<const ParseError *>(&er.error()) != nullptr);
+}
+
 TEST_CASE("Error: category") {
     REQUIRE(JsonError("x").category() == Category::Json);
     REQUIRE(ParseError("x", 3).category() == Category::Parse);
