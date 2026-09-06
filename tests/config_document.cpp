@@ -4,6 +4,7 @@
 
 #include <pjh_json/document.hpp>
 #include <pjh_json/config.hpp>
+#include <pjh_json/writer.hpp>
 
 using namespace pjh::json;
 
@@ -64,6 +65,51 @@ TEST_CASE("Document: move assignment no UAF") {
     REQUIRE(a2.root()["n"] == (int64_t)42);
     REQUIRE(a1.root().is_null());
     REQUIRE(a1.buffer().empty());
+}
+
+TEST_CASE("Document: move ctor no UAF") {
+    auto a = parse_copy(R"({"k":[1,2,3],"s":"hello","n":42})");
+    {
+        Document b = std::move(a);   // move-ctor on a non-empty source
+        // moved-to is self-contained (semantics intact, dump intact)
+        REQUIRE(b.root()["k"].size() == 3);
+        REQUIRE(b.root()["n"] == (int64_t)42);
+        REQUIRE(b.buffer().size() >= 64);
+        REQUIRE(b.is_view() == false);
+        REQUIRE(dump(b) == R"({"k":[1,2,3],"s":"hello","n":42})");
+        // moved-from surface state
+        REQUIRE(a.root().is_null());
+        REQUIRE(a.buffer().empty());
+    }   // b dies first -> its arena object is freed here
+    // The moved-from buffer allocator must point at the immortal
+    // resource, not at b's (now dead) arena.
+    // Compare the resource() raw pointer only, never the allocator with
+    // operator==: the latter virtual-dispatches do_is_equal on both ends
+    // and would UAF on the dead arena by the test itself pre-fix.
+    REQUIRE(a.buffer().get_allocator().resource()
+            == std::pmr::new_delete_resource());
+
+    // lifecycle control (green pre- and post-fix, pins the order):
+    // a as destination, then a as source, both on the rebound buffer
+    a.reset();
+    auto c = parse_copy(R"([1])");
+    a = std::move(c);
+    REQUIRE(a.root().size() == 1);
+    Document d;
+    d = std::move(a);
+    REQUIRE(d.root().size() == 1);
+
+    // Arena (monotonic) variant: same pin, same rebind
+    auto ea = parse_copy(R"({"k":[1,2,3],"s":"hello","n":42})", Storage::Arena);
+    {
+        Document eb = std::move(ea);
+        REQUIRE(eb.root()["k"].size() == 3);
+        REQUIRE(eb.root()["n"] == (int64_t)42);
+    }
+    REQUIRE(ea.root().is_null());
+    REQUIRE(ea.buffer().empty());
+    REQUIRE(ea.buffer().get_allocator().resource()
+            == std::pmr::new_delete_resource());
 }
 
 TEST_CASE("Document: reset no UAF") {

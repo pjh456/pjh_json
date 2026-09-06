@@ -74,19 +74,32 @@ namespace pjh::json
          */
         Document &operator=(const Document &) = delete;
         /**
-         * @brief Move construct (default)
+         * @brief Move construct (see @note)
+         * @note Memberwise in declaration order, identical to the defaulted
+         *       form, then the moved-from source's m_buffer is rebound to
+         *       the immortal new_delete_resource: the pmr string move ctor
+         *       copies the allocator member, so the source would otherwise
+         *       keep a pointer to the arena that moved into this document —
+         *       a heap-use-after-free on the next allocator comparison or
+         *       deallocation, whichever of the two dies first. The moved-
+         *       from document is left empty/valid-Null, self-contained no
+         *       matter which of the two dies first. Do not simplify back
+         *       to a bare memberwise move (nor reorder the member
+         *       declarations above).
          */
-        Document(Document &&) noexcept = default;
+        Document(Document &&) noexcept;
         /**
          * @brief Move assign (member-wise, noexcept)
          * @param other Source document (left empty)
          * @return *this
          * @note m_arena is assigned last: the old root/buffer deallocate
-         *       into the old arena, so it must outlive them. The body also
-         *       rebuilds m_buffer (and the source's) in place with the
-         *       source's resource before the arena moves, because pmr
-         *       string assignment never updates the allocator member.
-         *       Do not reorder the body (nor the member declarations above).
+         *       into the old arena, so it must outlive them. Because pmr
+         *       string assignment never updates the allocator member,
+         *       both buffers are rebuilt in place (destroy + placement-
+         *       new): this's m_buffer with the source's resource, before
+         *       the arena moves; the source's m_buffer with the immortal
+         *       new_delete_resource, after. Do not reorder the body (nor
+         *       the member declarations above).
          */
         Document &operator=(Document &&other) noexcept;
 

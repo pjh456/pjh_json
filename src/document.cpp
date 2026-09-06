@@ -74,6 +74,40 @@ namespace pjh::json
     }
 
     /*
+     * Move construct
+     *
+     * Memberwise in declaration order (identical to the defaulted form):
+     * unique_ptr move nulls other.m_arena without destroying the arena
+     * object; Json's move ctor (json.hpp:257-261) nulls other.m_root's tag;
+     * the pmr string move steals storage and COPIES the allocator member,
+     * leaving other.m_buffer's allocator pointing at the arena object that
+     * moved into this document. That arena dies with its new owner — any
+     * later string operation on the moved-from document would then
+     * virtual-dispatch do_is_equal/do_allocate onto freed memory.
+     *
+     * Rebind the moved-from buffer to the immortal new_delete_resource,
+     * verbatim the operator= source rebind, so the moved-from document is
+     * self-contained no matter which of the two dies first. The explicit
+     * destructor is trivially safe: the moved-from string is empty (local),
+     * so its dispose skips deallocation and never touches the old member.
+     */
+    Document::Document(Document &&other) noexcept
+        : m_arena(std::move(other.m_arena)),
+          m_root(std::move(other.m_root)),
+          m_buffer(std::move(other.m_buffer)),
+          m_is_view(other.m_is_view),
+          m_storage(other.m_storage),
+          m_block(other.m_block),
+          m_thread_safe(other.m_thread_safe),
+          m_count(other.m_count)
+    {
+        using PmrString = std::pmr::string;
+        other.m_buffer.~PmrString();
+        ::new (static_cast<void *>(std::addressof(other.m_buffer)))
+            PmrString(std::pmr::new_delete_resource());
+    }
+
+    /*
      * Return the arena resource, or fall back to new_delete_resource
      */
     std::pmr::memory_resource *Document::resource() noexcept
