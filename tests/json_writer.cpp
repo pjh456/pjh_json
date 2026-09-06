@@ -250,3 +250,24 @@ TEST_CASE("Writer: max depth") {
 
     Config::instance().set_max_depth(0); // restore
 }
+
+TEST_CASE("Writer: result entry") {
+#ifndef __FAST_MATH__
+    // non-finite double (write_double): writer channel E = base JsonError
+    auto bad = Json(std::numeric_limits<double>::quiet_NaN());
+    auto r = dump_result(bad);
+    REQUIRE(!r.has_value());
+    REQUIRE(r.error().category() == Category::Json);
+    REQUIRE(dynamic_cast<const JsonError *>(&r.error()) != nullptr);
+#endif
+    // Success path + payload content
+    auto d = parse_copy(R"({"a":1})");
+    auto ok = dump_result(d.root());
+    REQUIRE(ok.has_value());
+    REQUIRE(ok.value() == R"({"a":1})");
+    // File shell (parent dir missing -> is_open false, cross-platform
+    // deterministic)
+    auto rf = dump_file_result("pjh_no_such_dir_xyz/out.json", d.root());
+    REQUIRE(!rf.has_value());
+    REQUIRE(rf.error().category() == Category::Json);
+}

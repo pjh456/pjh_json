@@ -246,4 +246,53 @@ namespace pjh::json
         Document doc = parse_copy(json);
         return dump(doc.root(), opts, res);
     }
+
+    /*
+     * Structured-entry shells (task 16): thin catch-and-wrap over the
+     * throwing writer entries. Every writer throw site is the base JsonError
+     * (no more-derived class exists on this side), so the single-cell ladder
+     * is complete: catch by value into the expected channel, nothing to
+     * rethrow (non-JsonError exceptions such as std::bad_alloc escape).
+     */
+
+    expected<std::pmr::string, JsonError> dump_result(
+        const Json &value, const DumpOptions &opts, std::pmr::memory_resource *res)
+    {
+        try
+        {
+            return expected<std::pmr::string, JsonError>(dump(value, opts, res));
+        }
+        catch (const JsonError &e)
+        {
+            return expected<std::pmr::string, JsonError>(e);
+        }
+    }
+
+    expected<std::pmr::string, JsonError> dump_result(
+        const Document &doc, const DumpOptions &opts, std::pmr::memory_resource *res)
+    {
+        try
+        {
+            return expected<std::pmr::string, JsonError>(dump(doc, opts, res));
+        }
+        catch (const JsonError &e)
+        {
+            return expected<std::pmr::string, JsonError>(e);
+        }
+    }
+
+    expected<std::pmr::string, JsonError> dump_file_result(
+        std::string_view path, const Json &value, const DumpOptions &opts)
+    {
+        try
+        {
+            std::pmr::string out = dump(value, opts);
+            write_file(path, out);
+            return expected<std::pmr::string, JsonError>(std::move(out));
+        }
+        catch (const JsonError &e)
+        {
+            return expected<std::pmr::string, JsonError>(e);
+        }
+    }
 }

@@ -29,4 +29,37 @@ namespace pjh::json
     {
         write_file(path, dump_jsonl(arr));
     }
+
+    /*
+     * Structured-entry shells (task 16): same single-cell ladder as dump.cpp —
+     * the JSONL writer throws only the base JsonError.
+     */
+
+    expected<std::pmr::string, JsonError> dump_jsonl_result(
+        const Array &arr, std::pmr::memory_resource *res)
+    {
+        try
+        {
+            return expected<std::pmr::string, JsonError>(dump_jsonl(arr, res));
+        }
+        catch (const JsonError &e)
+        {
+            return expected<std::pmr::string, JsonError>(e);
+        }
+    }
+
+    expected<std::pmr::string, JsonError> dump_jsonl_file_result(
+        std::string_view path, const Array &arr)
+    {
+        try
+        {
+            std::pmr::string out = dump_jsonl(arr);
+            write_file(path, out);
+            return expected<std::pmr::string, JsonError>(std::move(out));
+        }
+        catch (const JsonError &e)
+        {
+            return expected<std::pmr::string, JsonError>(e);
+        }
+    }
 }

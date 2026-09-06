@@ -9,12 +9,37 @@ namespace pjh::json
 {
 
     /**
+     * @brief Machine-readable error class (no RTTI needed)
+     *
+     * One value per concrete exception class: ParseError -> Parse,
+     * TypeError -> Type, base JsonError (writer/serialization + write-side
+     * file I/O) -> Json.
+     *
+     * @note Deliberately class-level, not site-level: an Io value is not
+     *       expressible per class — file I/O failures are ParseError on the
+     *       read side (parse_file) and JsonError on the write side
+     *       (dump_file). Splitting them would need per-site tagging at ~9
+     *       throw sites; the "Failed to <verb> file" message family stays the
+     *       human distinction (what() is an implementation detail either way).
+     */
+    enum class Category { Parse, Type, Json };
+
+    /**
      * @brief Base exception for all JSON errors
      */
     class JsonError : public std::runtime_error
     {
     public:
         using std::runtime_error::runtime_error;
+
+        /**
+         * @brief Machine-readable class (see Category)
+         * @return Category::Json for the base class
+         */
+        [[nodiscard]] virtual Category category() const noexcept
+        {
+            return Category::Json;
+        }
     };
 
     /**
@@ -50,6 +75,15 @@ namespace pjh::json
             return m_offset;
         }
 
+        /**
+         * @brief Machine-readable class (see Category)
+         * @return Category::Parse
+         */
+        [[nodiscard]] Category category() const noexcept override
+        {
+            return Category::Parse;
+        }
+
     private:
         size_t m_offset = 0;
     };
@@ -61,6 +95,15 @@ namespace pjh::json
     {
     public:
         using JsonError::JsonError;
+
+        /**
+         * @brief Machine-readable class (see Category)
+         * @return Category::Type
+         */
+        [[nodiscard]] Category category() const noexcept override
+        {
+            return Category::Type;
+        }
     };
 
 }

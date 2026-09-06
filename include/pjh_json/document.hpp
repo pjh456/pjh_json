@@ -5,6 +5,7 @@
 #include <memory_resource>
 #include <string_view>
 
+#include "expected.hpp"
 #include "json.hpp"
 #include "literal.hpp"
 
@@ -205,6 +206,91 @@ namespace pjh::json
      * @throws ParseError if file cannot be opened, read, or contains invalid JSON
      */
     [[nodiscard]] Document parse_file(
+        std::string_view filepath,
+        Storage storage = Config::instance().storage());
+
+    /**
+     * @brief Parse buffer with trailing kPaddingWidth-byte padding (result form)
+     * @param buffer Padded pmr::string (must have kPaddingWidth extra NUL
+     *               bytes)
+     * @param storage Allocation strategy (default: global config)
+     * @return expected holding the Document on success, or the ParseError
+     *         (copied by value, offset preserved) on failure
+     * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
+     *         escaping the parse core (unreachable in the current core) is
+     *         rethrown
+     * @note Same contract as parse_in_situ (buffer consumed, NUL tail
+     *       runtime-checked); the throwing entry remains the core, this is a
+     *       thin catch-and-wrap shell.
+     */
+    [[nodiscard]] expected<Document, ParseError> parse_in_situ_result(
+        std::pmr::string &&buffer,
+        Storage storage = Config::instance().storage());
+
+    /**
+     * @brief Parse copy of json string (padded internally, result form)
+     * @param json UTF-8 JSON text (copied and padded internally)
+     * @param storage Allocation strategy (default: global config)
+     * @return expected holding the Document on success, or the ParseError
+     *         (copied by value, offset preserved) on failure
+     * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
+     *         escaping the parse core (unreachable in the current core) is
+     *         rethrown
+     * @note Same contract as parse_copy; thin catch-and-wrap shell.
+     */
+    [[nodiscard]] expected<Document, ParseError> parse_copy_result(
+        std::string_view json,
+        Storage storage = Config::instance().storage());
+
+    /**
+     * @brief Parse string view (no copy, result form)
+     * @param data Pointer to JSON text
+     * @param content_len Length of JSON text (data must have kPaddingWidth
+     *                    extra NUL bytes past content_len)
+     * @param storage Allocation strategy (default: global config)
+     * @return expected holding the Document on success, or the ParseError
+     *         (copied by value, offset preserved) on failure
+     * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
+     *         escaping the parse core (unreachable in the current core) is
+     *         rethrown
+     * @note Same caller-padding contract as parse_view; thin catch-and-wrap
+     *       shell.
+     */
+    [[nodiscard]] expected<Document, ParseError> parse_view_result(
+        const char *data, size_t content_len,
+        Storage storage = Config::instance().storage());
+
+    /**
+     * @brief Parse newline-delimited JSON (result form)
+     * @param input Multi-line text, each non-blank line is one JSON value
+     * @param storage Allocation strategy (default: global config)
+     * @return expected holding the Document (root = Array of per-line values)
+     *         on success, or the first failing line's ParseError (copied by
+     *         value) on failure
+     * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
+     *         escaping the parse core (unreachable in the current core) is
+     *         rethrown
+     * @note Error offsets are relative to the failing line, not the whole
+     *       input (same as the throwing parse_jsonl). First error wins: the
+     *       document is discarded when any line fails.
+     */
+    [[nodiscard]] expected<Document, ParseError> parse_jsonl_result(
+        std::string_view input,
+        Storage storage = Config::instance().storage());
+
+    /**
+     * @brief Parse JSON from file (result form)
+     * @param filepath Path to file
+     * @param storage Allocation strategy (default: global config)
+     * @return expected holding the Document on success, or the ParseError
+     *         (copied by value; file I/O failures are context-free, offset 0)
+     *         on failure
+     * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
+     *         escaping the parse core (unreachable in the current core) is
+     *         rethrown
+     * @note Same contract as parse_file; thin catch-and-wrap shell.
+     */
+    [[nodiscard]] expected<Document, ParseError> parse_file_result(
         std::string_view filepath,
         Storage storage = Config::instance().storage());
 

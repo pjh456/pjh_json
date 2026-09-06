@@ -482,3 +482,69 @@ TEST_CASE("Parser: padding width contract") {
     auto doc = parse_view(buf.data(), content.size());
     REQUIRE(doc.root().size() == 3);
 }
+
+TEST_CASE("Parser: result entry success") {
+    auto r = parse_copy_result(R"({"a":1,"b":[true,null]})");
+    REQUIRE(r.has_value());
+    REQUIRE(r.value().root()["a"].is_int());
+    REQUIRE(r.value().root()["b"].is_array());
+    // value() hands out a reference; the expected itself stays usable
+    REQUIRE(r.value().root()["b"].size() == 2);
+    REQUIRE(static_cast<bool>(r));
+}
+
+TEST_CASE("Parser: result entry positioned error") {
+    auto r = parse_copy_result("{"); // "Expected string key in object"
+    REQUIRE(!r.has_value());
+    REQUIRE(r.error().offset() == 1); // '{' consumed, cursor at padding NUL
+    REQUIRE(r.error().category() == Category::Parse);
+    // no-slicing pin: the channel still holds the full ParseError (dynamic
+    // type + machine channel survive the by-value copy; what() carries the
+    // offset segment, task 13 shape, mode-independent)
+    REQUIRE(dynamic_cast<const ParseError *>(&r.error()) != nullptr);
+    REQUIRE(std::string(r.error().what()).find(" at offset 1") != std::string::npos);
+}
+
+TEST_CASE("Parser: result entry context-free error") {
+    ConfigGuard guard; // first: save the entering state before any mutation
+    Config::instance().set_strict_duplicate_keys(true);
+
+    // in_situ size below kPaddingWidth (offset 0, context-free)
+    std::pmr::string small;
+    small.resize(10, '\0');
+    auto r1 = parse_in_situ_result(std::move(small));
+    REQUIRE(!r1.has_value());
+    REQUIRE(r1.error().offset() == 0);
+    REQUIRE(r1.error().category() == Category::Parse);
+
+    // strict duplicate key (offset 0, context-free)
+    auto r2 = parse_copy_result(R"({"a":1,"a":2})");
+    REQUIRE(!r2.has_value());
+    REQUIRE(r2.error().offset() == 0);
+    REQUIRE(r2.error().category() == Category::Parse);
+}
+
+TEST_CASE("Parser: jsonl result entry") {
+    // Line 2 fails: offset is RELATIVE TO THE LINE, not the whole input
+    // ('x' sits at whole-input offset 7 but line offset 3)
+    auto r = parse_jsonl_result("[1]\n[2 x]\n[3]");
+    REQUIRE(!r.has_value());
+    REQUIRE(r.error().category() == Category::Parse);
+    REQUIRE(r.error().offset() == 3);
+    REQUIRE(dynamic_cast<const ParseError *>(&r.error()) != nullptr);
+
+    // All lines legal -> one Array with one element per line
+    auto ok = parse_jsonl_result("[1]\n[2]\n[3]");
+    REQUIRE(ok.has_value());
+    REQUIRE(ok.value().root().as_array().size() == 3);
+}
+
+TEST_CASE("Error: category") {
+    REQUIRE(JsonError("x").category() == Category::Json);
+    REQUIRE(ParseError("x", 3).category() == Category::Parse);
+    REQUIRE(TypeError("x").category() == Category::Type);
+    // Inheritance channel: the base-class reference observes the derived
+    // value (no slicing, runtime polymorphism)
+    const JsonError &base = ParseError("x", 7);
+    REQUIRE(base.category() == Category::Parse);
+}
