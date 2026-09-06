@@ -1417,3 +1417,30 @@ TEST_CASE("Json: as_variant lifetime window") {
     }
     REQUIRE(j.is_string()); // Json still alive after the window
 }
+
+TEST_CASE("Json: const array range-for iterates") {
+    // R_21 F1 regression pin (fixer sub-batch, R_21 fixer scope): the
+    // array branch of Json::end() const used to return the BEGIN position
+    // (copy-paste slip from the adjacent begin() const body) — range-for
+    // over a NON-EMPTY const array then compared begin() == end() at
+    // position 0 and silently iterated ZERO times (no crash, no throw —
+    // the "silent zero-iteration buries the bug" mode ruling C rejects for
+    // scalars). No committed case could fire this: case 3's const loop is
+    // an object, case 5's range expressions bind non-const Json —
+    // 121/121 x3 green was behaviorally consistent with the defect.
+    // const Json lvalue straight from the Array::of prvalue (Json(Array)
+    // ctor, elided — Array is non-copyable, array.hpp:53, so no
+    // Array lvalue may ever feed the by-value ctor).
+    const Json ca = Array::of(Json((int64_t)10), Json((int64_t)20),
+                              Json((int64_t)30));
+    int n = 0;
+    const int64_t expect[3] = {10, 20, 30};
+    for (const auto &e : ca)
+    {
+        REQUIRE(e.key.empty()); // array element => empty key view (convention)
+        REQUIRE(e.value.as_int() == expect[n]);
+        ++n;
+    }
+    REQUIRE(n == 3); // pre-fix red: n stays 0 — zero iterations, not a crash
+    REQUIRE(ca.begin() != ca.end()); // R2 wall: non-empty => distinct
+}

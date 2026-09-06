@@ -391,7 +391,7 @@ namespace pjh::json
     ConstJsonIterator Json::end() const
     {
         if (is_array())
-            return ConstJsonIterator(as_array().begin());
+            return ConstJsonIterator(as_array().end());
         if (is_object())
             return ConstJsonIterator(as_object().end());
         throw TypeError("expected array or object");
