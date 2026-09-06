@@ -181,9 +181,14 @@ TEST_CASE("Writer: max depth") {
     CHECK_THROWS_WITH((void)dump(doc60.root()),
                       "Maximum nesting depth exceeded during dump");
 
-    // Empty containers do not bypass the limit
+    // Empty containers do not bypass the limit — parse while depth is
+    // unlimited, so only dump() can throw; the dump message pins the
+    // dump-side check (a parse-side throw carries the parse message)
+    auto doc2 = parse_copy("{\"a\":{}}");
     Config::instance().set_max_depth(1);
-    REQUIRE_THROWS_AS((void)dump(parse_copy("{\"a\":{}}").root()), JsonError);
+    REQUIRE_THROWS_AS((void)dump(doc2.root()), JsonError);
+    CHECK_THROWS_WITH((void)dump(doc2.root()),
+                      "Maximum nesting depth exceeded during dump");
 
     // The failure is a JsonError, not a ParseError
     bool caught = false;
