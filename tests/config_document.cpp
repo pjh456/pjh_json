@@ -110,3 +110,19 @@ TEST_CASE("Config: max depth") {
     Config::instance().reset();
     REQUIRE(Config::instance().max_depth() == 0);
 }
+
+TEST_CASE("Config: reset restores defaults") {
+    Config &cfg = Config::instance();
+
+    cfg.set_strict_duplicate_keys(true);
+    cfg.set_arena_block_size(65536);
+    cfg.set_max_depth(42);
+    cfg.configure(Storage::Arena, 8192);
+
+    cfg.reset();
+
+    REQUIRE(cfg.strict_duplicate_keys() == false);
+    REQUIRE(cfg.arena_block_size() == 0);
+    REQUIRE(cfg.max_depth() == 0);
+    REQUIRE(cfg.storage() == Storage::Pooled);
+}

@@ -10,6 +10,35 @@
 
 using namespace pjh::json;
 
+namespace
+{
+    // doctest has no per-case setup/teardown: a case that mutates the
+    // global Config singleton must restore it itself. RAII (not a manual
+    // end-of-case restore) so the restore still runs when a REQUIRE fails
+    // and unwinds the case. Covers the knobs with getter+setter pairs;
+    // storage/block are restored manually by their cases.
+    struct ConfigGuard
+    {
+        bool m_strict;
+        size_t m_arena_block;
+        size_t m_max_depth;
+
+        ConfigGuard()
+            : m_strict(Config::instance().strict_duplicate_keys()),
+              m_arena_block(Config::instance().arena_block_size()),
+              m_max_depth(Config::instance().max_depth())
+        {
+        }
+
+        ~ConfigGuard()
+        {
+            Config::instance().set_strict_duplicate_keys(m_strict);
+            Config::instance().set_arena_block_size(m_arena_block);
+            Config::instance().set_max_depth(m_max_depth);
+        }
+    };
+}
+
 TEST_CASE("Parser: literal") {
     auto doc1 = parse_copy("null");
     REQUIRE(doc1.root().is_null());
@@ -121,6 +150,7 @@ TEST_CASE("Parser: complex") {
 }
 
 TEST_CASE("Parser: error handling") {
+    ConfigGuard guard; // first: save the entering state before any mutation
     Config::instance().set_strict_duplicate_keys(true);
 
     CHECK_THROWS_AS((void)parse_copy(""), std::runtime_error);

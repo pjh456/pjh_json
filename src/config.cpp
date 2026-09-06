@@ -77,13 +77,16 @@ namespace pjh::json
     }
 
     /*
-     * Reset to defaults: Pooled/4096, max depth 0 (unlimited), then release.
+     * Reset to defaults: Pooled/4096, strict_duplicate_keys off,
+     * arena_block_size 0 (auto), max depth 0 (unlimited), then release.
      */
     void Config::reset()
     {
         std::lock_guard lock(m_mutex);
         m_storage = Storage::Pooled;
         m_block = 4096;
+        m_strict_duplicate_keys = false;
+        m_arena_block_size = 0;
         m_max_depth = 0;
         release_locked();
     }

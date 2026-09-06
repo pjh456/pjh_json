@@ -97,8 +97,9 @@ namespace pjh::json
         void release();
         /**
          * @brief Reset config to defaults and release global document
-         * @note Equivalent to configure(Pooled, 4096), max depth reset to 0
-         *       (unlimited), then release().
+         * @note Equivalent to configure(Pooled, 4096),
+         *       strict_duplicate_keys = false, arena_block_size = 0 (auto),
+         *       max depth = 0 (unlimited), then release().
          */
         void reset();
 
