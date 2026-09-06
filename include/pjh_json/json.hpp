@@ -464,6 +464,14 @@ namespace pjh::json
         [[nodiscard]] constexpr bool is_int() const noexcept { return m_type == Type::Integer; }
 
         /**
+         * @brief true if holds int64
+         * @note Full-spelling alias for is_int() (the house name); both
+         *       test the stored slot only — a 5.0 held in the Floating
+         *       slot is NOT integer (type-based, not value-based).
+         */
+        [[nodiscard]] constexpr bool is_integer() const noexcept { return is_int(); }
+
+        /**
          * @brief true if holds double
          */
         [[nodiscard]] constexpr bool is_float() const noexcept { return m_type == Type::Floating; }
@@ -640,11 +648,134 @@ namespace pjh::json
          * @return nullptr if not Object
          */
         [[nodiscard]] Object *try_as_object() noexcept;
+         /**
+          * @brief Try get const object pointer
+          * @return nullptr if not Object
+          */
+         [[nodiscard]] const Object *try_as_object() const noexcept;
+         /**@}*/
+
+    public:
         /**
-         * @brief Try get const object pointer
-         * @return nullptr if not Object
+         * @name Checked numeric conversion (get / try_get)
+         *
+         * Fourth accessor family, deliberately OUTSIDE the as_* dual
+         * track: it returns a computed conversion by value, so the
+         * type guard stays active in BOTH build modes (contrast as_*:
+         * release no-op; contrast at(): checked in both modes — get<T>
+         * joins at()'s family). Tag is the single source of truth: a
+         * slot is read only after m_type confirms it (no
+         * non-active union member read in any mode).
          */
-        [[nodiscard]] const Object *try_as_object() const noexcept;
+        /**@{*/
+        /**
+         * @brief Get the held numeric value as T (checked conversion)
+         *
+         * Accepted source slots:
+         * - bool:      Boolean (identity)
+         * - int64_t:   Integer only — a Floating source is rejected
+         *               (narrowing: truncation/overflow, and the
+         *               double->int64 cast of inf/NaN is UB)
+         * - float:     Integer, Floating (defined rounding)
+         * - double:    Integer, Floating (defined rounding)
+         * Any other slot throws in debug AND release.
+         *
+         * @tparam T bool, int64_t, float or double (the slot's own
+         *         types; other T is a compile error)
+         * @return The value converted to T
+         * @throws TypeError if the active slot is not in T's accepted set
+         * @note Widening is defined rounding to the nearest
+         *       representable value (round to even): values above 2^53
+         *       may not round-trip (2^53+1 -> 2^53). Use is_int()/
+         *       as_int() when int64 identity matters. Not an as_*
+         *       dual-track accessor: conversions must compute in both
+         *       modes, so the guard cannot be PJH_JSON_NOEXCEPT
+         *       (same family as at(): checked in both modes).
+         */
+        template <typename T>
+            requires(std::same_as<T, bool> || std::same_as<T, int64_t> ||
+                     std::same_as<T, float> || std::same_as<T, double>)
+        [[nodiscard]] T get() const
+        {
+            if constexpr (std::same_as<T, bool>)
+            {
+                if (m_type != Type::Boolean)
+                    throw TypeError("type mismatch in get()");
+                return m_data.boolean;
+            }
+            else if constexpr (std::same_as<T, int64_t>)
+            {
+                if (m_type != Type::Integer)
+                    throw TypeError("type mismatch in get()");
+                return m_data.integer;
+            }
+            else if constexpr (std::same_as<T, float>)
+            {
+                if (m_type == Type::Integer)
+                    return static_cast<float>(m_data.integer);
+                if (m_type == Type::Floating)
+                    return static_cast<float>(m_data.floating);
+                throw TypeError("type mismatch in get()");
+            }
+            else if constexpr (std::same_as<T, double>)
+            {
+                if (m_type == Type::Integer)
+                    return static_cast<double>(m_data.integer);
+                if (m_type == Type::Floating)
+                    return m_data.floating;
+                throw TypeError("type mismatch in get()");
+            }
+            else
+            {
+                static_assert(sizeof(T) == 0,
+                              "get<T>: T must be bool, int64_t, float or double");
+            }
+        }
+
+        /**
+         * @brief Try get<T>() without throwing
+         * @tparam T bool, int64_t, float or double
+         * @return The value converted to T, or nullopt if the active
+         *         slot is not in T's accepted set. Numeric widening
+         *         always succeeds: try_get<double>() on an Integer
+         *         yields the widened (nearest representable) value.
+         */
+        template <typename T>
+            requires(std::same_as<T, bool> || std::same_as<T, int64_t> ||
+                     std::same_as<T, float> || std::same_as<T, double>)
+        [[nodiscard]] std::optional<T> try_get() const noexcept
+        {
+            if constexpr (std::same_as<T, bool>)
+            {
+                if (m_type == Type::Boolean)
+                    return m_data.boolean;
+            }
+            else if constexpr (std::same_as<T, int64_t>)
+            {
+                if (m_type == Type::Integer)
+                    return m_data.integer;
+            }
+            else if constexpr (std::same_as<T, float>)
+            {
+                if (m_type == Type::Integer)
+                    return static_cast<float>(m_data.integer);
+                if (m_type == Type::Floating)
+                    return static_cast<float>(m_data.floating);
+            }
+            else if constexpr (std::same_as<T, double>)
+            {
+                if (m_type == Type::Integer)
+                    return static_cast<double>(m_data.integer);
+                if (m_type == Type::Floating)
+                    return m_data.floating;
+            }
+            else
+            {
+                static_assert(sizeof(T) == 0,
+                              "try_get<T>: T must be bool, int64_t, float or double");
+            }
+            return std::nullopt;
+        }
         /**@}*/
 
     public:

@@ -3,6 +3,7 @@
 #include <pjh_json/document.hpp>
 #include <pjh_json/path.hpp>
 #include <pjh_json/writer.hpp>
+#include <limits>
 #include <memory_resource>
 
 using namespace pjh::json;
@@ -641,4 +642,212 @@ TEST_CASE("Json: owned ctor overload set (compile pins)") {
     static_assert(std::constructible_from<Json, std::string, std::pmr::memory_resource *>);
     static_assert(!std::constructible_from<Json, const Json &, std::pmr::memory_resource *>);
     static_assert(!std::constructible_from<Json, bool, std::pmr::memory_resource *>);
+}
+
+// --- task 19: get<T> / try_get<T> / is_integer ---
+
+// 8-slot fixture: every Json tag exactly once. StringOwned slot is produced
+// through the existing clone path (StringView clone = StringOwned,
+// src/json.cpp:83-93) — no task-18 dependency.
+// slot 0 = Null, 1 = Boolean, 2 = Integer, 3 = Floating, 4 = StringView,
+//      5 = StringOwned, 6 = Array, 7 = Object
+static Array make_slots()
+{
+    Json owned_str = parse_copy("\"s\"").root().clone();
+    return Array::of(Json(nullptr), Json(true), Json((int64_t)7),
+                      Json(1.5), Json("s"), std::move(owned_str),
+                      Json(Array{}), Json(Object{}));
+}
+
+TEST_CASE("Json: is_integer type test") {
+    Array slots = make_slots();
+    REQUIRE(slots.size() == 8);
+    // Alias identity on all 8 slots
+    for (size_t i = 0; i < slots.size(); ++i)
+        REQUIRE(slots[i].is_integer() == slots[i].is_int());
+    // Per-slot values (type-based, not value-based)
+    REQUIRE(!slots[0].is_integer());
+    REQUIRE(!slots[1].is_integer());
+    REQUIRE(slots[2].is_integer());
+    REQUIRE(!slots[3].is_integer());
+    REQUIRE(!slots[4].is_integer());
+    REQUIRE(!slots[5].is_integer());
+    REQUIRE(!slots[6].is_integer());
+    REQUIRE(!slots[7].is_integer());
+
+    // constexpr pin (literal_test.cpp precedent): the alias is constexpr-capable
+    constexpr Json c((int64_t)7);
+    static_assert(c.is_integer());
+    static_assert(!c.is_float());
+}
+
+TEST_CASE("Json: get numeric matrix") {
+    Array slots = make_slots();
+    // Full 32-cell matrix of plan 19 §2.2, same shape in debug and release
+    // (no #ifdef): rejected cells throw TypeError, accepted cells return.
+
+    // Accepted cells (value pins)
+    REQUIRE(slots[1].get<bool>() == true);
+    REQUIRE(slots[2].get<int64_t>() == (int64_t)7);
+    REQUIRE(slots[2].get<float>() == 7.0f);  // int64 -> float (defined rounding, exact at 7)
+    REQUIRE(slots[2].get<double>() == 7.0);  // int64 -> double (defined widening)
+    REQUIRE(slots[3].get<float>() == 1.5f);  // double -> float (exact)
+    REQUIRE(slots[3].get<double>() == 1.5);  // identity
+
+    // T = bool: Boolean only
+    REQUIRE_THROWS_AS((void)slots[0].get<bool>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[2].get<bool>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[3].get<bool>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[4].get<bool>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[5].get<bool>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[6].get<bool>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[7].get<bool>(), TypeError);
+
+    // T = int64_t: Integer only (strict — a Floating source is rejected)
+    REQUIRE_THROWS_AS((void)slots[0].get<int64_t>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[1].get<int64_t>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[3].get<int64_t>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[4].get<int64_t>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[5].get<int64_t>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[6].get<int64_t>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[7].get<int64_t>(), TypeError);
+
+    // T = float: Integer + Floating
+    REQUIRE_THROWS_AS((void)slots[0].get<float>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[1].get<float>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[4].get<float>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[5].get<float>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[6].get<float>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[7].get<float>(), TypeError);
+
+    // T = double: Integer + Floating
+    REQUIRE_THROWS_AS((void)slots[0].get<double>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[1].get<double>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[4].get<double>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[5].get<double>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[6].get<double>(), TypeError);
+    REQUIRE_THROWS_AS((void)slots[7].get<double>(), TypeError);
+}
+
+TEST_CASE("Json: try_get numeric matrix") {
+    Array slots = make_slots();
+    // Same 32 cells, nullopt/has_value form (noexcept track)
+    // Accepted cells (value pins)
+    REQUIRE(slots[1].try_get<bool>().has_value());
+    REQUIRE(*slots[1].try_get<bool>() == true);
+    REQUIRE(slots[2].try_get<int64_t>().has_value());
+    REQUIRE(*slots[2].try_get<int64_t>() == (int64_t)7);
+    REQUIRE(*slots[2].try_get<float>() == 7.0f);
+    REQUIRE(*slots[2].try_get<double>() == 7.0);
+    REQUIRE(*slots[3].try_get<float>() == 1.5f);
+    REQUIRE(*slots[3].try_get<double>() == 1.5);
+
+    // T = bool: Boolean only
+    REQUIRE(!slots[0].try_get<bool>().has_value());
+    REQUIRE(!slots[2].try_get<bool>().has_value());
+    REQUIRE(!slots[3].try_get<bool>().has_value());
+    REQUIRE(!slots[4].try_get<bool>().has_value());
+    REQUIRE(!slots[5].try_get<bool>().has_value());
+    REQUIRE(!slots[6].try_get<bool>().has_value());
+    REQUIRE(!slots[7].try_get<bool>().has_value());
+
+    // T = int64_t: Integer only (strict)
+    REQUIRE(!slots[0].try_get<int64_t>().has_value());
+    REQUIRE(!slots[1].try_get<int64_t>().has_value());
+    REQUIRE(!slots[3].try_get<int64_t>().has_value());
+    REQUIRE(!slots[4].try_get<int64_t>().has_value());
+    REQUIRE(!slots[5].try_get<int64_t>().has_value());
+    REQUIRE(!slots[6].try_get<int64_t>().has_value());
+    REQUIRE(!slots[7].try_get<int64_t>().has_value());
+
+    // T = float: Integer + Floating
+    REQUIRE(!slots[0].try_get<float>().has_value());
+    REQUIRE(!slots[1].try_get<float>().has_value());
+    REQUIRE(!slots[4].try_get<float>().has_value());
+    REQUIRE(!slots[5].try_get<float>().has_value());
+    REQUIRE(!slots[6].try_get<float>().has_value());
+    REQUIRE(!slots[7].try_get<float>().has_value());
+
+    // T = double: Integer + Floating
+    REQUIRE(!slots[0].try_get<double>().has_value());
+    REQUIRE(!slots[1].try_get<double>().has_value());
+    REQUIRE(!slots[4].try_get<double>().has_value());
+    REQUIRE(!slots[5].try_get<double>().has_value());
+    REQUIRE(!slots[6].try_get<double>().has_value());
+    REQUIRE(!slots[7].try_get<double>().has_value());
+
+    // Consistency law over all 8 slots: is_* true iff the matching try_get
+    // has a value (delivery-surface self-consistency pin)
+    for (const auto &j : slots)
+    {
+        REQUIRE(j.is_integer() == j.try_get<int64_t>().has_value());
+        REQUIRE(j.is_number() == j.try_get<double>().has_value());
+        REQUIRE(j.is_boolean() == j.try_get<bool>().has_value());
+    }
+}
+
+TEST_CASE("Json: get widening boundary") {
+    // int64 -> double: the five pins of plan 19 §2.5 (round to even)
+    REQUIRE(Json((int64_t)9007199254740991).get<double>() == 9007199254740991.0); // 2^53-1, exact
+    REQUIRE(Json((int64_t)9007199254740992).get<double>() == 9007199254740992.0); // 2^53, exact
+    // 2^53+1 is the exact midpoint of 2^53 and 2^53+2 => tie => the even
+    // mantissa is 2^53 (rounds DOWN, NOT to 2^53+2 = 9007199254740994.0)
+    REQUIRE(Json((int64_t)9007199254740993).get<double>() == 9007199254740992.0);
+    REQUIRE(Json(std::numeric_limits<int64_t>::max()).get<double>() == 9223372036854775808.0);   // 2^63
+    REQUIRE(Json(std::numeric_limits<int64_t>::min()).get<double>() == -9223372036854775808.0);  // -2^63
+
+    // int64 -> float: 2^24+1 is a tie -> even mantissa 2^24; 2^53 exact
+    // (a power of two); Floating 1.5 -> 1.5f exact (identity, not conversion)
+    REQUIRE(Json((int64_t)16777217).get<float>() == 16777216.0f);
+    REQUIRE(Json((int64_t)9007199254740992).get<float>() == 9007199254740992.0f);
+    Json f(1.5);
+    REQUIRE(f.get<float>() == 1.5f);
+}
+
+TEST_CASE("Json: get strict integer direction") {
+    Json v(5.0); // integer-valued, but stored in the Floating slot
+    REQUIRE_THROWS_AS((void)v.get<int64_t>(), TypeError);
+    REQUIRE(!v.try_get<int64_t>().has_value());
+    REQUIRE(v.is_float());
+    REQUIRE(!v.is_integer());
+
+    // Parse side: 5.0 still lands in the Floating slot (task-06 invariant)
+    auto doc = parse_copy("5.0");
+    const Json &r = doc.root();
+    REQUIRE_THROWS_AS((void)r.get<int64_t>(), TypeError);
+    REQUIRE(!r.try_get<int64_t>().has_value());
+    REQUIRE(r.is_float());
+    REQUIRE(!r.is_integer());
+    REQUIRE(r.try_get<double>().has_value()); // numeric-domain read still works
+    REQUIRE(*r.try_get<double>() == 5.0);
+}
+
+// Negative compile pins need the detection-idiom form: naming an
+// unsatisfied member-template specialization directly (&Json::get<int>)
+// is a hard error on both clang 22 and gcc 16, while the requires-clause
+// check on a call expression is SFINAE (immediate context) — verified
+// empirically on both host compilers before use.
+template <typename T, typename = void>
+struct can_get : std::false_type {};
+template <typename T>
+struct can_get<T, std::void_t<decltype(std::declval<const Json &>().get<T>())>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct can_try_get : std::false_type {};
+template <typename T>
+struct can_try_get<T, std::void_t<decltype(std::declval<const Json &>().try_get<T>())>>
+    : std::true_type {};
+
+TEST_CASE("Json: get compile pins") {
+    // Positive pins: the four legal T's are invocable (requires clause)
+    static_assert(std::is_invocable_v<decltype(&Json::get<bool>), const Json &>);
+    static_assert(std::is_invocable_v<decltype(&Json::get<int64_t>), const Json &>);
+    static_assert(std::is_invocable_v<decltype(&Json::get<float>), const Json &>);
+    static_assert(std::is_invocable_v<decltype(&Json::get<double>), const Json &>);
+    static_assert(std::is_invocable_v<decltype(&Json::try_get<bool>), const Json &>);
+    // Negative pins: T outside the set is a compile error (deduction failure)
+    static_assert(!can_get<int>::value);           // 32-bit narrowing rejected
+    static_assert(!can_get<uint64_t>::value);       // no unsigned slot
+    static_assert(!can_try_get<std::string>::value);
 }
