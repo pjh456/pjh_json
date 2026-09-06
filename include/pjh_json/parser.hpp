@@ -29,6 +29,8 @@ namespace pjh::json
         const char *m_end;          // End of input data
         std::pmr::memory_resource *m_resource;  // Allocator for parsed values
         bool m_assume_padded;       // If true, caller guarantees 64 trailing NUL bytes
+        size_t m_depth = 0;         // Current nesting depth (open containers)
+        size_t m_max_depth;         // Captured depth limit (0 = unlimited)
 
     public:
         /**
@@ -47,7 +49,8 @@ namespace pjh::json
               m_curr(json.data()),
               m_end(json.data() + json.size()),
               m_resource(res),
-              m_assume_padded(assume_padded) {}
+              m_assume_padded(assume_padded),
+              m_max_depth(Config::instance().max_depth()) {}
 
         /**
          * @brief Parse a complete JSON value
@@ -124,6 +127,22 @@ namespace pjh::json
          * @return Json holding bool or nullptr
          */
         Json parse_literal();
+
+        /**
+         * @brief RAII nesting-depth frame
+         *
+         * Increments m_depth on construction and decrements on destruction,
+         * so every exit path (including exceptions) keeps the counter
+         * consistent.
+         */
+        class DepthFrame
+        {
+        public:
+            explicit DepthFrame(Parser &p) : m_p(&p) { ++m_p->m_depth; }
+            ~DepthFrame() { --m_p->m_depth; }
+        private:
+            Parser *m_p;
+        };
     };
 }
 

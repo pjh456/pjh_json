@@ -142,3 +142,41 @@ TEST_CASE("Writer: dump ostream") {
     dump_to(os, d.root());
     REQUIRE(os.str() == R"({"a":1})");
 }
+
+TEST_CASE("Writer: max depth") {
+    Config::instance().set_max_depth(0); // defensive: clear prior case state
+
+    auto deep = [](size_t n, char o, char c)
+    {
+        return std::string(n, o) + std::string(n, c);
+    };
+
+    // Default: unlimited (regression pin, round-trip)
+    auto doc100 = parse_copy(deep(100, '[', ']'));
+    REQUIRE(sv(dump(doc100.root())) == deep(100, '[', ']'));
+
+    // Exactly N passes, N+1 throws
+    auto doc60 = parse_copy(deep(60, '[', ']'));
+    Config::instance().set_max_depth(60);
+    REQUIRE(sv(dump(doc60.root())) == deep(60, '[', ']'));
+    Config::instance().set_max_depth(59);
+    REQUIRE_THROWS_AS((void)dump(doc60.root()), JsonError);
+    CHECK_THROWS_WITH((void)dump(doc60.root()),
+                      "Maximum nesting depth exceeded during dump");
+
+    // Empty containers do not bypass the limit
+    Config::instance().set_max_depth(1);
+    REQUIRE_THROWS_AS((void)dump(parse_copy("{\"a\":{}}").root()), JsonError);
+
+    // The failure is a JsonError, not a ParseError
+    bool caught = false;
+    try {
+        (void)dump(doc60.root());
+    } catch (const JsonError &e) {
+        caught = true;
+        CHECK(dynamic_cast<const ParseError *>(&e) == nullptr);
+    }
+    REQUIRE(caught);
+
+    Config::instance().set_max_depth(0); // restore
+}

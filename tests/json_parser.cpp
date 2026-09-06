@@ -209,3 +209,65 @@ TEST_CASE("Parser: jsonl control byte line rejected") {
     REQUIRE(doc.root()[0] == (int64_t)1);
     REQUIRE(doc.root()[1] == (int64_t)2);
 }
+
+TEST_CASE("Parser: max depth") {
+    Config::instance().set_max_depth(0); // defensive: clear prior case state
+
+    auto deep = [](size_t n, char o, char c)
+    {
+        return std::string(n, o) + std::string(n, c);
+    };
+    // Number of nested arrays along the single-element chain (empty root = 0)
+    auto depth_of = [](const Json &j)
+    {
+        size_t d = 0;
+        const Json *cur = &j;
+        while (cur->is_array())
+        {
+            ++d;
+            if (cur->empty())
+                break;
+            REQUIRE(cur->size() == 1);
+            cur = &(*cur)[0];
+        }
+        return d;
+    };
+
+    // Default: unlimited (regression pin)
+    REQUIRE(Config::instance().max_depth() == 0);
+    auto doc100 = parse_copy(deep(100, '[', ']'));
+    REQUIRE(depth_of(doc100.root()) == 100);
+
+    // Exactly N passes, N+1 throws
+    Config::instance().set_max_depth(10);
+    auto doc10 = parse_copy(deep(10, '[', ']'));
+    REQUIRE(depth_of(doc10.root()) == 10);
+    CHECK_THROWS_AS((void)parse_copy(deep(11, '[', ']')), ParseError);
+#ifndef NDEBUG
+    CHECK_THROWS_WITH((void)parse_copy(deep(11, '[', ']')),
+                      "Maximum nesting depth exceeded at offset 10");
+#endif
+
+    // Object path counts symmetrically with arrays
+    Config::instance().set_max_depth(2);
+    auto doc2 = parse_copy("{\"a\":{\"b\":1}}");
+    REQUIRE(doc2.root().is_object());
+    CHECK_THROWS_AS((void)parse_copy("{\"a\":{\"b\":{}}"), ParseError);
+
+    // Sibling containers do not add depth: three objects share level 2
+    Config::instance().set_max_depth(2);
+    auto doc1 = parse_copy("[{},{},{}]");
+    REQUIRE(doc1.root().is_array());
+    REQUIRE(doc1.root().size() == 3);
+    // but wrapping them in another array adds a level
+    CHECK_THROWS_AS((void)parse_copy("[[{}]]"), ParseError);
+
+    // JSONL: depth resets per line, does not accumulate across lines
+    Config::instance().set_max_depth(2);
+    auto jl = parse_jsonl("[[1]]\n[[1]]\n");
+    REQUIRE(jl.root().is_array());
+    REQUIRE(jl.root().size() == 2);
+    CHECK_THROWS_AS((void)parse_jsonl("[[[1]]]\n"), ParseError);
+
+    Config::instance().set_max_depth(0); // restore
+}

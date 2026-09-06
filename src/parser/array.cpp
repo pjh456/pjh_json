@@ -14,6 +14,10 @@ namespace pjh::json
      */
     void Parser::parse_array_inplace(Json &out)
     {
+        if (m_max_depth != 0 && m_depth + 1 > m_max_depth)
+            throw_parse_error("Maximum nesting depth exceeded", m_curr, m_begin);
+        DepthFrame frame(*this);
+
         // Consume '[' and create array
         ++m_curr;
         Array arr(m_resource);

@@ -58,9 +58,11 @@ namespace pjh::json
      * 3. Object: '{' + key:value pairs + '}'.
      *    - If sort_keys: collect entry pointers, sort by key, emit sorted.
      *    - Otherwise emit in insertion order.
+     * Container branches reject depth + 1 > max_depth (0 = unlimited)
+     * before the empty-container early return, so empty containers count.
      */
     static void write_value(std::pmr::string &sink, const Json &value,
-                            const DumpOptions &opts, size_t depth)
+                            const DumpOptions &opts, size_t depth, size_t max_depth)
     {
         if (value.is_null())
         {
@@ -86,6 +88,8 @@ namespace pjh::json
         }
         else if (auto *arr = value.try_as_array())
         {
+            if (max_depth != 0 && depth + 1 > max_depth)
+                throw JsonError("Maximum nesting depth exceeded during dump");
             if (arr->empty())
             {
                 sink.append("[]");
@@ -100,7 +104,7 @@ namespace pjh::json
                 first = false;
                 if (opts.pretty)
                     write_indent(sink, opts, depth + 1);
-                write_value(sink, el, opts, depth + 1);
+                write_value(sink, el, opts, depth + 1, max_depth);
             }
             if (opts.pretty)
                 write_indent(sink, opts, depth);
@@ -108,6 +112,8 @@ namespace pjh::json
         }
         else if (auto *obj = value.try_as_object())
         {
+            if (max_depth != 0 && depth + 1 > max_depth)
+                throw JsonError("Maximum nesting depth exceeded during dump");
             if (obj->empty())
             {
                 sink.append("{}");
@@ -135,7 +141,7 @@ namespace pjh::json
                         write_indent(sink, opts, depth + 1);
                     write_escaped(sink, e->first, opts.ascii);
                     sink.append(opts.pretty ? ": " : ":");
-                    write_value(sink, e->second, opts, depth + 1);
+                    write_value(sink, e->second, opts, depth + 1, max_depth);
                 }
             }
             else
@@ -150,7 +156,7 @@ namespace pjh::json
                         write_indent(sink, opts, depth + 1);
                     write_escaped(sink, key, opts.ascii);
                     sink.append(opts.pretty ? ": " : ":");
-                    write_value(sink, val, opts, depth + 1);
+                    write_value(sink, val, opts, depth + 1, max_depth);
                 }
             }
             if (opts.pretty)
@@ -164,7 +170,7 @@ namespace pjh::json
      */
     void dump_to(std::pmr::string &sink, const Json &value, const DumpOptions &opts)
     {
-        write_value(sink, value, opts, 0);
+        write_value(sink, value, opts, 0, Config::instance().max_depth());
     }
 
     /*
@@ -186,7 +192,7 @@ namespace pjh::json
                           std::pmr::memory_resource *res)
     {
         std::pmr::string sink(res);
-        write_value(sink, value, opts, 0);
+        write_value(sink, value, opts, 0, Config::instance().max_depth());
         return sink;
     }
 

@@ -80,6 +80,16 @@ namespace pjh::json
         [[nodiscard]] size_t arena_block_size() const noexcept { return m_arena_block_size; }
 
         /**
+         * @brief Set maximum nesting depth for parse and dump
+         * @param depth Maximum number of nested containers (objects/arrays);
+         *        0 (default) means unlimited.
+         * @note Captured at parse start / dump start; a later call does not
+         *       affect in-flight operations.
+         */
+        void set_max_depth(size_t depth) noexcept { m_max_depth = depth; }
+        [[nodiscard]] size_t max_depth() const noexcept { return m_max_depth; }
+
+        /**
          * @brief Release global document
          * @note In debug builds, asserts no outstanding allocations from the
          *       global resource.
@@ -87,7 +97,8 @@ namespace pjh::json
         void release();
         /**
          * @brief Reset config to defaults and release global document
-         * @note Equivalent to configure(Pooled, 4096) then release().
+         * @note Equivalent to configure(Pooled, 4096), max depth reset to 0
+         *       (unlimited), then release().
          */
         void reset();
 
@@ -110,6 +121,7 @@ namespace pjh::json
 
         bool m_strict_duplicate_keys = false;
         size_t m_arena_block_size = 0;
+        size_t m_max_depth = 0;
         std::atomic<Storage> m_storage{Storage::Pooled};
         size_t m_block = 4096;
         std::unique_ptr<Document> m_global;

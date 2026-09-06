@@ -98,3 +98,15 @@ TEST_CASE("Config: release") {
     auto doc = parse_copy(R"({"after":"release"})");
     REQUIRE(doc.root()["after"] == "release");
 }
+
+TEST_CASE("Config: max depth") {
+    // Default: unlimited
+    REQUIRE(Config::instance().max_depth() == 0);
+
+    Config::instance().set_max_depth(256);
+    REQUIRE(Config::instance().max_depth() == 256);
+
+    Config::instance().set_max_depth(7);
+    Config::instance().reset();
+    REQUIRE(Config::instance().max_depth() == 0);
+}
