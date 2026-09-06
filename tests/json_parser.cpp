@@ -3,6 +3,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <cmath>
+#include <limits>
 
 #include <pjh_json/document.hpp>
 #include <pjh_json/parser.hpp>
@@ -270,4 +271,72 @@ TEST_CASE("Parser: max depth") {
     CHECK_THROWS_AS((void)parse_jsonl("[[[1]]]\n"), ParseError);
 
     Config::instance().set_max_depth(0); // restore
+}
+
+TEST_CASE("Parser: 19-digit integer boundary") {
+    // 19-digit ints within [INT64_MIN, INT64_MAX] must stay int64, exact
+    auto d1 = parse_copy("9223372036854775807"); // INT64_MAX (was double, +1 drift)
+    REQUIRE(d1.root().is_int());
+    REQUIRE(d1.root().as_int() == std::numeric_limits<int64_t>::max());
+
+    auto d2 = parse_copy("9223372036854775806"); // INT64_MAX - 1 (was double, +2 drift)
+    REQUIRE(d2.root().is_int());
+    REQUIRE(d2.root().as_int() == (int64_t)9223372036854775806);
+
+    auto d3 = parse_copy("1000000000000000000"); // 10^18, smallest 19-digit int
+    REQUIRE(d3.root().is_int());
+    REQUIRE(d3.root().as_int() == (int64_t)1000000000000000000);
+
+    // Regression: <= 18 digits unchanged
+    auto d4 = parse_copy("999999999999999999");
+    REQUIRE(d4.root().is_int());
+    REQUIRE(d4.root().as_int() == (int64_t)999999999999999999);
+    auto d5 = parse_copy("-999999999999999999");
+    REQUIRE(d5.root().is_int());
+    REQUIRE(d5.root().as_int() == (int64_t)-999999999999999999);
+
+    // INT64_MIN: magnitude exactly 2^63 (negation-overflow special case)
+    auto d6 = parse_copy("-9223372036854775808");
+    REQUIRE(d6.root().is_int());
+    REQUIRE(d6.root().as_int() == std::numeric_limits<int64_t>::min());
+
+    auto d7 = parse_copy("-9223372036854775807"); // INT64_MIN + 1 (was -1 drift)
+    REQUIRE(d7.root().is_int());
+    REQUIRE(d7.root().as_int() == (int64_t)-9223372036854775807);
+
+    // 19-digit ints outside int64 range fall to double
+    auto d8 = parse_copy("9223372036854775808"); // 2^63, exact in double
+    REQUIRE(d8.root().is_float());
+    REQUIRE(d8.root().as_float() == 9223372036854775808.0);
+
+    auto d9 = parse_copy("9999999999999999999"); // rounds to 1e19, exact in double
+    REQUIRE(d9.root().is_float());
+    REQUIRE(d9.root().as_float() == 1e19);
+
+    auto d10 = parse_copy("-9223372036854775809"); // -2^63-1, rounds to -2^63
+    REQUIRE(d10.root().is_float());
+    REQUIRE(d10.root().as_float() == -9223372036854775808.0);
+
+    auto d11 = parse_copy("18446744073709551615"); // UINT64_MAX, 20 digits -> 2^64.0
+    REQUIRE(d11.root().is_float());
+    REQUIRE(d11.root().as_float() == 18446744073709551616.0);
+
+    // Float indicators still force double
+    auto d12 = parse_copy("9223372036854775807.5");
+    REQUIRE(d12.root().is_float());
+    auto d13 = parse_copy("9223372036854775807e0");
+    REQUIRE(d13.root().is_float());
+
+    // -0 stays int 0
+    auto d14 = parse_copy("-0");
+    REQUIRE(d14.root().is_int());
+    REQUIRE(d14.root().as_int() == (int64_t)0);
+
+    // JSONL: same parse_number path per line
+    auto jl = parse_jsonl("9223372036854775807\n9223372036854775808\n");
+    REQUIRE(jl.root().is_array());
+    REQUIRE(jl.root().size() == 2);
+    REQUIRE(jl.root()[0].is_int());
+    REQUIRE(jl.root()[0].as_int() == std::numeric_limits<int64_t>::max());
+    REQUIRE(jl.root()[1].is_float());
 }

@@ -83,6 +83,23 @@ TEST_CASE("Writer: dump numbers") {
 #endif
 }
 
+TEST_CASE("Writer: 19-digit round trip") {
+    // int-stored 19-digit values round-trip digit-exact
+    REQUIRE(sv(dump(parse_copy("9223372036854775807").root())) == "9223372036854775807");
+    REQUIRE(sv(dump(parse_copy("-9223372036854775808").root())) == "-9223372036854775808");
+
+    // double-stored boundary: value-level round trip only (to_chars shortest
+    // form is lib-dependent, so no exact-text assertion)
+    auto dumped = dump(parse_copy("18446744073709551615").root());
+    std::string_view out = sv(dumped);
+    // Float-ness preserved: to_chars output carries '.'/'e', or write_double
+    // appended ".0" (single binary check; doctest cannot decompose '||')
+    REQUIRE(out.find_first_of(".e") != std::string_view::npos);
+    auto re = parse_copy(out);
+    REQUIRE(re.root().is_float());
+    REQUIRE(re.root().as_float() == 18446744073709551616.0);
+}
+
 TEST_CASE("Writer: prettify") {
     auto out = prettify(R"({"a":[1,2]})", {.pretty = true, .indent = 2});
     const char *expected =
