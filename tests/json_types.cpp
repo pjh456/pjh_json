@@ -253,6 +253,72 @@ TEST_CASE("Object: owned key outlives source") {
     REQUIRE(obj2.at("dyn") == "v");
 }
 
+// --- task 21.1: Object iterator key side is read-only ---
+//
+// Negative compile pins detect over the ASSIGNMENT expression (task-19
+// lesson: never name a failed member lookup bare — that is a hard error;
+// an assignment expression inside void_t is SFINAE-friendly). The RHS is
+// String&& — the only viable mutation channel (String's copy-assign is
+// deleted, string.hpp:117); a const String& RHS would false-negative on
+// the regression tree (no candidate for String& = const String&).
+template <class T, class = void>
+struct key_side_assignable : std::false_type {};
+template <class T>
+struct key_side_assignable<T, std::void_t<decltype(
+    std::declval<T &>().first = std::declval<String &&>())>>
+    : std::true_type {};
+
+template <class T, class = void>
+struct key_arrow_assignable : std::false_type {};
+template <class T>
+struct key_arrow_assignable<T, std::void_t<decltype(
+    std::declval<T &>()->first = std::declval<String &&>())>>
+    : std::true_type {};
+
+TEST_CASE("Object: iterator key side is read-only") {
+    // It is begin()'s RETURN type (not the bare class), so a begin()
+    // reverted to a raw Vec::iterator flips red too.
+    using It = decltype(std::declval<Object &>().begin());
+    // The prvalue type of operator* (the write path, non-const track).
+    // NB: *declval<It*>() would be It& itself, not the yield type.
+    using Yield = decltype((*std::declval<It &>()));
+    // --- negative compile pins (flip to compile-RED on regression) ---
+    static_assert(!key_side_assignable<Yield>::value,
+                  "yield: the key side (first) must not be assignable");
+    static_assert(!key_arrow_assignable<It>::value,
+                  "iterator: ->first must not be assignable");
+    // --- positive type pins ---
+    static_assert(std::is_same_v<Yield, Object::EntryRef>);
+    static_assert(std::is_same_v<decltype(std::declval<Yield &>().first), const String &>);
+    static_assert(std::is_same_v<decltype(std::declval<Yield &>().second), Json &>);
+    // --- const track: already sealed, recorded (not fixed by this task) ---
+    using CIt = decltype(std::declval<const Object &>().begin());
+    static_assert(std::is_same_v<CIt, Object::Vec::const_iterator>);
+    static_assert(!key_side_assignable<decltype(*std::declval<CIt &>())>::value);
+
+    // --- positive runtime pins (value side still patchable, reads unchanged) ---
+    Object obj;
+    obj.insert("a", Json((int64_t)1));
+    obj.insert("b", Json((int64_t)2));
+    for (auto &&kv : obj)                 // value patch through the new yield
+        kv.second = Json((int64_t)9);
+    REQUIRE(obj.at("a") == (int64_t)9);
+    REQUIRE(obj.at("b") == (int64_t)9);
+    REQUIRE(static_cast<std::string_view>(obj.begin()->first) == "a");
+    REQUIRE(obj.begin()->first.is_owned() == false);   // borrowed literal, unchanged
+    REQUIRE(obj.contains("a"));                        // find unaffected by iteration
+    REQUIRE(obj.size() == 2);
+    const Object &cobj = obj;
+    int seen = 0;
+    for (const auto &[k, v] : cobj)
+    {
+        REQUIRE(v == (int64_t)9);
+        (void)k;
+        ++seen;
+    }
+    REQUIRE(seen == 2);
+}
+
 TEST_CASE("Json: object parse-insert semantics unified") {
     // insert-on-existing and parse-duplicate-key must agree: last-wins
     Object o;

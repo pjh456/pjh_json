@@ -126,10 +126,12 @@ namespace pjh::json
 
             if (opts.sort_keys)
             {
-                // Build pointer vector, sort by key, emit in sorted order
+                // Build pointer vector, sort by key, emit in sorted order.
+                // data() (not *obj): the iterator yields a per-step EntryRef
+                // proxy, so &e must alias the stored entry (task 21.1).
                 std::pmr::vector<const Object::Entry *> sorted(obj->data().get_allocator());
                 sorted.reserve(obj->size());
-                for (const auto &e : *obj)
+                for (const auto &e : obj->data())
                     sorted.push_back(&e);
                 std::sort(sorted.begin(), sorted.end(),
                           [](const Object::Entry *a, const Object::Entry *b)

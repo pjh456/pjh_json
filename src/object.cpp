@@ -3,12 +3,38 @@
 
 #include <algorithm>
 #include <memory>
+#include <new>
 #include <ranges>
 #include <string_view>
 #include <utility>
 
 namespace pjh::json
 {
+    namespace
+    {
+        /*
+         * Sentinel pair for Object::iterator's cached proxy (task 21.1)
+         *
+         * A reference member must be bound at construction, and the end
+         * iterator has no entry to bind to; its cache binds to this legal
+         * empty pair and is never read (deref of end is UB by contract).
+         * The sentinel is TU-local (a function-local static), not a
+         * per-iterator member: a by-value Json cannot be declared in
+         * object.hpp, where Json is still incomplete (json.hpp includes
+         * object.hpp).
+         */
+        struct IteratorSentinel
+        {
+            String key{};
+            Json val{};
+        };
+
+        IteratorSentinel &iterator_sentinel()
+        {
+            static IteratorSentinel s;
+            return s;
+        }
+    }
     /*
      * Construct empty Object with pmr allocator
      *
@@ -316,8 +342,59 @@ namespace pjh::json
     size_t Object::size() const noexcept { return m_data.size(); }
     bool Object::empty() const noexcept { return m_data.empty(); }
     void Object::clear() noexcept { m_data.clear(); }
-    Object::Vec::iterator Object::begin() noexcept { return m_data.begin(); }
-    Object::Vec::iterator Object::end() noexcept { return m_data.end(); }
+
+    /*
+     * Non-const track (task 21.1): the wrapper seals the key side.
+     *
+     * 1. operator* builds a fresh EntryRef per call (zero staleness).
+     * 2. operator->/operator++ re-bind the cached proxy to the current
+     *    entry before returning/advancing (m_it may reach end after ++,
+     *    and dereferencing end is UB — so the re-bind reads the
+     *    pre-advance position). The re-bind is a destroy/recreate cycle:
+     *    EntryRef's reference members are not assignable.
+     * 3. The end iterator's cache binds to the sentinel empty pair at
+     *    construction and is never read (deref of end is UB by contract).
+     */
+    Object::iterator::iterator(Vec::iterator it) noexcept
+        : m_it(it),
+          m_ref(iterator_sentinel().key, iterator_sentinel().val)
+    {
+    }
+
+    Object::EntryRef Object::iterator::operator*() const noexcept
+    {
+        return EntryRef{m_it->first, m_it->second};
+    }
+
+    const Object::EntryRef *Object::iterator::operator->() const noexcept
+    {
+        std::destroy_at(&m_ref);
+        ::new (static_cast<void *>(&m_ref))
+            Object::EntryRef{m_it->first, m_it->second};
+        return &m_ref;
+    }
+
+    Object::iterator &Object::iterator::operator++() noexcept
+    {
+        std::destroy_at(&m_ref);
+        ::new (static_cast<void *>(&m_ref))
+            Object::EntryRef{m_it->first, m_it->second};
+        ++m_it;
+        return *this;
+    }
+
+    bool operator==(const Object::iterator &a, const Object::iterator &b) noexcept
+    {
+        return a.m_it == b.m_it;
+    }
+
+    bool operator!=(const Object::iterator &a, const Object::iterator &b) noexcept
+    {
+        return a.m_it != b.m_it;
+    }
+
+    Object::iterator Object::begin() noexcept { return iterator{m_data.begin()}; }
+    Object::iterator Object::end() noexcept { return iterator{m_data.end()}; }
     Object::Vec::const_iterator Object::begin() const noexcept { return m_data.begin(); }
     Object::Vec::const_iterator Object::end() const noexcept { return m_data.end(); }
 }

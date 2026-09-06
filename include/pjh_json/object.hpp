@@ -31,12 +31,94 @@ namespace pjh::json
      *       data for parse_view); a destroyed, moved or reset() source
      *       leaves them dangling. To make a key independent of its source,
      *       use insert(key, val, res) (owned, copied into res) or clone().
+     * @note The key is read-only through the iterators; data() remains the
+     *       raw advanced surface (its key side is still writable by design).
      */
     class Object
     {
     public:
         using Entry = std::pair<String, Json>;
         using Vec = std::pmr::vector<Entry>;
+
+        /**
+         * @brief Const-track iterator (std::vector const_iterator; the
+         *        key side is already read-only through the const pair)
+         */
+        using const_iterator = Vec::const_iterator;
+
+        /**
+         * @brief One iteration step of the non-const track
+         *
+         * Aggregate of two references into the stored entry. The key
+         * side is const: a key is lookup identity — replacing one would
+         * silently re-key the entry (find miss on the old key, a
+         * duplicate-key state that insert/parse never produce) and can
+         * downgrade an owned key to a view of dying memory. The value
+         * side stays patchable.
+         */
+        struct EntryRef
+        {
+            const String &first; ///< read-only key (was mutable pre-21.1)
+            Json &second;         ///< the value, in place
+        };
+
+        /**
+         * @brief Non-const iterator over (String, Json) entries
+         *
+         * operator* yields a fresh EntryRef per call (key read-only,
+         * value patchable); operator-> re-binds the cached EntryRef on
+         * every call (a pointer held across ++ reads at most a stale
+         * value, never a dangling one — the cache lives in the
+         * iterator). Pre-increment only: the iterator is non-copyable
+         * (the cache holds reference members). No iterator_traits
+         * typedefs: range-for is the only promised scenario.
+         * Dereferencing end() is undefined, as with every std container
+         * iterator.
+         * @warning Do not hold the address of a loop variable (&e)
+         * across ++: the yield is a per-step proxy, not the stored
+         * entry (the pre-21.1 raw pair& yield made that aliasing
+         * sound; the writer's sort path uses data() instead).
+         */
+        class iterator
+        {
+        public:
+            /** @brief The entry at the cursor (prvalue proxy into the container) */
+            [[nodiscard]] EntryRef operator*() const noexcept;
+
+            /** @brief Arrow access (re-bound on every call, see class doc) */
+            [[nodiscard]] const EntryRef *operator->() const noexcept;
+
+            /** @brief Advance one entry (pre-increment only, undefined past end) */
+            iterator &operator++() noexcept;
+
+            /**
+             * @brief Copy not allowed — the cached proxy holds reference
+             *        members (move-only by construction)
+             */
+            iterator(const iterator &) = delete;
+            /**
+             * @brief Move construct (reference members rebind to the same
+             *        referents; the moved-from cache stays a legal, live
+             *        binding — operator* never reads the cache and
+             *        operator->/operator++ re-bind before any read)
+             * @param other Source iterator (left usable-but-stale)
+             */
+            iterator(iterator &&) noexcept = default;
+            /**
+             * @brief Copy not allowed — the cached proxy holds reference
+             *        members (move-only by construction)
+             */
+            iterator &operator=(const iterator &) = delete;
+
+            friend bool operator==(const iterator &a, const iterator &b) noexcept;
+            friend bool operator!=(const iterator &a, const iterator &b) noexcept;
+
+        private:
+            friend class Object;
+            explicit iterator(Vec::iterator it) noexcept;
+            Vec::iterator m_it;
+            mutable EntryRef m_ref;
+        };
 
     private:
         Vec m_data;
@@ -134,14 +216,17 @@ namespace pjh::json
 
         /**
          * @brief Iterator to first entry
-         * @return Mutable iterator over (String, Json) pairs
+         * @return Iterator over (String, Json) entries — the key side
+         *         is read-only (a mutable key would silently re-key the
+         *         entry or dangle its source; task 21.1), the value
+         *         side stays patchable
          */
-        [[nodiscard]] Vec::iterator begin() noexcept;
+        [[nodiscard]] iterator begin() noexcept;
         /**
          * @brief Iterator past last entry
-         * @return Mutable iterator
+         * @return Iterator
          */
-        [[nodiscard]] Vec::iterator end() noexcept;
+        [[nodiscard]] iterator end() noexcept;
         /**
          * @brief Const iterator to first entry
          * @return Const iterator
