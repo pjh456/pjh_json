@@ -211,4 +211,12 @@ TEST_CASE("ConstJson: parse strictness") {
     static_assert(ConstJson::parse(" \t\r\n 42 \t").valid);
     static_assert(!ConstJson::parse(std::string_view("\x0b1", 2)).valid);  // VT is not whitespace
     static_assert(!ConstJson::parse(std::string_view("1\x0b", 2)).valid);
+
+    // BOM (task 23): the constexpr path is grammar-strict — 0xEF is not
+    // whitespace (validate.hpp:26-30) and no consteval knob can strip it
+    // (std::atomic is not constexpr). Runtime strip_bom does NOT apply
+    // here: the divergence is by design (§1.4).
+    static_assert(!ConstJson::parse(std::string_view("\xEF\xBB\xBF" "1", 4)).valid);
+    static_assert(!ConstJson::parse(std::string_view("\xEF\xBB\xBF", 3)).valid);
+    static_assert(ConstJson::parse("1").valid); // control: BOM-free is fine
 }

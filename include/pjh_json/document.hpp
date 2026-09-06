@@ -149,6 +149,9 @@ namespace pjh::json
      * @note buffer is consumed (moved into Document). Strings borrow from it.
      * @note buffer.size() must be >= kPaddingWidth; the final kPaddingWidth
      *       bytes are NUL sentinels.
+     * @note A leading UTF-8 BOM (EF BB BF) is rejected unless
+     *       Config::set_strip_bom(true); error offsets stay relative to the
+     *       buffer start (a value right after the BOM reports offset 3).
      */
     [[nodiscard]] Document parse_in_situ(
         std::pmr::string &&buffer,
@@ -161,6 +164,9 @@ namespace pjh::json
      * @return Document owning the parsed tree and a copy of json
      * @throws ParseError on invalid JSON
      * @note The input is copied into a padded buffer owned by Document.
+     * @note A leading UTF-8 BOM (EF BB BF) is rejected unless
+     *       Config::set_strip_bom(true); error offsets stay relative to the
+     *       buffer start (a value right after the BOM reports offset 3).
      */
     [[nodiscard]] Document parse_copy(
         std::string_view json,
@@ -180,6 +186,9 @@ namespace pjh::json
      * @note The library cannot verify this padding (reading past content_len
      *       would itself overread); a violation is UB - use an ASan build in
      *       development to catch it.
+     * @note A leading UTF-8 BOM (EF BB BF) is rejected unless
+     *       Config::set_strip_bom(true); error offsets stay relative to the
+     *       buffer start (a value right after the BOM reports offset 3).
      */
     [[nodiscard]] Document parse_view(
         const char *data, size_t content_len,
@@ -193,6 +202,10 @@ namespace pjh::json
      * @throws ParseError on invalid JSON in any line
      * @note Blank lines and lines with only whitespace are skipped.
      *       Lines use \\n as delimiter; \\r before \\n is stripped.
+     * @note A leading BOM is stripped (strip_bom) only at the whole-input
+     *       start, before the line scan; a BOM at the start of any line is
+     *       a parse error at that line's offset 0, with or without
+     *       strip_bom.
      */
     [[nodiscard]] Document parse_jsonl(
         std::string_view input,
@@ -204,6 +217,8 @@ namespace pjh::json
      * @param storage Allocation strategy (default: global config)
      * @return Document owning the parsed tree and file content buffer
      * @throws ParseError if file cannot be opened, read, or contains invalid JSON
+     * @note Same BOM contract as parse_in_situ (the file content delegates
+     *       to it).
      */
     [[nodiscard]] Document parse_file(
         std::string_view filepath,

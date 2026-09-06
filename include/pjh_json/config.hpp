@@ -25,9 +25,9 @@ namespace pjh::json
     /**
      * @brief Global configuration singleton (storage policy, global resource)
      *
-     * The knobs — strict_duplicate_keys, arena_block_size, max_depth and
-     * the storage policy — are lock-free atomics: their setters and getters
-     * may be called concurrently from any thread. The mutex guards only the
+     * The knobs — strict_duplicate_keys, arena_block_size, max_depth,
+     * strip_bom and the storage policy — are lock-free atomics: their
+     * setters and getters may be called concurrently from any thread. The mutex guards only the
      * global Document (allocator state and the resource-cache invalidation
      * window). Knob semantics are capture-at-start: a value set mid-operation
      * takes effect at the next operation start (strict_duplicate_keys is
@@ -111,6 +111,29 @@ namespace pjh::json
         [[nodiscard]] size_t max_depth() const noexcept { return m_max_depth.load(std::memory_order_relaxed); }
 
         /**
+         * @brief Strip a leading UTF-8 BOM (EF BB BF) at parse entry
+         * @note Lock-free: relaxed atomic store/load, safe to call
+         *       concurrently with parse. The value is captured at each
+         *       Parser construction (the single-value parse entries
+         *       pass it); a change takes effect from the next entry
+         *       (capture-at-start granularity).
+         * @note Default: false. By default a leading BOM is rejected
+         *       by the grammar ("Unexpected character parsing value"
+         *       at offset 0). Only the UTF-8 BOM at byte 0 of the
+         *       input is handled; UTF-16/32 BOMs are invalid UTF-8
+         *       and remain rejected (no special-casing).
+         * @note In parse_jsonl the whole-input start only counts: the
+         *       BOM belongs to the file and is consumed once before
+         *       the line scan; a BOM at the start of any later line is
+         *       still a parse error at that line's offset 0.
+         * @note The compile-time path (ConstJson::parse) cannot read
+         *       runtime config (std::atomic is not constexpr): it
+         *       stays BOM-strict regardless of this knob.
+         */
+        void set_strip_bom(bool enable) noexcept { m_strip_bom.store(enable, std::memory_order_relaxed); }
+        [[nodiscard]] bool strip_bom() const noexcept { return m_strip_bom.load(std::memory_order_relaxed); }
+
+        /**
          * @brief Release global document
          * @note In debug builds, asserts no outstanding allocations from the
          *       global resource.
@@ -120,7 +143,7 @@ namespace pjh::json
          * @brief Reset config to defaults and release global document
          * @note Equivalent to configure(Pooled, 4096),
          *       strict_duplicate_keys = false, arena_block_size = 0 (auto),
-         *       max depth = 0 (unlimited), then release().
+         *       max depth = 0 (unlimited), strip_bom = false, then release().
          * @note Knob restoration uses atomic stores, still performed under
          *       the lock, in service of release_locked().
          */
@@ -146,6 +169,7 @@ namespace pjh::json
         std::atomic<bool> m_strict_duplicate_keys{false};
         std::atomic<size_t> m_arena_block_size{0};
         std::atomic<size_t> m_max_depth{0};
+        std::atomic<bool> m_strip_bom{false};
         std::atomic<Storage> m_storage{Storage::Pooled};
         size_t m_block = 4096;
         std::unique_ptr<Document> m_global;

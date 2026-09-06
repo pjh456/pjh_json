@@ -107,3 +107,48 @@ TEST_CASE("File: result entry") {
     REQUIRE(d.root()["ok"] == (int64_t)1);
     std::remove(f.c_str());
 }
+
+TEST_CASE("File: BOM") {
+    // read_file.cpp has no shared ConfigGuard TU: local RAII guard, same
+    // obligation as json_parser.cpp's (doctest has no teardown)
+    struct StripBomGuard
+    {
+        bool m_strip;
+
+        StripBomGuard()
+            : m_strip(Config::instance().strip_bom())
+        {
+        }
+
+        ~StripBomGuard()
+        {
+            Config::instance().set_strip_bom(m_strip);
+        }
+    } guard;
+
+    const std::string f = "pjh_bom_file.json";
+    {
+        std::ofstream out(f, std::ios::binary);
+        out.write("\xEF\xBB\xBF", 3);
+        out << R"({"a":1})";
+    }
+
+    // Default: the file content delegates to parse_in_situ — the leading
+    // BOM is rejected at offset 0
+    try {
+        (void)parse_file(f);
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 0);
+    }
+
+    // strip ON: the file entry and the result shell both parse
+    Config::instance().set_strip_bom(true);
+    auto doc = parse_file(f);
+    REQUIRE(doc.root()["a"] == (int64_t)1);
+
+    auto r = parse_file_result(f);
+    REQUIRE(r.is_ok());
+
+    std::remove(f.c_str());
+}

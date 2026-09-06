@@ -25,11 +25,13 @@ namespace
         bool m_strict;
         size_t m_arena_block;
         size_t m_max_depth;
+        bool m_strip_bom;
 
         ConfigGuard()
             : m_strict(Config::instance().strict_duplicate_keys()),
               m_arena_block(Config::instance().arena_block_size()),
-              m_max_depth(Config::instance().max_depth())
+              m_max_depth(Config::instance().max_depth()),
+              m_strip_bom(Config::instance().strip_bom())
         {
         }
 
@@ -38,8 +40,13 @@ namespace
             Config::instance().set_strict_duplicate_keys(m_strict);
             Config::instance().set_arena_block_size(m_arena_block);
             Config::instance().set_max_depth(m_max_depth);
+            Config::instance().set_strip_bom(m_strip_bom);
         }
     };
+
+    // UTF-8 BOM bytes (hex escapes are self-terminating: \xBF does not
+    // swallow a following byte)
+    inline std::string bom() { return std::string("\xEF\xBB\xBF", 3); }
 }
 
 TEST_CASE("Parser: literal") {
@@ -592,4 +599,144 @@ TEST_CASE("Error: category") {
     // value (no slicing, runtime polymorphism)
     const JsonError &base = ParseError("x", 7);
     REQUIRE(base.category() == Category::Parse);
+}
+
+TEST_CASE("Parser: BOM rejected by default") {
+    // Default-OFF contract pin (task 23): a leading UTF-8 BOM (EF BB BF)
+    // is a grammar error by default. Full message: "Unexpected character
+    // parsing value at offset 0" (value.cpp default branch) — what()'s
+    // full text is not the house contract pin (error.hpp:47-50), the
+    // offset segment is.
+    try {
+        (void)parse_copy(bom() + "1");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 0);
+        REQUIRE(std::string(e.what()).find(" at offset 0") != std::string::npos);
+    }
+
+    // Control: BOM-free input succeeds (the BOM is the sole cause)
+    auto ok = parse_copy("1");
+    REQUIRE(ok.root().as_int() == (int64_t)1);
+
+    // A BOM after whitespace is not at byte 0: no strip, the 0xEF at
+    // input index 1 is an ordinary invalid byte
+    try {
+        (void)parse_copy(" " + bom() + "1");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 1);
+    }
+}
+
+TEST_CASE("Parser: BOM strip opt-in") {
+    ConfigGuard guard; // first: save the entering state before any mutation
+    Config::instance().set_strip_bom(true);
+    using std::pmr::get_default_resource;
+
+    // copy: the BOM is stripped, the parse succeeds; the BOM bytes stay in
+    // the Document buffer (no buffer rewrite — offset-honesty bookkeeping)
+    auto d1 = parse_copy(bom() + R"({"a":1})");
+    REQUIRE(d1.root()["a"] == (int64_t)1);
+    REQUIRE(d1.buffer().compare(0, 3, "\xEF\xBB\xBF", 3) == 0);
+
+    // in_situ: head BOM + compliant tail padding (the tail-NUL check and
+    // the head BOM have zero interaction)
+    std::pmr::string isitu(get_default_resource());
+    isitu.assign(bom() + R"([1,2])");
+    isitu.append(kPaddingWidth, '\0');
+    auto d2 = parse_in_situ(std::move(isitu));
+    REQUIRE(d2.root().size() == 2);
+
+    // view: caller-padded buffer with the BOM inside the content
+    std::string content = bom() + R"({"a":1})";
+    std::string buf(content.size() + kPaddingWidth, '\0');
+    memcpy(buf.data(), content.data(), content.size());
+    auto d3 = parse_view(buf.data(), content.size());
+    REQUIRE(d3.root()["a"] == (int64_t)1);
+
+    // Offset honesty (ruling D): the strip advances m_curr, never
+    // m_begin — the extra '2' sits at original-buffer index 5 (EF BB BF
+    // '1' ' ' '2'); a shifted-view implementation would report 2
+    try {
+        (void)parse_copy(bom() + "1 2");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 5);
+    }
+
+    // BOM-only input: after the strip the content is empty — "Unexpected
+    // end of input" at offset 3, m_begin untouched
+    try {
+        (void)parse_copy(bom());
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 3);
+    }
+
+    // Truncated BOM (EF BB + '1'): third byte mismatches, no strip, the
+    // 0xEF is rejected at offset 0
+    try {
+        (void)parse_copy(std::string("\xEF\xBB", 2) + "1");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 0);
+    }
+
+    // UTF-16 BOMs get no special-casing (ruling E): with strip ON they
+    // are still invalid UTF-8, rejected at offset 0
+    try {
+        (void)parse_copy(std::string("\xFF\xFE", 2) + "1");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 0);
+    }
+    try {
+        (void)parse_copy(std::string("\xFE\xFF", 2) + "1");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 0);
+    }
+
+    // The result channel inherits the knob with zero shell code
+    auto r1 = parse_copy_result(bom() + "1");
+    REQUIRE(r1.is_ok());
+
+    Config::instance().set_strip_bom(false);
+    auto r2 = parse_copy_result(bom() + "1");
+    REQUIRE(r2.is_err());
+    ParseError e2 = r2.unwrap_err();
+    REQUIRE(e2.offset() == 0);
+}
+
+TEST_CASE("Parser: jsonl BOM line-1 only") {
+    ConfigGuard guard; // first: save the entering state before any mutation
+    Config::instance().set_strip_bom(true);
+
+    // Whole-input start: the BOM belongs to the file and is consumed once
+    // before the line scan; line 1's parser sees BOM-free content
+    auto d = parse_jsonl(bom() + "1\n2\n");
+    REQUIRE(d.root().is_array());
+    REQUIRE(d.root().size() == 2);
+    REQUIRE(d.root()[0] == (int64_t)1);
+    REQUIRE(d.root()[1] == (int64_t)2);
+
+    // Line >= 2: per-line parsers keep the strict grammar — a BOM at the
+    // line start is a parse error at that line's offset 0 (the offset is
+    // relative to the line, house jsonl contract)
+    try {
+        (void)parse_jsonl("1\n" + bom() + "2\n");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 0);
+    }
+
+    // strip OFF: the default contract in its jsonl form
+    Config::instance().set_strip_bom(false);
+    try {
+        (void)parse_jsonl(bom() + "1\n");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 0);
+    }
 }

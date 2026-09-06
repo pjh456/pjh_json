@@ -386,6 +386,11 @@ namespace pjh::json
         /// can be used to optionally construct a Document at runtime without
         /// risk of parse errors.
         ///
+        /// @note The compile-time validator is grammar-strict: a leading
+        /// UTF-8 BOM (EF BB BF) is not whitespace (validate.hpp skip_whitespace)
+        /// and is rejected (valid == false). The runtime strip_bom knob
+        /// cannot reach consteval (std::atomic is not constexpr); this path
+        /// stays BOM-strict by construction.
         /// @param json The JSON string to validate.
         /// @return A ParseResult containing the source and validity flag.
         static consteval ParseResult parse(std::string_view json)

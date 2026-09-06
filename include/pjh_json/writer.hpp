@@ -32,6 +32,10 @@ namespace pjh::json
      * @param res   Memory resource for output string (default: global config)
      * @return Serialized JSON string
      * @throws JsonError if value contains non-finite double (NaN/Inf)
+     * @note dump never emits a BOM: the output starts with the first
+     *       value byte. A U+FEFF code point stored in a string is data,
+     *       not a prefix — it round-trips as raw UTF-8 (normal mode) or
+     *       \uFEFF (ascii mode).
      */
     [[nodiscard]] std::pmr::string dump(
         const Json &value,

@@ -49,6 +49,18 @@ namespace pjh::json
             if (n > SIZE_MAX - kPaddingWidth)
                 throw ParseError("Input too large to pad");
         }
+
+        // The UTF-8 BOM — the only BOM this library recognizes. Checked
+        // once per parse entry, at the input start only. Bytes compare
+        // as uint8_t: 0xEF is a negative char on two's-complement hosts,
+        // a signed `== 0xEF` test would never match.
+        bool starts_with_utf8_bom(const char *p, size_t size)
+        {
+            if (size < 3)
+                return false;
+            const auto *b = reinterpret_cast<const uint8_t *>(p);
+            return b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF;
+        }
     }
 
     /*
@@ -66,11 +78,25 @@ namespace pjh::json
             throw ParseError(
                 "Parser requires NUL padding (kPaddingWidth trailing"
                 " NUL bytes); use the parse_* entry points");
+        if (m_strip_bom)
+            skip_leading_bom();
         Json result = parse_value();
         skip_whitespace();
         if (m_curr < m_end)
             throw_parse_error("Extra characters after complete JSON value", m_curr, m_begin);
         return result;
+    }
+
+    /*
+     * BOM strip (task 23): at most once per parse, at the input start.
+     * m_begin is deliberately untouched — error offsets stay relative
+     * to the original buffer start (offset honesty).
+     */
+    void Parser::skip_leading_bom()
+    {
+        if (m_curr == m_begin &&
+            starts_with_utf8_bom(m_curr, m_end - m_curr))
+            m_curr += 3;
     }
 
     /*
@@ -105,7 +131,7 @@ namespace pjh::json
         size_t size = buffer.size() - kPaddingWidth;
         size_t block = arena_block_for(size);
         auto arena = Document::make_arena(storage, block, false);
-        Parser p(std::string_view(buffer.data(), size), arena_res(arena), true);
+        Parser p(std::string_view(buffer.data(), size), arena_res(arena), true, Config::instance().strip_bom());
         Json root = p.parse();
         return Document(std::move(arena), std::move(root), std::move(buffer),
                         false, storage, block);
@@ -132,7 +158,7 @@ namespace pjh::json
         buffer.resize(json.size() + kPaddingWidth, '\0');
         std::memcpy(buffer.data(), json.data(), json.size());
 
-        Parser p(std::string_view(buffer.data(), json.size()), res, true);
+        Parser p(std::string_view(buffer.data(), json.size()), res, true, Config::instance().strip_bom());
         Json root = p.parse();
         return Document(std::move(arena), std::move(root), std::move(buffer),
                         false, storage, block);
@@ -151,7 +177,7 @@ namespace pjh::json
     {
         size_t block = arena_block_for(content_len);
         auto arena = Document::make_arena(storage, block, false);
-        Parser p(std::string_view(data, content_len), arena_res(arena), true);
+        Parser p(std::string_view(data, content_len), arena_res(arena), true, Config::instance().strip_bom());
         Json root = p.parse();
         return Document(std::move(arena), std::move(root), std::pmr::string{},
                         true, storage, block);
@@ -185,6 +211,13 @@ namespace pjh::json
         const char *base = buffer.data();
         size_t i = 0;
         const size_t n = input.size();
+
+        // A BOM belongs to the file, not to line 1's value: consume it
+        // once at the whole-input start. Later lines keep the strict
+        // grammar — a BOM at their start is a parse error (per-line
+        // parsers are constructed without the strip flag).
+        if (Config::instance().strip_bom() && starts_with_utf8_bom(base, n))
+            i = 3;
 
         while (i < n)
         {

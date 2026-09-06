@@ -32,31 +32,38 @@ namespace pjh::json
         const char *m_end;          // End of input data
         std::pmr::memory_resource *m_resource;  // Allocator for parsed values
         bool m_assume_padded;       // If true, caller guarantees kPaddingWidth trailing NUL bytes
+        bool m_strip_bom;           // Strip a leading UTF-8 BOM at parse() start (per-Parser, ctor-captured)
         size_t m_depth = 0;         // Current nesting depth (open containers)
         size_t m_max_depth;         // Captured depth limit (0 = unlimited)
 
     public:
         /**
          * @brief Construct parser over a JSON text range
-         * @param json Text to parse
-         * @param res Allocator for parsed values (default: global config resource)
-         * @param assume_padded If true, caller guarantees kPaddingWidth
-         *                      trailing NUL bytes
-         * @note If assume_padded is false, parse() will immediately throw ParseError.
-         *       All five parse_* entry points set it to true:
-         *       parse_copy/parse_file/parse_jsonl over self-padded buffers,
-         *       parse_in_situ/parse_view over caller-padded buffers.
-         */
-        explicit Parser(
-            std::string_view json,
-            std::pmr::memory_resource *res = Config::instance().resource(),
-            bool assume_padded = false)
-            : m_begin(json.data()),
-              m_curr(json.data()),
-              m_end(json.data() + json.size()),
-              m_resource(res),
-              m_assume_padded(assume_padded),
-              m_max_depth(Config::instance().max_depth()) {}
+          * @param json Text to parse
+          * @param res Allocator for parsed values (default: global config resource)
+          * @param assume_padded If true, caller guarantees kPaddingWidth
+          *                      trailing NUL bytes
+          * @param strip_bom Strip a leading UTF-8 BOM at parse() start.
+          *       The single-value entries pass the Config setting;
+          *       parse_jsonl's per-line parsers pass false (the BOM is
+          *       consumed once at the whole-input start).
+          * @note If assume_padded is false, parse() will immediately throw ParseError.
+          *       All five parse_* entry points set it to true:
+          *       parse_copy/parse_file/parse_jsonl over self-padded buffers,
+          *       parse_in_situ/parse_view over caller-padded buffers.
+          */
+         explicit Parser(
+             std::string_view json,
+             std::pmr::memory_resource *res = Config::instance().resource(),
+             bool assume_padded = false,
+             bool strip_bom = false)
+             : m_begin(json.data()),
+               m_curr(json.data()),
+               m_end(json.data() + json.size()),
+               m_resource(res),
+               m_assume_padded(assume_padded),
+               m_strip_bom(strip_bom),
+               m_max_depth(Config::instance().max_depth()) {}
 
         /**
          * @brief Parse a complete JSON value
@@ -64,8 +71,11 @@ namespace pjh::json
          * @throws ParseError if JSON is invalid or if extra characters follow
          * @note Skips leading and trailing whitespace. Input must be padded
          *       (m_assume_padded must be true).
+         * @note Optionally strips a leading UTF-8 BOM before
+         *       dispatch (ctor flag; m_begin untouched, offsets stay
+         *       relative to the original buffer start).
          */
-        [[nodiscard]] Json parse();
+         [[nodiscard]] Json parse();
 
         /**
          * @brief Read 4 hex digits at current position (advances cursor)
@@ -83,6 +93,15 @@ namespace pjh::json
          * @brief Skip whitespace (SIMD-accelerated via xsimd)
          */
         void skip_whitespace();
+        /**
+         * @brief Advance past a leading UTF-8 BOM, if enabled and present
+         *
+         * No-op unless the ctor flag was set AND bytes 0..2 of the input
+         * are EF BB BF. m_begin is untouched: error offsets stay
+         * relative to the original buffer start (a value right after
+         * the BOM reports offset 3, not 0).
+         */
+        void skip_leading_bom();
         /**
          * @brief Parse any JSON value (returns new Json)
          */
