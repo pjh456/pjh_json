@@ -90,19 +90,46 @@ namespace pjh::json
     }
 
     /*
-     * Move assignment via destruct + placement-new
+     * Move assignment
      *
-     * Directly moving unique_ptr (arena) and Json is safe across unequal
-     * allocators. The old Document is destroyed first to prevent double-free
-     * of arena resources when the source is destroyed.
+     * Invariants:
+     * 1. The old root/buffer are destroyed through the old arena while it
+     *    is still alive; m_arena moves last, so the old resource is
+     *    destroyed only after nothing references it anymore.
+     * 2. m_buffer's allocator member is rebound before the arena moves.
+     *    String assignment never updates the allocator member (both
+     *    propagate_on_container_copy_assignment and
+     *    propagate_on_container_move_assignment are false for
+     *    polymorphic_allocator), while every string operation compares
+     *    allocators (virtual calls on the resource). A bare move-assign
+     *    would therefore leave m_buffer pointing at the old arena after
+     *    the m_arena move — a heap-use-after-free on the next comparison
+     *    or destruction. Rebinding is done by destroying the member in
+     *    place and move-constructing it with the source's resource, the
+     *    only form that sets the allocator member.
+     * 3. The moved-from source is left self-contained: its buffer is
+     *    rebuilt bound to the immortal new_delete_resource, so it never
+     *    keeps a pointer to the arena that moved into this document.
      */
     Document &Document::operator=(Document &&other) noexcept
     {
         if (this != &other)
         {
-            m_arena = std::move(other.m_arena);
+            using PmrString = std::pmr::string;
+            std::pmr::memory_resource *res = other.resource();
+
             m_root = std::move(other.m_root);
-            m_buffer = std::move(other.m_buffer);
+
+            m_buffer.~PmrString();
+            ::new (static_cast<void *>(std::addressof(m_buffer)))
+                PmrString(std::move(other.m_buffer), res);
+
+            m_arena = std::move(other.m_arena);
+
+            other.m_buffer.~PmrString();
+            ::new (static_cast<void *>(std::addressof(other.m_buffer)))
+                PmrString(std::pmr::new_delete_resource());
+
             m_is_view = other.m_is_view;
             m_storage = other.m_storage;
             m_block = other.m_block;

@@ -81,6 +81,12 @@ namespace pjh::json
          * @brief Move assign (member-wise, noexcept)
          * @param other Source document (left empty)
          * @return *this
+         * @note m_arena is assigned last: the old root/buffer deallocate
+         *       into the old arena, so it must outlive them. The body also
+         *       rebuilds m_buffer (and the source's) in place with the
+         *       source's resource before the arena moves, because pmr
+         *       string assignment never updates the allocator member.
+         *       Do not reorder the body (nor the member declarations above).
          */
         Document &operator=(Document &&other) noexcept;
 
