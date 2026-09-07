@@ -25,9 +25,9 @@ namespace pjh::json
     /**
      * @brief Global configuration singleton (storage policy, global resource)
      *
-     * The knobs — strict_duplicate_keys, arena_block_size, max_depth,
-     * strip_bom and the storage policy — are lock-free atomics: their
-     * setters and getters may be called concurrently from any thread. The mutex guards only the
+      * The knobs — strict_duplicate_keys, arena_block_size, max_depth,
+      * strip_bom, strict_utf8 and the storage policy — are lock-free atomics:
+      * their setters and getters may be called concurrently from any thread. The mutex guards only the
      * global Document (allocator state and the resource-cache invalidation
      * window). Knob semantics are capture-at-start: a value set mid-operation
      * takes effect at the next operation start (strict_duplicate_keys is
@@ -129,9 +129,44 @@ namespace pjh::json
          * @note The compile-time path (ConstJson::parse) cannot read
          *       runtime config (std::atomic is not constexpr): it
          *       stays BOM-strict regardless of this knob.
+         * @note Orthogonal to strict_utf8: this knob rules only on the
+         *       byte-0 prefix; strict_utf8 only sees bytes inside quotes
+         *       (a BOM inside a string is U+FEFF data, legal UTF-8).
          */
         void set_strip_bom(bool enable) noexcept { m_strip_bom.store(enable, std::memory_order_relaxed); }
         [[nodiscard]] bool strip_bom() const noexcept { return m_strip_bom.load(std::memory_order_relaxed); }
+
+        /**
+         * @brief Enable strict UTF-8 validation of string content at parse
+         * @note Lock-free: relaxed atomic store/load, safe to call
+         *       concurrently with parse. The value is captured at each
+         *       Parser construction (all five entries, including
+         *       parse_jsonl's per-line parsers); a change takes effect
+         *       from the next parse (capture-at-start granularity).
+         * @note Default: false. By default string content is a byte
+         *       mirror — ill-formed UTF-8 (0x80-0xC1 / 0xF5-0xFF
+         *       leads, overlong encodings, surrogate range ED A0-BF,
+         *       codepoints > U+10FFFF, truncated tails) is accepted and
+         *       round-trips byte-identical.
+         * @note Scope: bytes inside quotes only (values and object
+         *       keys). The \\uXXXX escape path is already strict in
+         *       every build (lone surrogates / bad pair ordering throw
+         *       today); this knob adds the raw-byte rules only.
+         * @note The writer is unaffected: non-ascii dump stays a byte
+         *       mirror, ascii dump validates unconditionally
+         *       (pre-existing, DumpOptions.ascii).
+         * @note Errors report the first offending byte: offset relative
+         *       to the original buffer start (parse_jsonl: to the line
+         *       start). The compile-time path (ConstJson::parse) cannot
+         *       read runtime config (std::atomic is not constexpr): it
+         *       stays raw-byte-lenient by construction (documented
+         *       divergence, pinned in tests/literal_test.cpp).
+         * @note Orthogonal to strip_bom: a byte-0 BOM is a prefix
+         *       policy (grammar), not a UTF-8 error; a BOM inside a
+         *       string is U+FEFF data and passes this check.
+         */
+        void set_strict_utf8(bool enable) noexcept { m_strict_utf8.store(enable, std::memory_order_relaxed); }
+        [[nodiscard]] bool strict_utf8() const noexcept { return m_strict_utf8.load(std::memory_order_relaxed); }
 
         /**
          * @brief Release global document
@@ -143,7 +178,8 @@ namespace pjh::json
          * @brief Reset config to defaults and release global document
          * @note Equivalent to configure(Pooled, 4096),
          *       strict_duplicate_keys = false, arena_block_size = 0 (auto),
-         *       max depth = 0 (unlimited), strip_bom = false, then release().
+         *       max depth = 0 (unlimited), strip_bom = false,
+         *       strict_utf8 = false, then release().
          * @note Knob restoration uses atomic stores, still performed under
          *       the lock, in service of release_locked().
          */
@@ -170,6 +206,7 @@ namespace pjh::json
         std::atomic<size_t> m_arena_block_size{0};
         std::atomic<size_t> m_max_depth{0};
         std::atomic<bool> m_strip_bom{false};
+        std::atomic<bool> m_strict_utf8{false};
         std::atomic<Storage> m_storage{Storage::Pooled};
         size_t m_block = 4096;
         std::unique_ptr<Document> m_global;

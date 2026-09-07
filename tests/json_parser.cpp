@@ -26,12 +26,14 @@ namespace
         size_t m_arena_block;
         size_t m_max_depth;
         bool m_strip_bom;
+        bool m_strict_utf8;
 
         ConfigGuard()
             : m_strict(Config::instance().strict_duplicate_keys()),
               m_arena_block(Config::instance().arena_block_size()),
               m_max_depth(Config::instance().max_depth()),
-              m_strip_bom(Config::instance().strip_bom())
+              m_strip_bom(Config::instance().strip_bom()),
+              m_strict_utf8(Config::instance().strict_utf8())
         {
         }
 
@@ -41,12 +43,24 @@ namespace
             Config::instance().set_arena_block_size(m_arena_block);
             Config::instance().set_max_depth(m_max_depth);
             Config::instance().set_strip_bom(m_strip_bom);
+            Config::instance().set_strict_utf8(m_strict_utf8);
         }
     };
 
     // UTF-8 BOM bytes (hex escapes are self-terminating: \xBF does not
     // swallow a following byte)
     inline std::string bom() { return std::string("\xEF\xBB\xBF", 3); }
+
+    // Ill-formed UTF-8 samples (hex escapes self-terminating: \xBF does
+    // not swallow the following byte)
+    inline std::string invalid_byte()  { return std::string("a\xFF", 2); }
+    inline std::string lone_cont()     { return std::string("a\x80", 2); }
+    inline std::string overlong2()     { return std::string("a\xC0\x80", 3); }
+    inline std::string overlong3()     { return std::string("a\xE0\x80\x80", 4); }
+    inline std::string surrogate_seq() { return std::string("a\xED\xA0\x80", 4); }
+    inline std::string over_10ffff()   { return std::string("a\xF5\x80\x80\x80", 5); }
+    inline std::string truncated_tail(){ return std::string("a\xE0", 2); }
+    inline std::string valid_utf8()    { return std::string("caf\xC3\xA9 \xE4\xB8\xAD \xF0\x9F\x98\x80"); }
 }
 
 TEST_CASE("Parser: literal") {
@@ -739,4 +753,184 @@ TEST_CASE("Parser: jsonl BOM line-1 only") {
     } catch (const ParseError &e) {
         REQUIRE(e.offset() == 0);
     }
+}
+
+TEST_CASE("Parser: invalid utf-8 accepted by default") {
+    // Default-OFF contract pin (task 24): string content is a byte
+    // mirror — ill-formed UTF-8 is accepted and round-trips
+    // byte-identical. This case has NO guard: it must stay green
+    // forever (the regression wall for the default contract).
+    std::string samples[] = {
+        invalid_byte(),    // 0xFF: no such lead byte
+        lone_cont(),       // 0x80: continuation without a lead
+        overlong2(),       // C0 80: overlong 2-byte
+        overlong3(),       // E0 80 80: overlong 3-byte
+        surrogate_seq(),   // ED A0 80: U+D800 in UTF-8
+        over_10ffff(),     // F5 80 80 80: no such lead byte
+        truncated_tail(),  // E0 at the string end
+    };
+    for (const std::string &s : samples)
+    {
+        auto d = parse_copy("\"" + s + "\"");
+        REQUIRE(d.root().as_string() == std::string_view(s));
+    }
+
+    // Control: clean input succeeds (rejection is attributed correctly)
+    auto ok = parse_copy("\"hi\"");
+    REQUIRE(ok.root().as_string() == std::string_view("hi"));
+
+    // Unterminated-string priority: no closing quote -> the SIMD scan
+    // hits the padding NUL first; "Unterminated string" at the content
+    // end, NOT a UTF-8 error (the checker never runs without a quote
+    // window). Content = " a b c E0 (5 bytes).
+    try {
+        (void)parse_copy(std::string("\"abc\xE0", 5));
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 5);
+        REQUIRE(std::string(e.what()).find("Unterminated") != std::string::npos);
+    }
+}
+
+TEST_CASE("Parser: strict utf-8 rejects malformed bytes") {
+    ConfigGuard guard; // first: save the entering state before any mutation
+
+    // Phase A — default (strict OFF): every sample passes, byte-identical
+    std::string samples[] = { invalid_byte(), lone_cont(), overlong2(),
+        overlong3(), surrogate_seq(), over_10ffff(), truncated_tail() };
+    for (const std::string &s : samples)
+        REQUIRE(parse_copy("\"" + s + "\"").root().as_string() == std::string_view(s));
+
+    Config::instance().set_strict_utf8(true);
+
+    // Phase B — strict ON: each violation class rejected at its first
+    // offending byte. Pin = type + offset + " at offset N" substring
+    // (task 13 caliber: what()'s full text is not the contract); the
+    // message-family substring is added where the class is unambiguous.
+    auto expect_off = [](std::string input, size_t off,
+                         std::string_view family)
+    {
+        try {
+            (void)parse_copy(input);
+            REQUIRE(false);
+        } catch (const ParseError &e) {
+            REQUIRE(e.offset() == off);
+            REQUIRE(std::string(e.what()).find(" at offset " + std::to_string(off))
+                    != std::string::npos);
+            if (!family.empty())
+                REQUIRE(std::string(e.what()).find(family) != std::string::npos);
+        }
+    };
+
+    expect_off("\"a\xFF\"", 2, "Invalid UTF-8 lead byte in string");   // bad lead
+    expect_off("\"a\x80\"", 2, "Invalid UTF-8 lead byte in string");   // lone continuation
+    expect_off("\"a\xC0\x80\"", 2, "Overlong UTF-8 sequence in string");
+    expect_off("\"a\xE0\x80\x80\"", 2, "Overlong UTF-8 sequence in string");
+    expect_off("\"a\xED\xA0\x80\"", 2, "UTF-8 surrogate codepoint in string");
+    expect_off("\"a\xED\xBF\xBF\"", 2, "UTF-8 surrogate codepoint in string"); // U+DFFF edge
+    expect_off("\"a\xF5\x80\x80\x80\"", 2, "");  // 0xF5: no such lead byte
+    expect_off("\"a\xE0\"", 2, "Truncated UTF-8 sequence in string");
+    expect_off("\"a\xE0\xC0\"", 3, "Invalid UTF-8 continuation byte in string"); // lead in a slot
+
+    // Legal multibyte control group (strict ON must pass): the
+    // signed-char trap's executable counter-evidence
+    auto vd = parse_copy("\"" + valid_utf8() + "\"");
+    REQUIRE(vd.root().as_string() == std::string_view(valid_utf8()));
+
+    // Escape face: already strict before this task; the knob neither
+    // adds nor removes anything there (only type + offset pinned)
+    auto pair = parse_copy(R"("\uD83D\uDE00")");
+    REQUIRE(pair.root().as_string() == std::string_view("\xF0\x9F\x98\x80"));
+    try {
+        (void)parse_copy(R"("\uD800")");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 7); // lone high: cursor past \uD800's hex4
+    }
+    try {
+        (void)parse_copy(R"("\uDC00")");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 7); // lone low
+    }
+
+    // Escape tear: 0xC3 (2-byte lead) followed by an escape — the escape
+    // source text is fed as a plain byte stream: the backslash is the
+    // bad first continuation, reported at the backslash (NOT at the
+    // decoded output, NOT an interval pass over the post-decode buffer)
+    expect_off(std::string("\"a\xC3", 3) + "\\u0041\"", 3,
+               "Invalid UTF-8 continuation byte in string");
+
+    // Object keys go through parse_string (object.cpp) — the gate covers
+    // keys, not just values
+    expect_off(std::string("{\"\xFF\":1}", 7), 2,
+               "Invalid UTF-8 lead byte in string");
+
+    // Result channel: the thin shell inherits the knob (task 16 precedent)
+    auto r = parse_copy_result("\"a\xFF\"");
+    REQUIRE(r.is_err());
+    ParseError e = r.unwrap_err();
+    REQUIRE(e.offset() == 2);
+
+    // DEL (0x7F) stays legal under strict ON (literal_test.cpp:209 mirror)
+    auto del = parse_copy("\"a\x7F\"");
+    REQUIRE(del.root().as_string() == std::string_view("a\x7F", 2));
+}
+
+TEST_CASE("Parser: strict utf-8 jsonl line offset") {
+    ConfigGuard guard; // first: save the entering state before any mutation
+    Config::instance().set_strict_utf8(true);
+
+    // Line 2 = "a\xFF": offset is RELATIVE TO THE LINE, not the whole
+    // input (a whole-buffer reading would say 4). This pin is the
+    // executable referee for the house jsonl line-offset contract
+    // (document.hpp parse_jsonl note; "jsonl result entry" precedent).
+    // First error wins: line 1 legal, line 2 illegal -> the throw IS the
+    // pin (the partial document is discarded, nothing more observable).
+    try {
+        (void)parse_jsonl("1\n\"a\xFF\"\n");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 2); // " = 0, a = 1, 0xFF = 2 (line-relative)
+        REQUIRE(std::string(e.what()).find(" at offset 2") != std::string::npos);
+        REQUIRE(std::string(e.what()).find("Invalid UTF-8 lead byte") != std::string::npos);
+    }
+
+    // strict OFF: the default contract in its jsonl form
+    Config::instance().set_strict_utf8(false);
+    auto d = parse_jsonl("1\n\"a\xFF\"\n");
+    REQUIRE(d.root().is_array());
+    REQUIRE(d.root().size() == 2);
+}
+
+TEST_CASE("Parser: strict utf-8 bom boundary") {
+    ConfigGuard guard; // first: save the entering state before any mutation
+    Config::instance().set_strip_bom(false);
+    Config::instance().set_strict_utf8(true);
+
+    // BOM at byte 0 under strict ON: the BOM is NOT a UTF-8 error — it
+    // sits at the top level, where the grammar rejects it ("Unexpected
+    // character parsing value" @ 0, value.cpp). The checker only sees
+    // bytes inside quotes; the two knobs rule on disjoint bytes
+    try {
+        (void)parse_copy(bom() + "1");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 0);
+        REQUIRE(std::string(e.what()).find(" at offset 0") != std::string::npos);
+        REQUIRE(std::string(e.what()).find("Unexpected character") != std::string::npos);
+    }
+
+    // BOM bytes INSIDE a string: U+FEFF data, legal UTF-8 — strict ON
+    // passes it byte-identical (strip_bom's byte-0 rule does not reach
+    // inside quotes)
+    auto d = parse_copy("\"" + bom() + "\"");
+    REQUIRE(d.root().as_string() == std::string_view(bom()));
+
+    // Both-knob combination (task 23 + 24 orthogonality, executable):
+    // strip_bom ON strips the byte-0 prefix, strict ON validates the
+    // (BOM-free) content
+    Config::instance().set_strip_bom(true);
+    auto ok = parse_copy(bom() + "1");
+    REQUIRE(ok.root().as_int() == (int64_t)1);
 }

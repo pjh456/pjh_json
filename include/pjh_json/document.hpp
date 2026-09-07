@@ -149,10 +149,14 @@ namespace pjh::json
      * @note buffer is consumed (moved into Document). Strings borrow from it.
      * @note buffer.size() must be >= kPaddingWidth; the final kPaddingWidth
      *       bytes are NUL sentinels.
-     * @note A leading UTF-8 BOM (EF BB BF) is rejected unless
-     *       Config::set_strip_bom(true); error offsets stay relative to the
-     *       buffer start (a value right after the BOM reports offset 3).
-     */
+      * @note A leading UTF-8 BOM (EF BB BF) is rejected unless
+      *       Config::set_strip_bom(true); error offsets stay relative to the
+      *       buffer start (a value right after the BOM reports offset 3).
+      * @note String content is a byte mirror by default;
+      *       Config::set_strict_utf8(true) rejects ill-formed UTF-8 in string
+      *       content (values and keys) with the offset at the first offending
+      *       byte (relative to the buffer start).
+      */
     [[nodiscard]] Document parse_in_situ(
         std::pmr::string &&buffer,
         Storage storage = Config::instance().storage());
@@ -164,10 +168,14 @@ namespace pjh::json
      * @return Document owning the parsed tree and a copy of json
      * @throws ParseError on invalid JSON
      * @note The input is copied into a padded buffer owned by Document.
-     * @note A leading UTF-8 BOM (EF BB BF) is rejected unless
-     *       Config::set_strip_bom(true); error offsets stay relative to the
-     *       buffer start (a value right after the BOM reports offset 3).
-     */
+      * @note A leading UTF-8 BOM (EF BB BF) is rejected unless
+      *       Config::set_strip_bom(true); error offsets stay relative to the
+      *       buffer start (a value right after the BOM reports offset 3).
+      * @note String content is a byte mirror by default;
+      *       Config::set_strict_utf8(true) rejects ill-formed UTF-8 in string
+      *       content (values and keys) with the offset at the first offending
+      *       byte (relative to the buffer start).
+      */
     [[nodiscard]] Document parse_copy(
         std::string_view json,
         Storage storage = Config::instance().storage());
@@ -186,10 +194,14 @@ namespace pjh::json
      * @note The library cannot verify this padding (reading past content_len
      *       would itself overread); a violation is UB - use an ASan build in
      *       development to catch it.
-     * @note A leading UTF-8 BOM (EF BB BF) is rejected unless
-     *       Config::set_strip_bom(true); error offsets stay relative to the
-     *       buffer start (a value right after the BOM reports offset 3).
-     */
+      * @note A leading UTF-8 BOM (EF BB BF) is rejected unless
+      *       Config::set_strip_bom(true); error offsets stay relative to the
+      *       buffer start (a value right after the BOM reports offset 3).
+      * @note String content is a byte mirror by default;
+      *       Config::set_strict_utf8(true) rejects ill-formed UTF-8 in string
+      *       content (values and keys) with the offset at the first offending
+      *       byte (relative to the buffer start).
+      */
     [[nodiscard]] Document parse_view(
         const char *data, size_t content_len,
         Storage storage = Config::instance().storage());
@@ -202,11 +214,16 @@ namespace pjh::json
      * @throws ParseError on invalid JSON in any line
      * @note Blank lines and lines with only whitespace are skipped.
      *       Lines use \\n as delimiter; \\r before \\n is stripped.
-     * @note A leading BOM is stripped (strip_bom) only at the whole-input
-     *       start, before the line scan; a BOM at the start of any line is
-     *       a parse error at that line's offset 0, with or without
-     *       strip_bom.
-     */
+      * @note A leading BOM is stripped (strip_bom) only at the whole-input
+      *       start, before the line scan; a BOM at the start of any line is
+      *       a parse error at that line's offset 0, with or without
+      *       strip_bom.
+      * @note String content is a byte mirror by default;
+      *       Config::set_strict_utf8(true) rejects ill-formed UTF-8 in string
+      *       content (values and keys) with the offset at the first offending
+      *       byte. parse_jsonl offsets are relative to the failing line, as
+      *       with all errors here.
+      */
     [[nodiscard]] Document parse_jsonl(
         std::string_view input,
         Storage storage = Config::instance().storage());
@@ -216,10 +233,13 @@ namespace pjh::json
      * @param filepath Path to file
      * @param storage Allocation strategy (default: global config)
      * @return Document owning the parsed tree and file content buffer
-     * @throws ParseError if file cannot be opened, read, or contains invalid JSON
-     * @note Same BOM contract as parse_in_situ (the file content delegates
-     *       to it).
-     */
+      * @throws ParseError if file cannot be opened, read, or contains invalid JSON
+      * @note Same BOM contract as parse_in_situ (the file content delegates
+      *       to it).
+      * @note Same strict UTF-8 contract as parse_in_situ: string content is
+      *       a byte mirror by default; Config::set_strict_utf8(true) rejects
+      *       ill-formed UTF-8 at the first offending byte.
+      */
     [[nodiscard]] Document parse_file(
         std::string_view filepath,
         Storage storage = Config::instance().storage());

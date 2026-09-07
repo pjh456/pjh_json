@@ -33,6 +33,7 @@ namespace pjh::json
         std::pmr::memory_resource *m_resource;  // Allocator for parsed values
         bool m_assume_padded;       // If true, caller guarantees kPaddingWidth trailing NUL bytes
         bool m_strip_bom;           // Strip a leading UTF-8 BOM at parse() start (per-Parser, ctor-captured)
+        bool m_strict_utf8;         // Strict UTF-8 validation of string content (per-Parser, ctor-captured)
         size_t m_depth = 0;         // Current nesting depth (open containers)
         size_t m_max_depth;         // Captured depth limit (0 = unlimited)
 
@@ -43,27 +44,31 @@ namespace pjh::json
           * @param res Allocator for parsed values (default: global config resource)
           * @param assume_padded If true, caller guarantees kPaddingWidth
           *                      trailing NUL bytes
-          * @param strip_bom Strip a leading UTF-8 BOM at parse() start.
-          *       The single-value entries pass the Config setting;
-          *       parse_jsonl's per-line parsers pass false (the BOM is
-          *       consumed once at the whole-input start).
-          * @note If assume_padded is false, parse() will immediately throw ParseError.
-          *       All five parse_* entry points set it to true:
-          *       parse_copy/parse_file/parse_jsonl over self-padded buffers,
-          *       parse_in_situ/parse_view over caller-padded buffers.
-          */
-         explicit Parser(
-             std::string_view json,
-             std::pmr::memory_resource *res = Config::instance().resource(),
-             bool assume_padded = false,
-             bool strip_bom = false)
-             : m_begin(json.data()),
-               m_curr(json.data()),
-               m_end(json.data() + json.size()),
-               m_resource(res),
-               m_assume_padded(assume_padded),
-               m_strip_bom(strip_bom),
-               m_max_depth(Config::instance().max_depth()) {}
+           * @param strip_bom Strip a leading UTF-8 BOM at parse() start.
+           *       The single-value entries pass the Config setting;
+           *       parse_jsonl's per-line parsers pass false (the BOM is
+           *       consumed once at the whole-input start).
+           * @param strict_utf8 Validate raw UTF-8 in string content
+           *       (Config::strict_utf8); all five parse entries pass it.
+           * @note If assume_padded is false, parse() will immediately throw ParseError.
+           *       All five parse_* entry points set it to true:
+           *       parse_copy/parse_file/parse_jsonl over self-padded buffers,
+           *       parse_in_situ/parse_view over caller-padded buffers.
+           */
+          explicit Parser(
+              std::string_view json,
+              std::pmr::memory_resource *res = Config::instance().resource(),
+              bool assume_padded = false,
+              bool strip_bom = false,
+              bool strict_utf8 = false)
+              : m_begin(json.data()),
+                m_curr(json.data()),
+                m_end(json.data() + json.size()),
+                m_resource(res),
+                m_assume_padded(assume_padded),
+                m_strip_bom(strip_bom),
+                m_strict_utf8(strict_utf8),
+                m_max_depth(Config::instance().max_depth()) {}
 
         /**
          * @brief Parse a complete JSON value
@@ -74,8 +79,11 @@ namespace pjh::json
          * @note Optionally strips a leading UTF-8 BOM before
          *       dispatch (ctor flag; m_begin untouched, offsets stay
          *       relative to the original buffer start).
+         * @note Optionally validates raw UTF-8 in string content
+         *       (ctor flag; first offending byte reported, offsets
+         *       relative to the original buffer start).
          */
-         [[nodiscard]] Json parse();
+          [[nodiscard]] Json parse();
 
         /**
          * @brief Read 4 hex digits at current position (advances cursor)

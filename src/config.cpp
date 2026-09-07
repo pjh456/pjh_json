@@ -79,7 +79,7 @@ namespace pjh::json
     /*
      * Reset to defaults: Pooled/4096, strict_duplicate_keys off,
      * arena_block_size 0 (auto), max depth 0 (unlimited), strip_bom
-     * off, then release.
+     * off, strict_utf8 off, then release.
      */
     void Config::reset()
     {
@@ -90,6 +90,7 @@ namespace pjh::json
         m_arena_block_size.store(0, std::memory_order_relaxed);
         m_max_depth.store(0, std::memory_order_relaxed);
         m_strip_bom.store(false, std::memory_order_relaxed);
+        m_strict_utf8.store(false, std::memory_order_relaxed);
         release_locked();
     }
 

@@ -350,3 +350,56 @@ TEST_CASE("Writer: jsonl file result entry") {
     REQUIRE(e.category() == Category::Json);
     REQUIRE(dynamic_cast<const JsonError *>(&e) != nullptr);
 }
+
+TEST_CASE("Writer: utf-8 pass-through and ascii validation") {
+    // json_writer.cpp has no shared ConfigGuard TU: local RAII guard, same
+    // obligation as json_parser.cpp's (doctest has no teardown)
+    struct StrictUtf8Guard
+    {
+        bool m_on;
+
+        StrictUtf8Guard()
+            : m_on(Config::instance().strict_utf8())
+        {
+        }
+
+        ~StrictUtf8Guard()
+        {
+            Config::instance().set_strict_utf8(m_on);
+        }
+    } guard;
+
+    // Byte mirror (default opts): ill-formed UTF-8 built via the borrowed
+    // ctor (zero validation) round-trips byte-identical — strict_utf8 is a
+    // parse gate, not a tree invariant (the writer stays a mirror).
+    // Hex-escape greediness: "\xFF" must be its own literal (a following
+    // hex digit would extend the escape past one byte).
+    const std::string bad = std::string("\"a", 2) + "\xFF" + "b\"";
+    Json j(std::string_view(bad.data() + 1, 3));
+    auto out = dump(j);
+    REQUIRE(sv(out) == std::string_view(bad));
+
+    // ascii mode: the pre-existing six-site validator throws
+    // unconditionally (DumpOptions.ascii, knob-independent) — first pinned
+    // here (type + message-family substring, task 13 caliber)
+    try {
+        (void)dump(j, DumpOptions{.ascii = true});
+        REQUIRE(false);
+    } catch (const JsonError &err) {
+        REQUIRE(err.category() == Category::Json);
+        REQUIRE(std::string(err.what()).find("Invalid UTF-8 lead byte in string") != std::string::npos);
+    }
+
+    // strict ON does NOT make the default dump throw (stance pin: the
+    // mirror stays a mirror)
+    Config::instance().set_strict_utf8(true);
+    auto out2 = dump(j);
+    REQUIRE(sv(out2) == std::string_view(bad));
+
+    // Round-trip pin (strict ON): strict-parse output fed to the default
+    // dump loses no information (byte-identical)
+    auto d = parse_copy("\"caf\xC3\xA9 \xF0\x9F\x98\x80\"");
+    REQUIRE(d.root().as_string() == std::string_view("caf\xC3\xA9 \xF0\x9F\x98\x80", 10));
+    auto out3 = dump(d.root());
+    REQUIRE(sv(out3) == std::string_view("\"caf\xC3\xA9 \xF0\x9F\x98\x80\"", 12));
+}

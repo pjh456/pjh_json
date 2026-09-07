@@ -131,7 +131,8 @@ namespace pjh::json
         size_t size = buffer.size() - kPaddingWidth;
         size_t block = arena_block_for(size);
         auto arena = Document::make_arena(storage, block, false);
-        Parser p(std::string_view(buffer.data(), size), arena_res(arena), true, Config::instance().strip_bom());
+        Parser p(std::string_view(buffer.data(), size), arena_res(arena), true,
+                Config::instance().strip_bom(), Config::instance().strict_utf8());
         Json root = p.parse();
         return Document(std::move(arena), std::move(root), std::move(buffer),
                         false, storage, block);
@@ -158,7 +159,8 @@ namespace pjh::json
         buffer.resize(json.size() + kPaddingWidth, '\0');
         std::memcpy(buffer.data(), json.data(), json.size());
 
-        Parser p(std::string_view(buffer.data(), json.size()), res, true, Config::instance().strip_bom());
+        Parser p(std::string_view(buffer.data(), json.size()), res, true,
+                Config::instance().strip_bom(), Config::instance().strict_utf8());
         Json root = p.parse();
         return Document(std::move(arena), std::move(root), std::move(buffer),
                         false, storage, block);
@@ -177,7 +179,8 @@ namespace pjh::json
     {
         size_t block = arena_block_for(content_len);
         auto arena = Document::make_arena(storage, block, false);
-        Parser p(std::string_view(data, content_len), arena_res(arena), true, Config::instance().strip_bom());
+        Parser p(std::string_view(data, content_len), arena_res(arena), true,
+                Config::instance().strip_bom(), Config::instance().strict_utf8());
         Json root = p.parse();
         return Document(std::move(arena), std::move(root), std::pmr::string{},
                         true, storage, block);
@@ -249,7 +252,14 @@ namespace pjh::json
 
             if (!blank)
             {
-                Parser p(std::string_view(base + i, len), res, true);
+                // Per-line parsers: the BOM flag stays false (the BOM
+                // belongs to the whole input, consumed once above), but
+                // the strict_utf8 gate applies to EVERY line — UTF-8
+                // legality has no file-level vs line-level split.
+                // Offsets come out line-relative automatically (m_begin
+                // = line base).
+                Parser p(std::string_view(base + i, len), res, true, false,
+                        Config::instance().strict_utf8());
                 arr.push_back(p.parse());
             }
 

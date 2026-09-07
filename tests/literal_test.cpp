@@ -219,4 +219,10 @@ TEST_CASE("ConstJson: parse strictness") {
     static_assert(!ConstJson::parse(std::string_view("\xEF\xBB\xBF" "1", 4)).valid);
     static_assert(!ConstJson::parse(std::string_view("\xEF\xBB\xBF", 3)).valid);
     static_assert(ConstJson::parse("1").valid); // control: BOM-free is fine
+
+    // Raw-byte leniency (task 24 documented divergence): the constexpr
+    // validator stays raw-byte-lenient — the runtime strict_utf8 knob
+    // cannot reach consteval (std::atomic is not constexpr).
+    static_assert(ConstJson::parse(std::string_view("\"a\xFF" "b\"", 5)).valid);  // 0xFF passes (>= 0x20)
+    static_assert(ConstJson::parse(std::string_view("\"a\xC0" "b\"", 5)).valid);  // overlong lead passes raw
 }

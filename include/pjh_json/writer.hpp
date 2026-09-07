@@ -213,9 +213,13 @@ namespace pjh::json
      * @param sink  Output string (appended to)
      * @param s     Raw string to escape and emit
      * @param ascii If true, escape non-ASCII as \\uXXXX
-     * @note Uses SIMD (xsimd) for fast scanning of characters needing escape.
-     * @throws JsonError if s contains invalid UTF-8 (only when ascii=true)
-     */
+      * @note Uses SIMD (xsimd) for fast scanning of characters needing escape.
+      * @throws JsonError if s contains invalid UTF-8 (only when ascii=true)
+      * @note The strict_utf8 Config knob does NOT apply here: non-ascii
+      *       mode is a byte mirror (ill-formed UTF-8 round-trips
+      *       untouched), ascii mode validates unconditionally via the
+      *       pre-existing six JsonError sites (DumpOptions.ascii).
+      */
     void write_escaped(std::pmr::string &sink, std::string_view s, bool ascii = false);
     /**
      * @brief Write raw data to file
