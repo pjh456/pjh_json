@@ -131,29 +131,32 @@ target_link_libraries(pjh_json
 )
 
 # -------------------------
-# install / export
+# install / export（仅独立工程时生成；作为子项目被 add_subdirectory 时跳过，
+# 否则导出集缺少外部提供的 pjh_result 目标会导致 configure 失败）
 # -------------------------
-set(pjh_json_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/cmake/pjh_json)
+if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
+    set(pjh_json_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/cmake/pjh_json)
 
-install(TARGETS pjh_json xsimd EXPORT pjh_jsonTargets)   # pjh_result 不入集（文件级守卫全有全无）
-install(EXPORT pjh_jsonTargets
-    FILE pjh_jsonTargets.cmake
-    DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(DIRECTORY thirdparty/xsimd/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(DIRECTORY thirdparty/pjh_result/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    install(TARGETS pjh_json xsimd EXPORT pjh_jsonTargets)   # pjh_result 不入集（文件级守卫全有全无）
+    install(EXPORT pjh_jsonTargets
+        FILE pjh_jsonTargets.cmake
+        DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
+    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    install(DIRECTORY thirdparty/xsimd/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    install(DIRECTORY thirdparty/pjh_result/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
-configure_package_config_file(cmake/pjh_jsonConfig.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfig.cmake
-    INSTALL_DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
-write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfigVersion.cmake
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion)
-install(FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfig.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfigVersion.cmake
-    DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
+    configure_package_config_file(cmake/pjh_jsonConfig.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfig.cmake
+        INSTALL_DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfigVersion.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion)
+    install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfig.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfigVersion.cmake
+        DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
+endif()
 
 # -------------------------
 # tests/examples
