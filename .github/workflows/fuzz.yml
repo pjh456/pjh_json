@@ -1,0 +1,44 @@
+name: Fuzz
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * *"   # nightly, off the push gate
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Configure
+        env:
+          CC: clang
+          CXX: clang++
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DPJH_JSON_BUILD_FUZZERS=ON
+          -DPJH_JSON_SANITIZERS=address,undefined
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Fuzz (bounded)
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          ./build/fuzz/fuzz_parse_copy \
+            -max_total_time=120 -seed=1 -max_len=4096 \
+            -dict=fuzz/json.dict -artifact_prefix=build/fuzz/ \
+            fuzz/corpus/parse_copy
+          ./build/fuzz/fuzz_parse_jsonl \
+            -max_total_time=120 -seed=1 -max_len=4096 \
+            -dict=fuzz/json.dict -artifact_prefix=build/fuzz/ \
+            fuzz/corpus/parse_jsonl

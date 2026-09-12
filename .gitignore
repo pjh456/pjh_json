@@ -2,3 +2,9 @@
 .vs
 build
 *.json
+# libFuzzer crash/leak/timeout artifacts (default written to CWD by hand runs)
+fuzz/crash-*
+fuzz/leak-*
+fuzz/timeout-*
+fuzz/oom-*
+fuzz/slow-unit-*

@@ -17,6 +17,7 @@ include(CMakePackageConfigHelpers)
 option(PJH_JSON_BUILD_TESTS "Build tests" OFF)
 option(PJH_JSON_BUILD_EXAMPLES "Build examples" OFF)
 option(PJH_JSON_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(PJH_JSON_BUILD_FUZZERS "Build libFuzzer differential fuzz targets (Clang + sanitizers)" OFF)
 set(PJH_JSON_PGO OFF CACHE STRING "PGO mode: OFF, GENERATE, or USE")
 
 # -------------------------
@@ -191,6 +192,32 @@ endif()
 # -------------------------
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     enable_testing()
+
+    # -------------------------
+    # libFuzzer differential fuzzers (opt-in; Clang + sanitizers only)
+    # -------------------------
+    # The library objects need the fuzzer coverage pass (fuzzer-no-link) for
+    # libFuzzer's feedback to see the parser internals; the fuzzer runtime and
+    # main are linked only by the fuzz executables (fuzz/CMakeLists.txt).
+    if(PJH_JSON_BUILD_FUZZERS)
+        if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            message(FATAL_ERROR
+                "PJH_JSON_BUILD_FUZZERS requires Clang (libFuzzer); "
+                "${CMAKE_CXX_COMPILER_ID} is not supported. Use a Clang build tree.")
+        endif()
+        if(NOT PJH_JSON_SANITIZER_FLAGS)
+            message(FATAL_ERROR
+                "PJH_JSON_BUILD_FUZZERS requires sanitizers: configure with "
+                "-DPJH_JSON_SANITIZERS=address,undefined.")
+        endif()
+        if(PJH_JSON_SANITIZERS MATCHES "thread")
+            message(FATAL_ERROR
+                "PJH_JSON_BUILD_FUZZERS is incompatible with TSan (thread); "
+                "use -DPJH_JSON_SANITIZERS=address,undefined.")
+        endif()
+        target_compile_options(pjh_json PRIVATE -fsanitize=fuzzer-no-link)
+        add_subdirectory(fuzz)
+    endif()
 
     if(PJH_JSON_BUILD_TESTS)
         add_subdirectory(tests)
