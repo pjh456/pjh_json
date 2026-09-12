@@ -127,8 +127,56 @@ namespace pjh::json
         };
 
     private:
+        /**
+         * @brief Flat open-addressing key -> entry-position index
+         *
+         * Cache only: an absent (or dropped) index means lookups fall back
+         * to the linear scan, so a stale index can only be slow, never
+         * wrong. Only materialised above kIndexThreshold by the write
+         * paths; below it the linear sweep of a handful of short keys
+         * beats hashing. Defined out of line (incomplete here).
+         */
+        struct Index;
+
+        /**
+         * @brief Entry count above which the write paths materialise the index
+         *
+         * Kept low enough that the public bulk-construction APIs turn O(N^2)
+         * into O(N), high enough that the small-object hot path (benchmark
+         * objects average ~3 keys, standalone objects 1-5) never pays for a
+         * hash table.
+         */
+        static constexpr size_t kIndexThreshold = 16;
+
+        /// Miss sentinel returned by find_slot (a valid position is < size())
+        static constexpr size_t npos = static_cast<size_t>(-1);
+
         Vec m_data;
         std::pmr::memory_resource *m_resource{nullptr};
+        Index *m_index{nullptr};
+
+        /// First entry position whose key equals `key`, or npos. Uses the
+        /// index when present, else the linear scan; never allocates. With
+        /// `rebuild` false a stale index is bypassed (linear) instead of
+        /// being refilled — used by remove, where refilling per erase would
+        /// not pay off.
+        [[nodiscard]] size_t find_slot(std::string_view key,
+                                       bool rebuild = true) const noexcept;
+        /// (Re)build the index over every current entry (first-wins). Drops
+        /// any existing index first, so a throw leaves a valid null cache.
+        void index_build();
+        /// Refill an existing slot array from m_data (first-wins), clearing
+        /// the stale flag; never allocates.
+        void index_refill(Index &idx) const noexcept;
+        /// Maintain the index after `pos` was appended (build/refill/grow/no-op).
+        void index_note_append(size_t pos);
+        /// Mark the index stale after an erase (or drop it below threshold);
+        /// O(1), no slot-array walk.
+        void index_after_erase() noexcept;
+        /// Store `pos` under its key; skips a key already present.
+        void index_insert(Index &idx, size_t pos) const noexcept;
+        /// Release the index (no-op when absent); safe to call any time.
+        void index_free() noexcept;
 
         friend class Json;
 
@@ -146,7 +194,7 @@ namespace pjh::json
          */
         Object(Vec val);
 
-        ~Object() = default;
+        ~Object();
 
         /**
          * @brief Copy not allowed -- use clone()
@@ -247,8 +295,18 @@ namespace pjh::json
         /**
          * @brief Direct access to underlying vector
          * @return Mutable reference to internal Vec
+         * @note The mutable surface can re-key, reorder or drop entries
+         *       behind the class's back, so it drops the lookup index (a
+         *       cache): subsequent lookups fall back to the linear scan
+         *       until a write path rebuilds it. The vector itself is
+         *       untouched.
          */
-        [[nodiscard]] Vec &data() noexcept { return m_data; }
+        [[nodiscard]] Vec &data() noexcept
+        {
+            if (m_index)
+                index_free();
+            return m_data;
+        }
         /**
          * @brief Direct access to underlying vector (const)
          * @return Const reference to internal Vec

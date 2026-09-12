@@ -506,6 +506,292 @@ TEST_CASE("Object: same-res move assign keeps source adoptable") {
     REQUIRE(dump(j) == "{}");
 }
 
+// --- task 50: threshold-gated Object lookup index ---
+//
+// The index is a private cache, so these cases pin the observable contract:
+// N above the threshold exercises the indexed lookup / append / erase paths,
+// while the small-object cases elsewhere pin that nothing changed below it.
+// Keys are borrowed from `keys`, which is reserved up-front so SSO buffers
+// never move underneath the borrowed views.
+
+TEST_CASE("Object: hash index large lookup") {
+    constexpr int N = 256;
+    std::vector<std::string> keys;
+    keys.reserve(N);
+    for (int i = 0; i < N; ++i)
+        keys.push_back("key_" + std::to_string(i));
+
+    Object o;
+    for (int i = 0; i < N; ++i)
+    {
+        if (i % 2 == 0)
+            o[keys[i]] = Json((int64_t)i); // insert-if-missing path
+        else
+            o.insert(keys[i], Json((int64_t)i));
+    }
+    REQUIRE(o.size() == (size_t)N);
+
+    for (int i = 0; i < N; ++i)
+    {
+        REQUIRE(o.contains(keys[i]));
+        REQUIRE(o.at(keys[i]) == (int64_t)i);
+        REQUIRE(static_cast<const Object &>(o).at(keys[i]) == (int64_t)i);
+    }
+    REQUIRE(!o.contains("not-a-key"));
+    REQUIRE_THROWS_AS(o.at("not-a-key"), std::out_of_range);
+    REQUIRE_THROWS_AS(static_cast<const Object &>(o).at("not-a-key"),
+                      std::out_of_range);
+    REQUIRE_THROWS_AS(static_cast<const Object &>(o)["not-a-key"],
+                      std::out_of_range);
+
+    // Insertion order is untouched by the index.
+    std::vector<std::string> got;
+    got.reserve(N);
+    for (std::string_view k : o.keys())
+        got.emplace_back(k);
+    REQUIRE(got == keys);
+}
+
+TEST_CASE("Object: hash index overwrite and remove") {
+    constexpr int N = 100;
+    std::vector<std::string> keys;
+    keys.reserve(N + 64);
+    for (int i = 0; i < N; ++i)
+        keys.push_back("k" + std::to_string(i));
+
+    Object o;
+    for (int i = 0; i < N; ++i)
+        o.insert(keys[i], Json((int64_t)i));
+    REQUIRE(o.size() == (size_t)N);
+
+    // Overwrite keeps the first key/position (last-wins) and the size.
+    for (int i = 0; i < N; i += 2)
+        o.insert(keys[i], Json((int64_t)(i + 1000)));
+    REQUIRE(o.size() == (size_t)N);
+    for (int i = 0; i < N; i += 2)
+        REQUIRE(o.at(keys[i]) == (int64_t)(i + 1000));
+
+    // Remove rebuilds the index (positions shift).
+    for (int i = 1; i < N; i += 2)
+        REQUIRE(o.remove(keys[i]));
+    REQUIRE(o.size() == (size_t)(N / 2));
+    for (int i = 1; i < N; i += 2)
+    {
+        REQUIRE(!o.contains(keys[i]));
+        REQUIRE_THROWS_AS(o.at(keys[i]), std::out_of_range);
+    }
+    for (int i = 0; i < N; i += 2)
+        REQUIRE(o.at(keys[i]) == (int64_t)(i + 1000));
+
+    // Re-inserting a removed key appends at the tail (order contract).
+    o.insert(keys[1], Json((int64_t)777));
+    REQUIRE(o.size() == (size_t)(N / 2 + 1));
+    REQUIRE(o.at(keys[1]) == (int64_t)777);
+    std::string last;
+    for (std::string_view k : o.keys())
+        last.assign(k);
+    REQUIRE(last == keys[1]);
+
+    // Remove down past the threshold: the index is dropped, lookups still
+    // answer from the linear fallback.
+    std::vector<std::string> present;
+    for (std::string_view k : o.keys())
+        present.emplace_back(k);
+    for (const auto &k : present)
+    {
+        if (o.size() <= 8)
+            break;
+        REQUIRE(o.remove(k));
+    }
+    REQUIRE(o.size() <= 8);
+    for (std::string_view k : o.keys())
+        REQUIRE(o.contains(k));
+
+    // Grow back above the threshold and re-exercise the rebuilt index.
+    const size_t base = o.size();
+    for (int i = 200; i < 240; ++i)
+    {
+        keys.push_back("z" + std::to_string(i));
+        o.insert(keys.back(), Json((int64_t)i));
+        REQUIRE(o.at(keys.back()) == (int64_t)i);
+    }
+    REQUIRE(o.size() == base + 40);
+}
+
+TEST_CASE("Object: hash index move assign") {
+    constexpr int N = 64;
+    std::vector<std::string> keys;
+    keys.reserve(N);
+    for (int i = 0; i < N; ++i)
+        keys.push_back("m" + std::to_string(i));
+
+    // Same resource: storage is stolen and the index travels with it.
+    {
+        auto res = std::make_unique<std::pmr::unsynchronized_pool_resource>();
+        Object oA(res.get());
+        for (int i = 0; i < N; ++i)
+            oA.insert(keys[i], Json((int64_t)i));
+        const Object &cA = oA;
+        auto *buf = cA.data().data(); // const data() must not drop the index
+        Object oB(res.get());
+        oB = std::move(oA);
+        REQUIRE(static_cast<const Object &>(oB).data().data() == buf);
+        REQUIRE(oA.empty());
+        REQUIRE(oB.size() == (size_t)N);
+        for (int i = 0; i < N; ++i)
+            REQUIRE(oB.at(keys[i]) == (int64_t)i);
+        REQUIRE(!oB.contains("missing"));
+    }
+
+    // Cross resource: entries move into the target's resource; the target
+    // stays correct (index lazily rebuilt by the next append) and the
+    // source's index must not leak into the wrong resource.
+    {
+        auto resA = std::make_unique<std::pmr::unsynchronized_pool_resource>();
+        auto resB = std::make_unique<std::pmr::unsynchronized_pool_resource>();
+        Json keep; // declared last so ~keep runs while both pools are alive
+        {
+            Object oA(resA.get());
+            for (int i = 0; i < N; ++i)
+                oA.insert(keys[i], Json((int64_t)i));
+            Object oB(resB.get());
+            oB = std::move(oA);
+            REQUIRE(oB.size() == (size_t)N);
+            REQUIRE(oA.empty());
+            REQUIRE(static_cast<const Object &>(oB).data().get_allocator().resource() ==
+                    resB.get());
+            for (int i = 0; i < N; ++i)
+                REQUIRE(oB.at(keys[i]) == (int64_t)i);
+            oB.insert("fresh", Json((int64_t)999));
+            REQUIRE(oB.at("fresh") == (int64_t)999);
+            for (int i = 0; i < N; ++i)
+                REQUIRE(oB.at(keys[i]) == (int64_t)i);
+            keep = Json(std::move(oB));
+        }
+        resA.reset(); // source arena dies before ~keep; target storage is in resB
+        REQUIRE(keep.is_object());
+        REQUIRE(keep.at("fresh") == (int64_t)999);
+    }
+}
+
+TEST_CASE("Object: hash index clone") {
+    constexpr int N = 64;
+    std::vector<std::string> keys;
+    keys.reserve(N);
+    for (int i = 0; i < N; ++i)
+        keys.push_back("c" + std::to_string(i));
+
+    Object o;
+    for (int i = 0; i < N; ++i)
+        o.insert(keys[i], Json((int64_t)i));
+
+    Object c = o.clone();
+    REQUIRE(c.size() == o.size());
+    for (int i = 0; i < N; ++i)
+        REQUIRE(c.at(keys[i]) == (int64_t)i);
+    REQUIRE(!c.contains("missing"));
+    REQUIRE(o == c);
+}
+
+TEST_CASE("Object: hash index data() invalidation") {
+    constexpr int N = 64;
+    std::vector<std::string> keys;
+    keys.reserve(N);
+    for (int i = 0; i < N; ++i)
+        keys.push_back("d" + std::to_string(i));
+
+    Object o;
+    for (int i = 0; i < N; ++i)
+        o.insert(keys[i], Json((int64_t)i));
+    REQUIRE(o.contains(keys[10]));
+
+    // The mutable raw surface drops the cache but leaves the vector intact;
+    // lookups fall back to the linear sweep and stay correct.
+    Object::Vec &raw = o.data();
+    REQUIRE(raw.size() == (size_t)N);
+    for (int i = 0; i < N; ++i)
+        REQUIRE(o.at(keys[i]) == (int64_t)i);
+
+    // A value patched through the raw surface is visible to the fallback.
+    raw[3].second = Json((int64_t)333);
+    REQUIRE(o.at(keys[3]) == (int64_t)333);
+
+    // The next append rebuilds the index; keys and patched value survive.
+    o.insert("extra", Json((int64_t)1));
+    REQUIRE(o.at("extra") == (int64_t)1);
+    for (int i = 0; i < N; ++i)
+        REQUIRE(o.at(keys[i]) == (int64_t)(i == 3 ? 333 : i));
+    REQUIRE(o.at(keys[3]) == (int64_t)333);
+}
+
+TEST_CASE("Object: hash index clear and reuse") {
+    constexpr int N = 64;
+    std::vector<std::string> keys;
+    keys.reserve(N);
+    for (int i = 0; i < N; ++i)
+        keys.push_back("e" + std::to_string(i));
+
+    Object o;
+    for (int i = 0; i < N; ++i)
+        o.insert(keys[i], Json((int64_t)i));
+    o.clear();
+    REQUIRE(o.empty());
+    REQUIRE(!o.contains(keys[0]));
+
+    for (int i = 0; i < N; ++i)
+        o.insert(keys[i], Json((int64_t)(i + 1)));
+    REQUIRE(o.size() == (size_t)N);
+    for (int i = 0; i < N; ++i)
+        REQUIRE(o.at(keys[i]) == (int64_t)(i + 1));
+}
+
+TEST_CASE("Object: hash index accounting") {
+    // Above the threshold the index buffer is allocated through the
+    // object's own resource; destruction must return every byte.
+    TestCountingResource cr;
+    {
+        Object o(&cr);
+        for (int i = 0; i < 64; ++i)
+        {
+            std::string k = "acct" + std::to_string(i);
+            o.insert(k, Json((int64_t)i), &cr);
+        }
+        REQUIRE(o.size() == 64);
+        REQUIRE(o.at("acct63") == (int64_t)63);
+        REQUIRE(cr.outstanding() > 0);
+    }
+    REQUIRE(cr.outstanding() == 0);
+}
+
+TEST_CASE("Object: hash index duplicate adoptee") {
+    // An adopted vector may carry duplicate keys. The index must keep the
+    // first occurrence (matching the old linear first-match sweep).
+    std::vector<std::string> store;
+    store.reserve(40);
+    for (int i = 0; i < 40; ++i)
+        store.emplace_back("dup");
+    Object::Vec v;
+    v.reserve(40);
+    for (int i = 0; i < 40; ++i)
+        v.emplace_back(String{std::string_view(store[static_cast<size_t>(i)])},
+                       Json((int64_t)i));
+
+    Object o(std::move(v));
+    REQUIRE(o.size() == 40);
+    REQUIRE(o.at("dup") == (int64_t)0); // no index yet: linear first-wins
+
+    // A miss append builds the index; first-wins must survive the build.
+    o.insert("other", Json((int64_t)9));
+    REQUIRE(o.at("dup") == (int64_t)0);
+    REQUIRE(o.at("other") == (int64_t)9);
+
+    // remove erases the first occurrence; the next duplicate becomes first.
+    REQUIRE(o.remove("dup"));
+    REQUIRE(o.size() == 40);
+    REQUIRE(o.at("dup") == (int64_t)1);
+    REQUIRE(o.contains("other"));
+}
+
 TEST_CASE("Path: at_path success") {
     auto doc = parse_copy(R"({"a":{"b":[10,20,{"c":true}]}})");
     auto &root = doc.root();

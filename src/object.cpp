@@ -2,9 +2,9 @@
 #include "pjh_json/json.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <new>
-#include <ranges>
 #include <string_view>
 #include <utility>
 
@@ -34,7 +34,59 @@ namespace pjh::json
             static IteratorSentinel s;
             return s;
         }
+
+        /*
+         * Empty-slot sentinel for Object::Index.
+         *
+         * Slots store `entry position + 1`, so zero is a safe "free" marker
+         * without having to reserve a valid in-range position.
+         */
+        constexpr uint32_t kEmptySlot = 0;
+
+        /*
+         * Deterministic 32-bit FNV-1a over the key bytes.
+         *
+         * std::hash<std::string_view> is implementation-defined and not
+         * stable across translation units; a fixed hash keeps the index
+         * self-contained. Equality still reads the live entry keys (same
+         * byte-content rule as String::operator==(string_view)), so the
+         * hash is only a bucket selector.
+         */
+        [[nodiscard]] uint32_t key_hash(std::string_view key) noexcept
+        {
+            uint32_t h = 2166136261u;
+            for (const char c : key)
+            {
+                h ^= static_cast<uint8_t>(c);
+                h *= 16777619u;
+            }
+            return h;
+        }
     }
+
+    /*
+     * Flat open-addressing key -> entry-position index (cache only).
+     *
+     * One contiguous slot array with linear probing: no per-key node
+     * allocation, cache friendly. Slots hold positions, not key views, so
+     * they survive entry-vector reallocation and the String moves a
+     * reallocation performs; comparisons read the live keys, which also
+     * covers owned (escaped) keys unchanged. The slot buffer is a pmr
+     * container allocated from the object's own resource.
+     */
+    struct Object::Index
+    {
+        Index(std::pmr::memory_resource *res, uint32_t capacity)
+            : cap(capacity), slots(res)
+        {
+            slots.assign(cap, kEmptySlot);
+        }
+
+        uint32_t cap;                       ///< power of two, > 0
+        uint32_t size{0};                   ///< occupied slots (unique keys)
+        bool stale{false};                  ///< entries changed since last refill
+        std::pmr::vector<uint32_t> slots;   ///< position+1; kEmptySlot = free
+    };
     /*
      * Construct empty Object with pmr allocator
      *
@@ -58,11 +110,19 @@ namespace pjh::json
     {
     }
 
+    Object::~Object()
+    {
+        index_free();
+    }
+
     /*
      * Deep copy each entry into a new Object with the target resource
      *
      * 1. Materialise key string into target resource.
      * 2. Recursively clone value.
+     * 3. Materialise the lookup index over the result (clone is already
+     *    O(n); the index keeps later lookups O(1) and moves out with the
+     *    returned object).
      */
     Object Object::clone(std::pmr::memory_resource *into) const
     {
@@ -74,6 +134,8 @@ namespace pjh::json
             k.own(into);
             out.m_data.emplace_back(std::move(k), val.clone(into));
         }
+        if (out.m_data.size() > kIndexThreshold)
+            out.index_build();
         return out;
     }
 
@@ -82,12 +144,16 @@ namespace pjh::json
      *
      * The source keeps its resource: its moved-from state (allocator
      * member still bound) stays consistent with m_resource, so it remains
-     * adoptable (Json heap_alloc / destroy, json.hpp).
+     * adoptable (Json heap_alloc / destroy, json.hpp). The index (if any)
+     * transfers with the stolen storage — its slots hold positions, which
+     * stay valid — and the source is left without one.
      */
     Object::Object(Object &&other) noexcept
         : m_data(std::move(other.m_data)),
-          m_resource(other.m_resource)
+          m_resource(other.m_resource),
+          m_index(other.m_index)
     {
+        other.m_index = nullptr;
     }
 
     /*
@@ -122,134 +188,277 @@ namespace pjh::json
      *    (Json::heap_alloc / Json::destroy, json.hpp) frees through the
      *    resource that owns this container's storage. The source keeps its
      *    m_resource because it keeps an empty buffer in that resource.
+     *
+     * Index handling mirrors the storage decision: the old index is always
+     * released first (its positions describe the overwritten data). On the
+     * same-resource steal path the source index transfers with the storage
+     * (positions stay valid); on the element-wise path the source index is
+     * released too — its positions describe storage this object does not
+     * own — and the target stays lazy (rebuilt by the next write).
      */
     Object &Object::operator=(Object &&other) noexcept
     {
         if (this == &other)
             return *this;
+        index_free();
         const bool same_resource =
             m_data.get_allocator() == other.m_data.get_allocator();
         m_data = std::move(other.m_data);
         other.m_data.clear();
         if (same_resource)
+        {
             m_resource = other.m_resource;
+            m_index = other.m_index;
+            other.m_index = nullptr;
+        }
+        else
+        {
+            other.index_free();
+        }
         return *this;
     }
 
     /*
-     * Linear search by key (insertion-order vector)
+     * First entry position whose key equals `key`, or npos.
+     *
+     * Uses the flat index when present (amortised O(1)); otherwise the
+     * original linear first-match sweep. Never allocates, so it is safe
+     * from the noexcept contains(). Comparison is the same byte-content
+     * rule as the old `kv.first == key`.
+     */
+    size_t Object::find_slot(std::string_view key, bool rebuild) const noexcept
+    {
+        if (m_index != nullptr && (rebuild || !m_index->stale))
+        {
+            // An erase invalidates every stored position; refill once here
+            // (no allocation) rather than on every erase. With `rebuild`
+            // false the caller prefers the linear sweep over that cost.
+            if (m_index->stale)
+                index_refill(*m_index);
+            const Index &idx = *m_index;
+            const size_t mask = idx.cap - 1;
+            size_t slot = key_hash(key) & mask;
+            while (idx.slots[slot] != kEmptySlot)
+            {
+                const size_t pos = idx.slots[slot] - 1;
+                if (static_cast<std::string_view>(m_data[pos].first) == key)
+                    return pos;
+                slot = (slot + 1) & mask;
+            }
+            return npos;
+        }
+        for (size_t i = 0; i < m_data.size(); ++i)
+        {
+            if (static_cast<std::string_view>(m_data[i].first) == key)
+                return i;
+        }
+        return npos;
+    }
+
+    /*
+     * Index lifecycle helpers.
+     */
+    void Object::index_insert(Index &idx, size_t pos) const noexcept
+    {
+        const std::string_view key =
+            static_cast<std::string_view>(m_data[pos].first);
+        const size_t mask = idx.cap - 1;
+        size_t slot = key_hash(key) & mask;
+        while (idx.slots[slot] != kEmptySlot)
+        {
+            // First occurrence wins: an adopted vector may carry duplicate
+            // keys, and the linear sweep returns the earliest too.
+            if (static_cast<std::string_view>(m_data[idx.slots[slot] - 1].first) == key)
+                return;
+            slot = (slot + 1) & mask;
+        }
+        idx.slots[slot] = static_cast<uint32_t>(pos) + 1;
+        ++idx.size;
+    }
+
+    void Object::index_refill(Index &idx) const noexcept
+    {
+        std::fill(idx.slots.begin(), idx.slots.end(), kEmptySlot);
+        idx.size = 0;
+        idx.stale = false;
+        for (size_t i = 0; i < m_data.size(); ++i)
+            index_insert(idx, i);
+    }
+
+    void Object::index_build()
+    {
+        // Drop the old index first: everything past this point may throw,
+        // and a null cache is always a correct (linear) fallback.
+        index_free();
+        size_t cap = 32;
+        while (cap < m_data.size() * 2)
+            cap <<= 1;
+
+        auto alloc = std::pmr::polymorphic_allocator<Index>(m_resource);
+        Index *fresh = alloc.allocate(1);
+        try
+        {
+            ::new (static_cast<void *>(fresh))
+                Index(m_resource, static_cast<uint32_t>(cap));
+        }
+        catch (...)
+        {
+            alloc.deallocate(fresh, 1);
+            throw;
+        }
+        index_refill(*fresh);
+        m_index = fresh;
+    }
+
+    void Object::index_note_append(size_t pos)
+    {
+        if (m_index == nullptr)
+        {
+            if (m_data.size() > kIndexThreshold)
+                index_build();
+            return;
+        }
+        if (m_index->stale)
+        {
+            // The refill re-reads every key, including the just-appended
+            // `pos`, so it supersedes a single insert.
+            index_refill(*m_index);
+            return;
+        }
+        // Keep load <= 0.5; a rebuild re-reads every key (including the
+        // just-appended `pos`), so no separate insert is needed.
+        if ((static_cast<size_t>(m_index->size) + 1) * 2 > m_index->cap)
+        {
+            index_build();
+            return;
+        }
+        index_insert(*m_index, pos);
+    }
+
+    /*
+     * Erase maintenance.
+     *
+     * Erase shifts every later entry down by one, so every stored position
+     * past the erased one is stale. Refilling on each erase would cost an
+     * O(cap) cache-cold walk per call while giving no asymptotic benefit
+     * (erase is already O(n) from the vector shift), so the index is just
+     * marked stale: the next lookup refills it in place once. Below the
+     * threshold the index is dropped.
+     */
+    void Object::index_after_erase() noexcept
+    {
+        if (m_index == nullptr)
+            return;
+        if (m_data.size() <= kIndexThreshold)
+            index_free();
+        else
+            m_index->stale = true;
+    }
+
+    void Object::index_free() noexcept
+    {
+        if (m_index == nullptr)
+            return;
+        Index *idx = m_index;
+        m_index = nullptr;
+        std::pmr::polymorphic_allocator<Index> alloc(m_resource);
+        std::destroy_at(idx);
+        alloc.deallocate(idx, 1);
+    }
+
+    /*
+     * Key lookup via find_slot (O(1) with an index, linear otherwise).
      */
     bool Object::contains(std::string_view key) const noexcept
     {
-        return std::ranges::find_if(
-                   m_data,
-                   [&](const auto &kv)
-                   { return kv.first == key; }) !=
-               m_data.end();
+        return find_slot(key) != npos;
     }
 
     /*
      * Mutable key access: find-or-insert
      *
-     * 1. Search for existing key via linear scan.
+     * 1. Search for existing key.
      * 2. If found, return reference to value.
-     * 3. If not found, append default-constructed Json entry and return it.
+     * 3. If not found, append default-constructed Json entry (and maintain
+     *    the index) and return it.
      */
     Json &Object::operator[](std::string_view key)
     {
-        auto it = std::find_if(
-            m_data.begin(), m_data.end(),
-            [&](auto &kv)
-            { return kv.first == key; });
+        const size_t pos = find_slot(key);
+        if (pos != npos)
+            return m_data[pos].second;
 
-        if (it == m_data.end())
-        {
-            m_data.emplace_back(key, Json());
-            return m_data.back().second;
-        }
-
-        return it->second;
+        m_data.emplace_back(key, Json());
+        index_note_append(m_data.size() - 1);
+        return m_data.back().second;
     }
 
     /*
      * Const key access: find-or-throw
      *
-     * 1. Search for key via linear scan.
+     * 1. Search for key.
      * 2. If found, return const reference.
      * 3. If missing, throw out_of_range.
      */
     const Json &Object::operator[](std::string_view key) const
     {
-        auto it = std::ranges::find_if(
-            m_data.begin(), m_data.end(),
-            [&](auto &kv)
-            { return kv.first == key; });
-
-        if (it == m_data.end())
+        const size_t pos = find_slot(key);
+        if (pos == npos)
             throw std::out_of_range("json key not found");
 
-        return it->second;
+        return m_data[pos].second;
     }
 
     /*
      * Mutable key access with bounds check: find-or-throw
      *
-     * 1. Search for key via linear scan.
+     * 1. Search for key.
      * 2. If found, return mutable reference.
      * 3. If missing, throw out_of_range.
      */
     Json &Object::at(std::string_view key)
     {
-        auto it = std::ranges::find_if(
-            m_data.begin(), m_data.end(),
-            [&](auto &kv)
-            { return kv.first == key; });
-
-        if (it == m_data.end())
+        const size_t pos = find_slot(key);
+        if (pos == npos)
             throw std::out_of_range("json key not found");
 
-        return it->second;
+        return m_data[pos].second;
     }
 
     /*
      * Const key access with bounds check: find-or-throw
      *
-     * 1. Search for key via linear scan.
+     * 1. Search for key.
      * 2. If found, return const reference.
      * 3. If missing, throw out_of_range.
      */
     const Json &Object::at(std::string_view key) const
     {
-        auto it = std::ranges::find_if(
-            m_data.begin(), m_data.end(),
-            [&](auto &kv)
-            { return kv.first == key; });
-
-        if (it == m_data.end())
+        const size_t pos = find_slot(key);
+        if (pos == npos)
             throw std::out_of_range("json key not found");
 
-        return it->second;
+        return m_data[pos].second;
     }
 
     /*
      * Insert or overwrite by key
      *
      * 1. Search for existing key.
-     * 2. If found, overwrite its value.
-     * 3. If not found, append new entry.
+     * 2. If found, overwrite its value (key and position unchanged, so the
+     *    index stays valid).
+     * 3. If not found, append new entry and note the append to the index.
      */
     void Object::insert(std::string_view key, Json val)
     {
-        auto it = std::ranges::find_if(
-            m_data,
-            [&](auto &kv) { return kv.first == key; });
-
-        if (it != m_data.end())
+        const size_t pos = find_slot(key);
+        if (pos != npos)
         {
-            it->second = std::move(val);
+            m_data[pos].second = std::move(val);
             return;
         }
         m_data.emplace_back(key, std::move(val));
+        index_note_append(m_data.size() - 1);
     }
 
     /*
@@ -257,10 +466,12 @@ namespace pjh::json
      *
      * 1. Resolve resource (null falls back to global config resource).
      * 2. Search for existing key (content compare, mode-agnostic).
-     * 3. If found, overwrite its value; keep the old key.
+     * 3. If found, overwrite its value; keep the old key. The lookup
+     *    happens before any owned-key allocation, so a hit does not
+     *    allocate.
      * 4. If not found, copy the key into an owned String via own(res) and
-     *    append. The key buffer is freed back into res at destruction, so
-     *    res must outlive this Object.
+     *    append; note the append to the index. The key buffer is freed back
+     *    into res at destruction, so res must outlive this Object.
      */
     void Object::insert(std::string_view key, Json val,
                         std::pmr::memory_resource *res)
@@ -268,52 +479,49 @@ namespace pjh::json
         if (!res)
             res = Config::instance().resource();
 
-        auto it = std::ranges::find_if(
-            m_data,
-            [&](auto &kv) { return kv.first == key; });
-
-        if (it != m_data.end())
+        const size_t pos = find_slot(key);
+        if (pos != npos)
         {
-            it->second = std::move(val);
+            m_data[pos].second = std::move(val);
             return;
         }
 
         String owned{key};
         owned.own(res);
         m_data.emplace_back(std::move(owned), std::move(val));
+        index_note_append(m_data.size() - 1);
     }
 
     void Object::insert(Entry entry)
     {
-        auto it = std::ranges::find_if(
-            m_data,
-            [&](auto &kv) { return kv.first == entry.first; });
-
-        if (it != m_data.end())
+        const size_t pos = find_slot(entry.first);
+        if (pos != npos)
         {
-            it->second = std::move(entry.second);
+            m_data[pos].second = std::move(entry.second);
             return;
         }
         m_data.push_back(std::move(entry));
+        index_note_append(m_data.size() - 1);
     }
 
     /*
      * Remove key
      *
-     * 1. Search for key.
-     * 2. If found, erase entry and return true.
+     * 1. Search for key. A stale index is bypassed for the linear sweep:
+     *    remove-heavy workloads would otherwise refill it on every erase.
+     * 2. If found, erase entry and return true; the index is marked stale
+     *    (rebuilt lazily by the next lookup) or dropped below threshold.
      * 3. If missing, return false.
      */
     bool Object::remove(std::string_view key)
     {
-        auto it = std::ranges::find_if(
-            m_data,
-            [&](auto &kv) { return kv.first == key; });
-
-        if (it == m_data.end())
+        const size_t pos = find_slot(key, /*rebuild=*/false);
+        if (pos == npos)
             return false;
 
-        m_data.erase(it);
+        m_data.erase(m_data.begin() +
+                     static_cast<Vec::difference_type>(pos));
+        index_after_erase();
         return true;
     }
 
@@ -349,7 +557,12 @@ namespace pjh::json
 
     size_t Object::size() const noexcept { return m_data.size(); }
     bool Object::empty() const noexcept { return m_data.empty(); }
-    void Object::clear() noexcept { m_data.clear(); }
+
+    void Object::clear() noexcept
+    {
+        index_free();
+        m_data.clear();
+    }
 
     /*
      * Non-const track (task 21.1): the wrapper seals the key side.
