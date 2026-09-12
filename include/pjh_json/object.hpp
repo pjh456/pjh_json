@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "config.hpp"
+#include "string.hpp"
 
 #include "json_fwd.hpp"
 

@@ -6,13 +6,10 @@
 #include <variant>
 #include <vector>
 
-#include "string.hpp"
-
 namespace pjh::json
 {
     class Json;
     struct ConstJson;
-    struct ConstEntry;
 
     /**
      * @brief One hop of a Json path: object key or array index

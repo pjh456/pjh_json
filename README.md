@@ -16,6 +16,9 @@ SIMD-accelerated C++20 JSON parser. Custom tagged-union `Json` type (24 bytes), 
 * **Builder API**: `Array::of(...)`, `Object::of(...)` for in-code construction
 * **Compile-time JSON**: `ConstJson::of()` builds nested JSON trees at compile time via template type encoding. `ConstJson::parse()` validates JSON strings at compile time. No heap allocation — all data lives inline in `std::tuple`.
 
+> The compile-time API is opt-in: `#include "pjh_json/json_constexpr.hpp"`. The
+> runtime umbrella `<pjh_json.hpp>` deliberately does not pull it in.
+
 ## Accessors
 
 `Json` has four value-read tracks plus a path/Result surface. Pick by the

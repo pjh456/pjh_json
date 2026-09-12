@@ -18,6 +18,7 @@
 #include "array.hpp"
 #include "object.hpp"
 #include "config.hpp"
+#include "string.hpp"
 #include "utils.hpp"
 
 namespace pjh::json

@@ -1,6 +1,8 @@
 #ifndef INCLUDE_PJH_JSON_VALIDATE_HPP
 #define INCLUDE_PJH_JSON_VALIDATE_HPP
 
+#include <cstddef>
+#include <cstdint>
 #include <string_view>
 
 namespace pjh::json

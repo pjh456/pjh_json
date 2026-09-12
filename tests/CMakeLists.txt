@@ -11,12 +11,15 @@ set(PJH_JSON_TEST_SOURCES
     access_result.cpp
     config_document.cpp
     constexpr_json_test.cpp
+    json_constexpr_isolation.cpp
+    json_fwd_isolation.cpp
     json_parser.cpp
     json_types.cpp
     json_writer.cpp
     literal_test.cpp
     read_file.cpp
     std_interop.cpp
+    umbrella_isolation.cpp
 )
 
 add_executable(pjh_json_tests ${PJH_JSON_TEST_SOURCES})
