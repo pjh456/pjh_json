@@ -375,7 +375,7 @@ TEST_CASE("Writer: document result entry") {
 }
 
 TEST_CASE("Writer: jsonl result entry") {
-    // Success: one compact line per element (mirrors "Writer: JSONL")
+    // Success: one compact line per element (mirrors "Writer: jsonl")
     std::string_view input =
         "{\"id\":1,\"msg\":\"hi\"}\n"
         "{\"id\":2,\"msg\":\"line\\ntwo\"}\n"

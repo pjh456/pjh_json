@@ -244,7 +244,7 @@ TEST_CASE("Parser: unicode escape error offset") {
             == std::string_view("\xF0\x9F\x98\x80"));
 
     // Surrogate semantic errors keep their established offsets (control,
-    // already pinned in "Parser: strict utf-8 rejects malformed bytes" == 7).
+    // already pinned in "Parser: strict UTF-8 rejects malformed bytes" == 7).
     try {
         (void)parse_copy(R"("\uD800")");
         REQUIRE(false);
