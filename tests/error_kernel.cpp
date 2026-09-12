@@ -1,9 +1,9 @@
-// Task 79.1 — zero-allocation error kernel vocabulary self-consistency.
+// Zero-allocation error kernel vocabulary self-consistency.
 //
 // Pins the compile-time properties of pjh::json::Error and the static
 // message table against the pre-existing exception shell text. The full
-// throw-vs-Result differential/golden table lives in 79.5; this TU is the
-// additive 79.1 gate only.
+// throw-vs-Result differential/golden table lives in differential_errors.cpp;
+// this TU pins the error kernel vocabulary only.
 #include <doctest/doctest.h>
 
 #include <pjh_result/diagnostic.hpp>
@@ -19,7 +19,7 @@
 using namespace pjh::json;
 
 // ---------------------------------------------------------------------------
-// Compile-time kernel properties (plan 79 §3.3 / §6)
+// Compile-time kernel properties
 // ---------------------------------------------------------------------------
 static_assert(std::is_trivially_copyable_v<Error>);
 static_assert(std::is_nothrow_move_constructible_v<Error>);
@@ -185,7 +185,7 @@ TEST_CASE("Error: message table mirrors the exception shell text")
         // Table self-consistency.
         CHECK(message_of(row.code) == row.msg);
 
-        // Detail-carrying codes must carry the placeholder (plan 79 §3.3).
+        // Detail-carrying codes must carry the placeholder.
         const bool has_placeholder = row.msg.find("{}") != std::string_view::npos;
         if (has_placeholder)
             CHECK(message_of(row.code).find("{}") != std::string_view::npos);
@@ -260,7 +260,7 @@ TEST_CASE("Error: positional suffix only when positioned")
 
 TEST_CASE("Error: empty detail still substitutes the placeholder")
 {
-    // Regression: the placeholder replacement must not be gated on a
+    // The placeholder replacement must not be gated on a
     // non-empty detail. An empty duplicate key renders `Duplicate key ""`
     // rather than leaving the literal `{}` (golden text identity).
     Error err{ErrorCode::DuplicateKey, Category::Parse, 0, false,

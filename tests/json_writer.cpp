@@ -131,7 +131,7 @@ TEST_CASE("Writer: dump numbers") {
     REQUIRE(threw);
 #endif
 
-    // Range policy (task 61): the parser rejects out-of-double-range numbers,
+    // Range policy: the parser rejects out-of-double-range numbers,
     // so parse_copy never yields a non-finite double — the hand-built `inf`
     // above is now the only source of a non-finite dump. Finite-but-large
     // values still round-trip at value level (to_chars shortest form is
@@ -236,7 +236,7 @@ TEST_CASE("Writer: dump_file open failure") {
 }
 
 TEST_CASE("Writer: dump_file round trip") {
-    // Success path: the close() state check must not misfire (R2)
+    // Success path: the close() state check must not misfire
     const std::string f = "pjh_dump_roundtrip.json";
     auto d = parse_copy(R"({"a":1,"b":[true,null,"x"]})");
     dump_file(f, d.root());
@@ -293,7 +293,7 @@ TEST_CASE("Writer: max depth") {
     Config::instance().set_max_depth(Config::kDefaultMaxDepth);
     REQUIRE_THROWS_AS((void)dump(doc_over.root()), JsonError);
 
-    // Well under the default (regression pin, round-trip)
+    // Well under the default (round-trip)
     auto doc100 = parse_copy(deep(100, '[', ']'));
     REQUIRE(sv(dump(doc100.root())) == deep(100, '[', ']'));
 
@@ -454,9 +454,9 @@ TEST_CASE("Writer: UTF-8 pass-through and ASCII validation")
     auto out = dump(j);
     REQUIRE(sv(out) == std::string_view(bad));
 
-    // ascii mode: the pre-existing six-site validator throws
-    // unconditionally (DumpOptions.ascii, knob-independent) — first pinned
-    // here (type + message-family substring, task 13 caliber)
+    // ascii mode: the six-site validator throws unconditionally
+    // (DumpOptions.ascii, knob-independent); the contract is the exception
+    // type plus a message-family substring, not the exact text.
     try {
         (void)dump(j, DumpOptions{.ascii = true});
         REQUIRE(false);

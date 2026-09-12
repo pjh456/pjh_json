@@ -61,7 +61,7 @@ namespace pjh::json
      */
     bool Parser::parse_number(Json &out)
     {
-        // JSON5 number extensions (task 40.2): hex / leading '+' / omitted
+        // JSON5 number extensions: hex / leading '+' / omitted
         // dot side. Kept behind the captured knob so the RFC body below stays
         // byte-for-byte identical on the default path.
         if (m_json5)
@@ -152,7 +152,7 @@ namespace pjh::json
     }
 
     /*
-     * Parse JSON5 number (task 40.2)
+     * Parse JSON5 number
      *
      * 1. grammar::scan_number_json5 validates the JSON5 spellings (leading
      *    '+' or '-', hex 0x/0X, leading/trailing decimal point) and reports
@@ -169,7 +169,7 @@ namespace pjh::json
      *    (sign included), and the double fallback feeds from_chars the token
      *    without an explicit JSON5 '+', which the standard does not accept.
      *    from_chars general already understands `.5`, `5.` and `5.e3`.
-     * 4. `Infinity`/`NaN` (task 40.4), each with an optional `+`/`-`, are
+     * 4. `Infinity`/`NaN`, each with an optional `+`/`-`, are
      *    tested first and produce the std::numeric_limits constants. This is
      *    a pure bit/materialisation path: no from_chars, no isfinite and no
      *    FP comparison, so -ffast-math cannot change which spellings are

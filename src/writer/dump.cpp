@@ -25,14 +25,14 @@ namespace pjh::json
      * 3. If the output is a bare integer (no '.' or 'e'), append ".0"
      *    to distinguish float from int64 on round-trip.
      *
-     * Fast-math constraint (task 40.4): the finite test below is
+     * Fast-math constraint: the finite test below is
      * std::isfinite. RFC 8259 has no NaN/Inf spelling, so this is the single
      * gate that stops to_chars from emitting "inf"/"nan" (invalid JSON). With
      * -ffast-math / -ffinite-math-only the compiler may fold std::isfinite to
      * true and the gate disappears. The library deliberately adds no such
      * flag (root CMakeLists), so the default build is safe; a consumer that
      * compiles this translation unit with fast-math gives up that guarantee.
-     * Consequence for 40.4: a JSON5-parsed Infinity/NaN is stored as an
+     * Consequence: a JSON5-parsed Infinity/NaN is stored as an
      * ordinary double and is rejected here as NonFiniteDouble — the
      * documented round-trip break (Config::set_json5).
      */
@@ -160,7 +160,7 @@ namespace pjh::json
             {
                 // Build pointer vector, sort by key, emit in sorted order.
                 // data() (not *obj): the iterator yields a per-step EntryRef
-                // proxy, so &e must alias the stored entry (task 21.1).
+                // proxy, so &e must alias the stored entry.
                 std::pmr::vector<const Object::Entry *> sorted(obj->data().get_allocator());
                 sorted.reserve(obj->size());
                 for (const auto &e : obj->data())

@@ -87,8 +87,8 @@ namespace
         return false;
     }
 
-    // Expression-SFINAE probes (task-19 lesson: never name a failed member
-    // lookup bare — probe the whole call expression instead).
+    // Expression-SFINAE probes: never name a failed member lookup bare —
+    // probe the whole call expression instead.
     template <class O, class K, class = void>
     struct insert_key_ok : std::false_type {};
     template <class O, class K>
@@ -262,9 +262,9 @@ TEST_CASE("Json: clone") {
 
 TEST_CASE("Json: clone null resource falls back to config") {
     static const char kLong[] = "clone-null-source-long-enough-to-exceed-sso-cap";
-    // Object root with a borrowed string value: pre-fix the value's
-    // String::make_owned(nullptr) dereferences a null polymorphic_allocator
-    // (deterministic SEGV); post-fix it resolves the global Config resource.
+    // Object root with a borrowed string value: a null resource into clone()
+    // resolves to the global Config resource rather than dereferencing a
+    // null polymorphic_allocator.
     {
         auto doc = parse_copy(R"({"s":"clone-null-source-long-enough-to-exceed-sso-cap"})");
         Json c = doc.root().clone(nullptr);
@@ -349,14 +349,14 @@ TEST_CASE("Object: owned key outlives source") {
     REQUIRE(obj2.at("dyn") == "v");
 }
 
-// --- task 21.1: Object iterator key side is read-only ---
+// --- Object iterator key side is read-only ---
 //
-// Negative compile pins detect over the ASSIGNMENT expression (task-19
-// lesson: never name a failed member lookup bare — that is a hard error;
-// an assignment expression inside void_t is SFINAE-friendly). The RHS is
-// String&& — the only viable mutation channel (String's copy-assign is
-// deleted, string.hpp:117); a const String& RHS would false-negative on
-// the regression tree (no candidate for String& = const String&).
+// Negative compile pins detect over the ASSIGNMENT expression (never name a
+// failed member lookup bare — that is a hard error; an assignment expression
+// inside void_t is SFINAE-friendly). The RHS is String&& — the only viable
+// mutation channel (String's copy-assign is deleted, string.hpp:117); a
+// const String& RHS would false-negative (no candidate for String& =
+// const String&).
 template <class T, class = void>
 struct key_side_assignable : std::false_type {};
 template <class T>
@@ -378,7 +378,7 @@ TEST_CASE("Object: iterator key side is read-only") {
     // The prvalue type of operator* (the write path, non-const track).
     // NB: *declval<It*>() would be It& itself, not the yield type.
     using Yield = decltype((*std::declval<It &>()));
-    // --- negative compile pins (flip to compile-RED on regression) ---
+    // --- negative compile pins ---
     static_assert(!key_side_assignable<Yield>::value,
                   "yield: the key side (first) must not be assignable");
     static_assert(!key_arrow_assignable<It>::value,
@@ -387,7 +387,7 @@ TEST_CASE("Object: iterator key side is read-only") {
     static_assert(std::is_same_v<Yield, Object::EntryRef>);
     static_assert(std::is_same_v<decltype(std::declval<Yield &>().first), const String &>);
     static_assert(std::is_same_v<decltype(std::declval<Yield &>().second), Json &>);
-    // --- const track: already sealed, recorded (not fixed by this task) ---
+    // --- const track: already sealed ---
     using CIt = decltype(std::declval<const Object &>().begin());
     static_assert(std::is_same_v<CIt, Object::Vec::const_iterator>);
     static_assert(!key_side_assignable<decltype(*std::declval<CIt &>())>::value);
@@ -506,13 +506,12 @@ TEST_CASE("Object: same-resource move assign steals storage") {
     REQUIRE(oB.size() == 1);
 }
 
-// Same-resource move assign used to end with the moved-from source's
-// m_resource nulled (steal + assign-null), so adopting the moved-from
-// container into a Json heap_alloc's through a null resource (UB: null
-// deref in polymorphic_allocator::allocate). The moved-from container must
-// stay bound to the shared resource: its node then allocates and frees
-// through that same live resource. The move-ctor path is pinned in the same
-// case (identical defect class, same one-line fix shape).
+// Same-resource move assign must leave the moved-from source bound to the
+// shared resource: a nulled m_resource would make adopting the moved-from
+// container into a Json heap_alloc through a null resource (UB: null deref
+// in polymorphic_allocator::allocate). Keeping it bound means its node
+// allocates and frees through that same live resource. The move-ctor path
+// is pinned in the same case (identical contract).
 TEST_CASE("Array: same-res move assign keeps source adoptable") {
     auto res = std::make_unique<std::pmr::unsynchronized_pool_resource>();
     Json j;
@@ -527,7 +526,7 @@ TEST_CASE("Array: same-res move assign keeps source adoptable") {
         REQUIRE(a.empty());
         // moved-from allocator member stays bound to the shared resource
         REQUIRE(a.data().get_allocator().resource() == res.get());
-        j = Json(std::move(a)); // pre-fix: heap_alloc(nullptr) -> UB
+        j = Json(std::move(a)); // adopting the moved-from source must not allocate through null
     }
     REQUIRE(j.is_array());
     REQUIRE(j.size() == 0);
@@ -562,7 +561,7 @@ TEST_CASE("Object: same-res move assign keeps source adoptable") {
         REQUIRE(oA.empty());
         // moved-from allocator member stays bound to the shared resource
         REQUIRE(oA.data().get_allocator().resource() == res.get());
-        j = Json(std::move(oA)); // pre-fix: heap_alloc(nullptr) -> UB
+        j = Json(std::move(oA)); // adopting the moved-from source must not allocate through null
     }
     REQUIRE(j.is_object());
     REQUIRE(j.size() == 0);
@@ -585,7 +584,7 @@ TEST_CASE("Object: same-res move assign keeps source adoptable") {
     REQUIRE(dump(j) == "{}");
 }
 
-// --- task 50: threshold-gated Object lookup index ---
+// --- threshold-gated Object lookup index ---
 //
 // The index is a private cache, so these cases pin the observable contract:
 // N above the threshold exercises the indexed lookup / append / erase paths,
@@ -871,7 +870,7 @@ TEST_CASE("Object: hash index duplicate adoptee") {
     REQUIRE(o.contains("other"));
 }
 
-// --- task 48: allocation-free Object equality + Array::contains noexcept ---
+// --- allocation-free Object equality + Array::contains noexcept ---
 
 TEST_CASE("Object: content equality large order-insensitive") {
     constexpr int N = 256;
@@ -983,10 +982,9 @@ TEST_CASE("Object: content equality large unindexed lazy index") {
     // Object(Vec) adoption, so neither carries an index. The first
     // comparison must materialise the probed side's index once (a mutable,
     // amortised cache write); every later comparison of the pair must be
-    // allocation-free. Executable guard against the both-unindexed O(n^2)
-    // regression (R_48 F1): a revert to a pure linear sweep allocates
-    // nothing on the first compare, and a per-comparison allocation would
-    // keep growing the counter.
+    // allocation-free. Executable guard against a both-unindexed O(n^2)
+    // sweep: a pure linear revert allocates nothing on the first compare,
+    // and a per-comparison allocation would keep growing the counter.
     TestCountingResource cr;
     constexpr int N = 64; // > kIndexThreshold
     std::vector<std::string> keys;
@@ -1355,12 +1353,12 @@ TEST_CASE("String: release leaves a null view") {
     std::pmr::string *p = s.release();
     REQUIRE(p != nullptr);
     REQUIRE(!s.is_owned());
-    REQUIRE(static_cast<std::string_view>(s).empty());            // pre-fix: false
-    REQUIRE(static_cast<std::string_view>(s).data() == nullptr); // pre-fix: non-null
+    REQUIRE(static_cast<std::string_view>(s).empty());           // released view is empty
+    REQUIRE(static_cast<std::string_view>(s).data() == nullptr); // and holds no data
     String::destroy_owned(p);
     REQUIRE(cr.outstanding() == 0);
-    // Pre-fix: s still held {freed header, 48}, so own() copied from freed
-    // memory (ASan UAF) and .empty() was false.
+    // A released view must no longer hold the freed {header, length} pair:
+    // own() would otherwise copy from freed memory (ASan UAF).
     s.own(&cr);
     REQUIRE(s.is_owned());
     REQUIRE(static_cast<std::string_view>(s).empty());
@@ -1421,11 +1419,11 @@ TEST_CASE("Json: clone allocates header through resource") {
 
 TEST_CASE("Json: clone propagates string allocation failure") {
     // Resource that fails a chosen allocation, so the clone String arm's
-    // make_owned throws mid-construction. Regression pin for the
-    // "allocate first, tag second" order (R_51 F1): pre-fix, unwinding ran
-    // ~Json -> destroy_owned on a never-assigned heap pointer (null deref /
-    // UB); post-fix the bad_alloc propagates and make_owned's catch(...)
-    // returns the raw header block to the resource.
+    // make_owned throws mid-construction. The "allocate first, tag second"
+    // order is load-bearing: tagging first would unwind ~Json through
+    // destroy_owned on a never-assigned heap pointer (null deref / UB);
+    // with allocate-first, the bad_alloc propagates and make_owned's
+    // catch(...) returns the raw header block to the resource.
     struct ThrowOnAllocResource : std::pmr::memory_resource
     {
         std::pmr::memory_resource *up = std::pmr::new_delete_resource();
@@ -1489,7 +1487,7 @@ TEST_CASE("Json: own factory default resource") {
 }
 
 TEST_CASE("Json: literal ctor stays borrowed") {
-    // Anti-footgun regression pin: the 1-arg spelling must still borrow
+    // Anti-footgun pin: the 1-arg spelling must still borrow
     // (C8 identity). If the owned ctor ever steals literals, data() would
     // become a heap address (red); if it gains a defaulted res parameter,
     // Json("lit") becomes an ambiguous compile error (red).
@@ -1516,7 +1514,7 @@ TEST_CASE("Json: owned ctor from std::string") {
 }
 
 TEST_CASE("Json: owned ctor overload set (compile pins)") {
-    // The ambiguity matrix's compile-time wall (plan 18 §2.2): the 2-arg
+    // The ambiguity matrix's compile-time wall: the 2-arg
     // owned ctor is the only 2-arg candidate for string-ish first args, and
     // no non-string first arg may reach it. constructible_from (C++20) is
     // the construct-side trait (is_invocable tests calls, not ctors).
@@ -1527,11 +1525,11 @@ TEST_CASE("Json: owned ctor overload set (compile pins)") {
     static_assert(!std::constructible_from<Json, bool, std::pmr::memory_resource *>);
 }
 
-// --- task 19: get<T> / try_get<T> / is_integer ---
+// --- get<T> / try_get<T> / is_integer ---
 
 // 8-slot fixture: every Json tag exactly once. StringOwned slot is produced
 // through the existing clone path (StringView clone = StringOwned,
-// src/json.cpp:83-93) — no task-18 dependency.
+// src/json.cpp:83-93).
 // slot 0 = Null, 1 = Boolean, 2 = Integer, 3 = Floating, 4 = StringView,
 //      5 = StringOwned, 6 = Array, 7 = Object
 static Array make_slots()
@@ -1566,7 +1564,7 @@ TEST_CASE("Json: is_integer type test") {
 
 TEST_CASE("Json: get numeric matrix") {
     Array slots = make_slots();
-    // Full 32-cell matrix of plan 19 §2.2, same shape in debug and release
+    // Full 32-cell matrix, same shape in debug and release
     // (no #ifdef): rejected cells throw TypeError, accepted cells return.
 
     // Accepted cells (value pins)
@@ -1670,7 +1668,7 @@ TEST_CASE("Json: try_get numeric matrix") {
 }
 
 TEST_CASE("Json: get widening boundary") {
-    // int64 -> double: the five pins of plan 19 §2.5 (round to even)
+    // int64 -> double: five pins (round to even)
     REQUIRE(Json((int64_t)9007199254740991).get<double>() == 9007199254740991.0); // 2^53-1, exact
     REQUIRE(Json((int64_t)9007199254740992).get<double>() == 9007199254740992.0); // 2^53, exact
     // 2^53+1 is the exact midpoint of 2^53 and 2^53+2 => tie => the even
@@ -1694,7 +1692,7 @@ TEST_CASE("Json: get strict integer direction") {
     REQUIRE(v.is_float());
     REQUIRE(!v.is_integer());
 
-    // Parse side: 5.0 still lands in the Floating slot (task-06 invariant)
+    // Parse side: 5.0 still lands in the Floating slot (integer-part-only rule)
     auto doc = parse_copy("5.0");
     const Json &r = doc.root();
     REQUIRE_THROWS_AS((void)r.get<int64_t>(), TypeError);
@@ -1735,7 +1733,7 @@ TEST_CASE("Json: get compile pins") {
     static_assert(!can_try_get<std::string>::value);
 }
 
-// --- task 21: Json range-for + Object::keys()/values() ---
+// --- Json range-for + Object::keys()/values() ---
 
 TEST_CASE("Json: range-for over array") {
     Json two = Json(Array::of(Json((int64_t)1), Json((int64_t)2), Json((int64_t)3)));
@@ -1755,8 +1753,7 @@ TEST_CASE("Json: range-for over array") {
         e.value = Json((int64_t)99);
     REQUIRE(two[0] == (int64_t)99);
 
-    // plan 21 §3.1c @code example (folded in verbatim — the doxygen
-    // example cannot rot)
+    // @code example (kept verbatim — the doxygen example cannot rot)
     auto doc = parse_copy(R"({"nums":[1,2,3]})");
     for (auto &&e : doc.root()["nums"])
         e.value = Json(e.value.as_int() * 2);
@@ -1788,7 +1785,7 @@ TEST_CASE("Json: range-for over object entries") {
 }
 
 TEST_CASE("Json: entry view const track (compile pins)") {
-    // Iterator split: non-const Json vs const Json (the R2 wall)
+    // Iterator split: non-const Json vs const Json
     static_assert(std::is_same_v<decltype(std::declval<Json &>().begin()), JsonIterator>);
     static_assert(std::is_same_v<decltype(std::declval<const Json &>().begin()), ConstJsonIterator>);
     // Value side: patchable on the non-const track, sealed on the const track
@@ -1821,7 +1818,7 @@ TEST_CASE("Json: entry view const track (compile pins)") {
     REQUIRE(sum == 3);
 }
 
-// --- task 70: iterator range-for-only contract ---
+// --- iterator range-for-only contract ---
 //
 // std::iterator_traits<X> for a non-standard iterator X is an empty primary
 // template, but naming a missing member on a concrete (non-dependent) type is
@@ -1976,7 +1973,7 @@ TEST_CASE("Object: keys() view order and shape") {
     REQUIRE(got[1] == "a");
     REQUIRE(got[2] == "c");
 
-    // Duplicate-key overwrite keeps the first key position (task 10 last-wins)
+    // Duplicate-key overwrite keeps the first key position (last-wins)
     Object d;
     d.insert("a", Json((int64_t)1));
     d.insert("a", Json((int64_t)2));
@@ -2044,7 +2041,7 @@ TEST_CASE("Json: keys()/values() dispatch") {
     }
     REQUIRE(v == 3);
 
-    // Const root: the same dispatch, const projection (the §2.5 sugar is
+    // Const root: the same dispatch, const projection (the sugar overload is
     // reachable at the parse entry; scalar/array negative pins live in
     // "Json: begin() on scalar throws TypeError")
     const Json &croot = doc.root();
@@ -2064,13 +2061,13 @@ TEST_CASE("Json: keys()/values() dispatch") {
     REQUIRE(v == 3);
 }
 
-// --- task 20: visit / as_variant (8-way tag dispatch, v2 wrapper payload) ---
+// --- visit / as_variant (8-way tag dispatch, reference_wrapper payload) ---
 // Payload: std::variant over std::reference_wrapper<T> alternatives
 // (raw references are not valid variant alternatives —
 // [variant.requirements]). Extract the referent with .get().
 
 TEST_CASE("Json: visit 8-way dispatch") {
-    // 8 slots = the 8 Type tags exactly once (task-19 make_slots: slot
+    // 8 slots = the 8 Type tags exactly once (make_slots: slot
     // 0 = Null, 1 = Boolean, 2 = Integer, 3 = Floating, 4 = StringView,
     // 5 = StringOwned, 6 = Array, 7 = Object).
     Array slots = make_slots();
@@ -2155,8 +2152,8 @@ TEST_CASE("Json: visit null is monostate") {
 TEST_CASE("Json: as_variant payload table") {
     // The 7-alternative spellings, compile-pinned: the 8-tag -> 7-alt
     // collapse is a language constraint (variant alternatives must be
-    // pairwise distinct non-array object types — raw references rejected,
-    // plan 20 v2 §2.1), not a design choice.
+    // pairwise distinct non-array object types — raw references rejected),
+    // not a design choice.
     using ConstAlt = decltype(std::declval<const Json &>().as_variant());
     static_assert(std::is_same_v<ConstAlt,
         std::variant<std::monostate,
@@ -2182,7 +2179,7 @@ TEST_CASE("Json: as_variant payload table") {
 
 TEST_CASE("Json: visit non-const mutation") {
     // int64 patch: 5 -> 7 through the reference_wrapper<int64_t>
-    // alternative (the tag itself can never change — R6 pin).
+    // alternative (the tag itself can never change).
     Json i((int64_t)5);
     i.visit([](auto &&v)
     {
@@ -2253,12 +2250,10 @@ TEST_CASE("Json: visit overload-set visitor") {
 
 // The json.hpp visit() @code block, verbatim at FILE SCOPE: the doxygen
 // example must compile and run (8 values, one per tag) — no rot.
-// RULING (2026-09-06 green-gate stop): the original in-TEST_CASE-body
-// placement of `render` is a nested function definition — ill-formed C++
-// on every host ("function definition is not allowed here"); the
-// doxygen @code block itself shows file scope, so file scope (anonymous
-// namespace, directly above the TEST_CASE, byte-identical body) is the
-// faithful form. Placement fix only: no protocol/payload/doxygen change.
+// `render` cannot sit inside the TEST_CASE body: a nested function
+// definition is ill-formed C++ ("function definition is not allowed
+// here"). The @code block shows file scope, so the anonymous namespace
+// directly above the TEST_CASE is the faithful placement.
 namespace {
 std::string render(const Json &j)
 {
@@ -2291,29 +2286,22 @@ TEST_CASE("Json: visit doxygen example runs") {
     REQUIRE(render(Json("hello")) == "hello");
     REQUIRE(render(Json::own("world")) == "world");
     REQUIRE(render(Json(Array::of(Json((int64_t)1), Json((int64_t)2)))) == "[2]");
-    // RULING (2026-09-06 third stop, runtime red): the @code example's
-    // Object branch is SIZE-BASED ("{" + to_string(size) + "}") — an
-    // empty Object renders "{0}", not JSON "{}"; the plan family's
-    // example and case-6 expectation never co-executed until this gate
-    // (plan 20 carried both texts; the example is the sacred object,
-    // the pin pins reality — test-side literal only, doxygen untouched).
+    // The @code example's Object branch is SIZE-BASED
+    // ("{" + to_string(size) + "}"), so an empty Object renders "{0}",
+    // not JSON "{}".
     REQUIRE(render(Json(Object{})) == "{0}"); // size-based, not JSON
 }
 
 TEST_CASE("Json: as_variant lifetime window") {
-    // Valid-window pin (plan 20 §5 R1): the variant is used while the
-    // Json — and the borrowed string's source buffer — stay alive. The
-    // StringView alternative is white-box pinned to point AT the source
-    // buffer (data() identity). Dangling is UB: untestable, not pinned.
+    // Valid-window pin: the variant is used while the Json — and the
+    // borrowed string's source buffer — stay alive. The StringView
+    // alternative is white-box pinned to point AT the source buffer
+    // (data() identity). Dangling is UB: untestable, not pinned.
     std::string buf = "s";
-    // RULING (2026-09-06 second green-gate stop): the original
-    // `Json j(std::string_view(buf));` is the MOST VEXING PARSE — the
-    // grammar reads it as a function declaration (param
-    // std::string_view named buf), so j.as_variant()/j.visit() fail and
-    // -Wvexing-parse fires; host-independent (clang + g++ repro,
-    // /tmp/opencode/task20-mvp/). Brace form = single-element list-init
-    // into the SAME single-arg ctor, identical overload resolution,
-    // verified 0 errors 0 warnings on both hosts:
+    // Brace form avoids the most vexing parse: `Json j(std::string_view(buf));`
+    // declares a function (param std::string_view named buf), so j.as_variant()
+    // fails and -Wvexing-parse fires. Single-element list-init selects the
+    // same single-arg ctor with identical overload resolution.
     Json j{std::string_view(buf)};
     {
         auto v = j.as_variant(); // variant declared
@@ -2332,15 +2320,10 @@ TEST_CASE("Json: as_variant lifetime window") {
 }
 
 TEST_CASE("Json: const array range-for iterates") {
-    // R_21 F1 regression pin (fixer sub-batch, R_21 fixer scope): the
-    // array branch of Json::end() const used to return the BEGIN position
-    // (copy-paste slip from the adjacent begin() const body) — range-for
-    // over a NON-EMPTY const array then compared begin() == end() at
-    // position 0 and silently iterated ZERO times (no crash, no throw —
-    // the "silent zero-iteration buries the bug" mode ruling C rejects for
-    // scalars). No committed case could fire this: case 3's const loop is
-    // an object, case 5's range expressions bind non-const Json —
-    // 121/121 x3 green was behaviorally consistent with the defect.
+    // Contract: range-for over a NON-EMPTY const Json array must visit
+    // every element. The array branch of Json::end() const must return the
+    // one-past-the-end position, not the begin position: aliasing them
+    // would silently iterate zero times (no crash, no throw).
     // const Json lvalue straight from the Array::of prvalue (Json(Array)
     // ctor, elided — Array is non-copyable, array.hpp:53, so no
     // Array lvalue may ever feed the by-value ctor).
@@ -2354,11 +2337,11 @@ TEST_CASE("Json: const array range-for iterates") {
         REQUIRE(e.value.as_int() == expect[n]);
         ++n;
     }
-    REQUIRE(n == 3); // pre-fix red: n stays 0 — zero iterations, not a crash
-    REQUIRE(ca.begin() != ca.end()); // R2 wall: non-empty => distinct
+    REQUIRE(n == 3);                 // non-empty const array must iterate all elements
+    REQUIRE(ca.begin() != ca.end()); // non-empty => distinct
 }
 
-// --- task 22: as_*_strict (type check throws in both build modes) ---
+// --- as_*_strict (type check throws in both build modes) ---
 
 TEST_CASE("Json: strict accessors match passthrough") {
     Array slots = make_slots();
@@ -2499,7 +2482,7 @@ TEST_CASE("Parser: initial reserve nested keeps fixed hint") {
     REQUIRE(root.as_array()[0].as_array().data().capacity() == 4);
 }
 
-// --- task 26: std::hash<Json> + operator< + Object::merge ---
+// --- std::hash<Json> + operator< + Object::merge ---
 
 TEST_CASE("Json: hash equal values same hash") {
     std::hash<Json> h;

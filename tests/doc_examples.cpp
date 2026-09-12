@@ -1,4 +1,4 @@
-// Documentation examples must not rot (roadmap 64). Every code block below is
+// Documentation examples must not rot. Every code block below is
 // mirrored from README.md or a public header @code block. When the source doc
 // changes, update the mirror in the same commit.
 #include <doctest/doctest.h>

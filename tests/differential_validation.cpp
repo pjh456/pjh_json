@@ -71,10 +71,19 @@ namespace
         PJH_DIFF_CASE(R"("\q")", false, false, nullptr),
         PJH_DIFF_CASE(R"("unterminated)", false, false, nullptr),
         // ----- raw bytes (default config: byte mirror) --------------------
-        PJH_DIFF_CASE(std::string_view("\"a\nb\"", 5), false, false, nullptr),      // raw LF
-        PJH_DIFF_CASE(std::string_view("\"a\x00" "b\"", 5), false, false, nullptr), // raw NUL
-        PJH_DIFF_CASE(std::string_view("\"a\x7f" "b\"", 5), true, true, nullptr),   // DEL legal
-        PJH_DIFF_CASE(std::string_view("\"a\xFF" "b\"", 5), true, true, nullptr),   // bad UTF-8 both accept
+        PJH_DIFF_CASE(std::string_view("\"a\nb\"", 5), false, false, nullptr), // raw LF
+        PJH_DIFF_CASE(std::string_view("\"a\x00"
+                                       "b\"",
+                                       5),
+                      false, false, nullptr), // raw NUL
+        PJH_DIFF_CASE(std::string_view("\"a\x7f"
+                                       "b\"",
+                                       5),
+                      true, true, nullptr), // DEL legal
+        PJH_DIFF_CASE(std::string_view("\"a\xFF"
+                                       "b\"",
+                                       5),
+                      true, true, nullptr), // bad UTF-8 both accept
         // ----- containers / whitespace ------------------------------------
         PJH_DIFF_CASE("[]", true, true, nullptr),
         PJH_DIFF_CASE("{}", true, true, nullptr),
@@ -84,14 +93,20 @@ namespace
         PJH_DIFF_CASE("{\"a\":}", false, false, nullptr),
         PJH_DIFF_CASE("{} {}", false, false, nullptr),
         PJH_DIFF_CASE(" \t\r\n 42 \t", true, true, nullptr),
-        PJH_DIFF_CASE(std::string_view("\x0b" "1", 2), false, false, nullptr), // VT not WS
+        PJH_DIFF_CASE(std::string_view("\x0b"
+                                       "1",
+                                       2),
+                      false, false, nullptr), // VT not WS
         PJH_DIFF_CASE(std::string_view("1\x0b", 2), false, false, nullptr),
         // ----- BOM: both reject at DEFAULT config -------------------------
-        PJH_DIFF_CASE(std::string_view("\xEF\xBB\xBF" "1", 4), false, false, nullptr),
-        // ----- documented divergence D1 (task 61) -------------------------
-        PJH_DIFF_CASE("1e400", true, false, "number range (task 61)"),
-        PJH_DIFF_CASE("1e-400", true, false, "number range (task 61)"),
-        PJH_DIFF_CASE("1e309", true, false, "number range (task 61)"),
+        PJH_DIFF_CASE(std::string_view("\xEF\xBB\xBF"
+                                       "1",
+                                       4),
+                      false, false, nullptr),
+        // ----- documented divergence: number range ------------------------
+        PJH_DIFF_CASE("1e400", true, false, "number range"),
+        PJH_DIFF_CASE("1e-400", true, false, "number range"),
+        PJH_DIFF_CASE("1e309", true, false, "number range"),
     };
 
 #undef PJH_DIFF_CASE
@@ -113,9 +128,8 @@ namespace
     static_assert(table_is_consistent(),
                   "differential table: consteval verdict / allowlist out of sync");
 
-    // Canary: D1 really is a consteval-true / runtime-false case.
-    static_assert(ConstJson::parse("1e400").valid,
-                  "1e400 must be grammatically valid (D1 canary)");
+    // Canary: the number-range case really is consteval-true / runtime-false.
+    static_assert(ConstJson::parse("1e400").valid, "1e400 must be grammatically valid (number-range canary)");
     static_assert(!ConstJson::parse(std::string_view("\xEF\xBB\xBF" "1", 4)).valid,
                   "BOM must be rejected by the consteval grammar");
 } // namespace
@@ -167,14 +181,14 @@ TEST_CASE("Differential: documented divergences under opt-in knobs")
     const bool saved_json5 = cfg.json5();
     cfg.set_json5(false);
 
-    // D2 BOM (task 23): runtime strips, consteval stays grammar-strict.
+    // BOM divergence: runtime strips, consteval stays grammar-strict.
     cfg.set_strip_bom(true);
     cfg.set_strict_utf8(false);
     static_assert(!ConstJson::parse(std::string_view("\xEF\xBB\xBF" "1", 4)).valid,
                   "consteval stays BOM-strict");
     REQUIRE(parse_copy(std::string_view("\xEF\xBB\xBF" "1", 4)).root().as_int() == 1);
 
-    // D3 strict_utf8 (task 24): runtime rejects raw bad UTF-8, consteval is
+    // strict_utf8 divergence: runtime rejects raw bad UTF-8, consteval is
     // raw-byte-lenient by construction.
     cfg.set_strip_bom(false);
     cfg.set_strict_utf8(true);

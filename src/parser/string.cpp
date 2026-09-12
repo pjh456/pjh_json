@@ -216,8 +216,8 @@ namespace pjh::json
         }
 
         /*
-         * m_end-bounded JSON5 1.0.0 §5.2 escape / line-continuation decoder
-         * (task 40.3). Extends the RFC set (short escapes + \uXXXX with
+         * m_end-bounded JSON5 1.0.0 §5.2 escape / line-continuation decoder.
+         * Extends the RFC set (short escapes + \uXXXX with
          * surrogate pairs) with:
          *   - LineContinuation: `\` + LF/CR/CRLF/U+2028/U+2029 is removed
          *     entirely (writes no byte). CRLF is one LineTerminatorSequence,
@@ -540,8 +540,7 @@ namespace pjh::json
     }
 
     /*
-     * Parse a JSON5 string with either quote (task 40.1 single quotes,
-     * extended by 40.3), scalar path.
+     * Parse a JSON5 string with either quote, scalar path.
      *
      * Deliberately a separate decoder from the double-quote SIMD path: the
      * RFC `"` scanner is byte-for-byte unchanged. parse_string() routes
@@ -558,8 +557,7 @@ namespace pjh::json
      * the quote, the backslash and the LineTerminators: raw LF/CR are
      * UnescapedControl, while every other raw byte (VT/FF/TAB, ...) is
      * accepted, matching JSON5's broader string body. Unescaped U+2028/29
-     * pass through as ordinary raw bytes (40.5 territory; JSON5 permits
-     * them).
+     * pass through as ordinary raw bytes (JSON5 permits them).
      */
     bool Parser::parse_string_json5(String &out, char quote)
     {

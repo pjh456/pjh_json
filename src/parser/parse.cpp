@@ -136,7 +136,7 @@ namespace pjh::json
     }
 
     /*
-     * Compatibility shell: same signature/behavior as before 79.2. The
+     * Compatibility shell: keeps the original signature and behavior. The
      * kernel records the first failure; materialise it as a ParseError in
      * this frame (detail is copied into the owned what() string).
      */
@@ -149,7 +149,7 @@ namespace pjh::json
     }
 
     /*
-     * BOM strip (task 23): at most once per parse, at the input start.
+     * BOM strip: at most once per parse, at the input start.
      * m_begin is deliberately untouched — error offsets stay relative
      * to the original buffer start (offset honesty).
      */
@@ -480,7 +480,7 @@ namespace pjh::json
             return parse_error(Error{ErrorCode::InputTooLarge,
                                      Category::Parse, 0, false, {}});
 
-        std::pmr::string buffer; // same default-resource buffer as before 79.4
+        std::pmr::string buffer; // default-resource buffer
         // tellg() can report a value that passes padded_fits yet exceeds the
         // buffer's representable size (e.g. INT64_MAX); resize() would then
         // throw std::length_error instead of a typed ParseError. Reject anything
@@ -524,7 +524,7 @@ namespace pjh::json
      * 4. Offsets are relative to the stream start (buffer start); read
      *    failures are context-free (offset 0), like parse_file's I/O
      *    failures; allocation failures propagate std::bad_alloc
-     *    unconverted (plan 14 ruling).
+     *    unconverted.
      */
     static pjh::result::Result<Document, ParseError>
     parse_from_istream_impl(std::istream &in, Storage storage)

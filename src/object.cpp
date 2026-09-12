@@ -13,7 +13,7 @@ namespace pjh::json
     namespace
     {
         /*
-         * Sentinel pair for Object::iterator's cached proxy (task 21.1)
+         * Sentinel pair for Object::iterator's cached proxy
          *
          * A reference member must be bound at construction, and the end
          * iterator has no entry to bind to; its cache binds to this legal
@@ -640,7 +640,7 @@ namespace pjh::json
     }
 
     /*
-     * Non-const track (task 21.1): the wrapper seals the key side.
+     * Non-const track: the wrapper seals the key side.
      *
      * 1. operator* builds a fresh EntryRef per call (zero staleness).
      * 2. operator->/operator++ re-bind the cached proxy to the current

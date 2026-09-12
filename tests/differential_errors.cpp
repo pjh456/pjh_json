@@ -1,18 +1,15 @@
-// Task 79.5 — differential error channel golden table.
+// Differential error channel golden table.
 //
-// Golden error table captured BEFORE task 79.1 from the unmodified working
-// tree (HEAD 5bf6604, Debug, PJH_JSON_ENABLE_OPTIMIZATIONS=OFF, g++ 14.2.0),
-// archived at .w1mer/results/79_golden_errors.md §A. The `what` strings below
-// are byte-identical to that capture. File-I/O rows use portable relative
-// missing paths (plan 79.5 §2.1); their `what` is synthesised from
-// {code, detail}. Every row is checked against the throwing channel, the
-// *_result channel, and Error{code,...}.format() (the static message table).
+// The golden `what` strings below are fixed. File-I/O rows use portable
+// relative missing paths; their `what` is synthesised from {code, detail}.
+// Every row is checked against the throwing channel, the *_result channel,
+// and Error{code,...}.format() (the static message table).
 //
-// The pre-79 gate has landed (79.4): both public shells forward to one
-// zero-throw *_impl, so `same_tuple` guards against a future per-shell
-// post-processing drift, while the golden bytes guard the pre-79 text.
+// Both public shells forward to one zero-throw *_impl, so `same_tuple` guards
+// against a future per-shell post-processing drift, while the golden bytes
+// guard the exact text.
 #include <doctest/doctest.h>
-#include <ostream> // MSVC doctest stringification (ebf47c4 precedent)
+#include <ostream> // MSVC doctest stringification
 
 #include <pjh_result/diagnostic.hpp>
 
@@ -37,7 +34,7 @@
 using namespace pjh::json;
 
 // ---------------------------------------------------------------------------
-// Compile-time kernel properties (plan 79 §3.3 / §6)
+// Compile-time kernel properties
 // ---------------------------------------------------------------------------
 static_assert(std::is_trivially_copyable_v<Error>);
 static_assert(std::is_nothrow_move_constructible_v<Error>);
@@ -1041,7 +1038,7 @@ TEST_CASE("DifferentialErrors: writer entries, both channels")
 // ---------------------------------------------------------------------------
 TEST_CASE("DifferentialErrors: every reachable ErrorCode has a golden row")
 {
-    // census §B: unreachable through the public API without changing code.
+    // Unreachable through the public API without changing code.
     constexpr ErrorCode kDefensive[] = {
         ErrorCode::NumberInvalidFormat, ErrorCode::ExpectedQuote,
         ErrorCode::InputTooLarge,       ErrorCode::InvalidCodepoint,

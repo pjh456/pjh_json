@@ -93,11 +93,11 @@ TEST_CASE("Document: move ctor no UAF") {
     // resource, not at b's (now dead) arena.
     // Compare the resource() raw pointer only, never the allocator with
     // operator==: the latter virtual-dispatches do_is_equal on both ends
-    // and would UAF on the dead arena by the test itself pre-fix.
+    // and would UAF on the dead arena.
     REQUIRE(a.buffer().get_allocator().resource()
             == std::pmr::new_delete_resource());
 
-    // lifecycle control (green pre- and post-fix, pins the order):
+    // lifecycle control (pins the order):
     // a as destination, then a as source, both on the rebound buffer
     a.reset();
     auto c = parse_copy(R"([1])");
@@ -157,28 +157,27 @@ TEST_CASE("Document: move assign foreign-resource source buffer no UAF") {
     auto src = parse_in_situ(std::move(buf), Storage::Pooled);
     REQUIRE(src.root()[0] == "hello");
 
-    // Non-empty target also exercises the task-02 old-state path.
+    // Non-empty target also exercises the old-state path.
     Document dst = parse_copy(R"([1])");
-    dst = std::move(src);                   // pre-fix: buffer COPIED, source freed+poisoned
+    dst = std::move(src); // target steals the source buffer storage
 
-    // Pre-fix the array element's borrowed view points into the freed,
-    // 0xAB-scribbled source storage -> mismatch (red, no sanitizer needed).
-    // Post-fix the storage is stolen and the view is intact (green).
+    // The stolen storage keeps the array element's borrowed view intact;
+    // a copied-then-freed source would leave it reading 0xAB scribble.
     REQUIRE(dst.buffer().data() != nullptr);
     REQUIRE(dst.root()[0] == "hello");
     REQUIRE(dump(dst) == R"(["hello"])");
 
-    // moved-from source self-contained (task 02 invariant 3, unchanged)
+    // moved-from source remains self-contained
     REQUIRE(src.root().is_null());
     REQUIRE(src.buffer().empty());
 }
 
 TEST_CASE("Document: move assign parse_file source no UAF") {
-    // R_75's entry-level shape: parse_file's buffer is bound to the default
+    // parse_file's entry-level shape: its buffer is bound to the default
     // resource while its arena is created inside parse_in_situ, so the source
-    // buffer allocator differs from the source arena. Under ASan the dangling
-    // borrowed views below are a heap-use-after-free pre-fix; the default
-    // resource keeps the bytes readable on a plain build.
+    // buffer allocator differs from the source arena. Under ASan a dangling
+    // borrowed view would be a heap-use-after-free; the default resource
+    // keeps the bytes readable on a plain build.
     const std::string f = "pjh_doc_move_parse_file.json";
     {
         std::ofstream out(f, std::ios::binary);

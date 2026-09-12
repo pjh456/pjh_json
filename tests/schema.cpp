@@ -307,7 +307,7 @@ TEST_CASE("Schema: diagnostic")
     CHECK(e.kind() == Category::Schema);
 
     // render() is the shared Diagnostic channel; only fragments are pinned
-    // (the full message text is an implementation detail, task 79 contract).
+    // (the full message text is an implementation detail, not a contract).
     const std::string rendered = pjh::result::render(e);
     CHECK(rendered.find("schema type mismatch") != std::string::npos);
     CHECK(rendered.find("<root>") != std::string::npos);

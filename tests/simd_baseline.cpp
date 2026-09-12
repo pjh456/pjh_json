@@ -9,8 +9,7 @@ using namespace pjh::json;
 // xsimd selects SSE2 on x86-64 / NEON on arm64, both 16-byte batches. The
 // lower bound guards against a narrower batch than the scanners ever
 // supported; the upper bound guards the uint64_t batch mask; the padding
-// identity keeps 2x headroom under kPaddingWidth. See
-// .w1mer/performance/PERF_SIMD_BASELINE.md.
+// identity keeps 2x headroom under kPaddingWidth.
 TEST_CASE("SIMD: baseline batch width")
 {
     const std::size_t width = simd_batch_width();

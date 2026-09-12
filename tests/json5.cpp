@@ -20,7 +20,7 @@ namespace
 {
     // doctest has no per-case teardown: restore EVERY knob this TU can touch
     // on an unwinding REQUIRE, so the JSON5 mode cannot leak into the
-    // default-RFC tests (plan 40 §7 R4).
+    // default-RFC tests.
     struct Json5ConfigGuard
     {
         bool m_strict;
@@ -187,7 +187,7 @@ TEST_CASE("Json5: single-quoted strings")
     // Single-quoted key.
     REQUIRE(parse_copy("{'q':1}").root()["q"].as_int() == (int64_t)1);
 
-    // Unterminated / raw control byte (line continuation is deferred to 40.3).
+    // Unterminated / raw control byte (line continuation is not supported).
     CHECK_THROWS_AS((void)parse_copy("'"), ParseError);
     CHECK_THROWS_AS((void)parse_copy("'abc"), ParseError);
     CHECK_THROWS_AS((void)parse_copy(std::string_view("'a\nb'", 5)), ParseError);
@@ -613,7 +613,7 @@ TEST_CASE("Json5: numbers in jsonl and RFC round-trip")
     REQUIRE(jl.root()[3].as_float() == 5.0);
 
     // An unterminated hex prefix on one line must not swallow the next line
-    // (same m_end discipline as the 40.1 trivia scans).
+    // (same m_end discipline as the JSON5 trivia scans).
     CHECK_THROWS_AS((void)parse_jsonl("0x\n[1]\n"), ParseError);
 
     // Per-line range errors stay line-relative like the RFC path.
@@ -712,7 +712,7 @@ TEST_CASE("Json5: non-finite values in jsonl and line bounding")
     REQUIRE(jl.root()[1].as_float() < 0.0);
     REQUIRE(std::isnan(jl.root()[2].as_float()));
 
-    // Trailing junk on one line must not swallow the next line (40.1 R1).
+    // Trailing junk on one line must not swallow the next line.
     CHECK_THROWS_AS((void)parse_jsonl("Infinityx\n[1]\n"), ParseError);
 
     // A non-finite value on its own line is fine, and the next line still
@@ -936,7 +936,7 @@ TEST_CASE("Json5: Unicode whitespace in jsonl and line bounding")
     cfg.set_json5(true);
 
     // A Unicode-whitespace-only line is blank and must be skipped, never
-    // handed to a per-line parser (R1: no line may be swallowed).
+    // handed to a per-line parser (no line may be swallowed).
     for (const std::string &ws : {kNbsp, kEmSpace, kOgham, kIdeoSpace, kFeff})
     {
         auto doc = parse_jsonl(ws + "\n[1]\n");

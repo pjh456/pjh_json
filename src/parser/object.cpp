@@ -225,7 +225,7 @@ namespace pjh::json
     }
 
     /*
-     * Parse an ES5.1 IdentifierName object key (JSON5 1.0.0 §3, task 40.5).
+     * Parse an ES5.1 IdentifierName object key (JSON5 1.0.0 §3).
      *
      * The ASCII fast path delegates classification to grammar.hpp; non-ASCII
      * sequences are decoded with the strict, m_end-bounded decoder in

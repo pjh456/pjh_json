@@ -7,7 +7,7 @@
 
 namespace pjh::json
 {
-    // --- task 26 TU-local helpers (operator< + std::hash payload) ---
+    // --- TU-local helpers (operator< + std::hash payload) ---
     namespace
     {
         /* splitmix64: the 3-line finalizer (bijective). */

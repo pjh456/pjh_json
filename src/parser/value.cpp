@@ -47,7 +47,7 @@ namespace pjh::json
         case '9':
             return parse_number(out);
         default:
-            // JSON5 single-quoted string (40.1). Kept out of the RFC switch
+            // JSON5 single-quoted string. Kept out of the RFC switch
             // table so the default path's cases/errors are untouched.
             if (m_json5 && *m_curr == '\'')
             {
@@ -57,8 +57,8 @@ namespace pjh::json
                 out = std::move(s);
                 return true;
             }
-            // JSON5 numbers with a leading '+'/'.' (40.2) and the
-            // Infinity/NaN literals (40.4); the RFC switch keeps its
+            // JSON5 numbers with a leading '+'/'.' and the
+            // Infinity/NaN literals; the RFC switch keeps its
             // '-'/digit cases byte-for-byte.
             if (m_json5 && (*m_curr == '+' || *m_curr == '.' || *m_curr == 'I' || *m_curr == 'N'))
                 return parse_number(out);
@@ -116,7 +116,7 @@ namespace pjh::json
             }
             [[fallthrough]];
         default:
-            // JSON5 single-quoted string (40.1); see parse_value_inplace.
+            // JSON5 single-quoted string; see parse_value_inplace.
             if (m_json5 && *m_curr == '\'')
             {
                 String s;
@@ -125,8 +125,8 @@ namespace pjh::json
                 out = std::move(s);
                 return true;
             }
-            // JSON5 numbers with a leading '+'/'.' (40.2) and the
-            // Infinity/NaN literals (40.4).
+            // JSON5 numbers with a leading '+'/'.' and the
+            // Infinity/NaN literals.
             if (m_json5 && (*m_curr == '+' || *m_curr == '.' || *m_curr == 'I' || *m_curr == 'N'))
                 return parse_number(out);
             fail(ErrorCode::UnexpectedValueCharacter, m_curr);

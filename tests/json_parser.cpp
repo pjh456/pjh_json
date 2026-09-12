@@ -523,7 +523,7 @@ TEST_CASE("Parser: out-of-double-range numbers") {
     expect_range("[1e400]", 1);
     expect_range("{\"a\":1e400}", 5);
 
-    // *_result shells inherit the positioned range error (task 16 channel)
+    // *_result shells inherit the positioned range error
     auto r = parse_copy_result("1e400");
     REQUIRE(r.is_err());
     ParseError e = r.unwrap_err();
@@ -760,13 +760,13 @@ TEST_CASE("Parser: in_situ padding") {
     auto doc = parse_in_situ(make_padded('\0'));
     REQUIRE(doc.root()["a"] == (int64_t)1);
 
-    // size < kPaddingWidth rejected (pre-existing check, pinned)
+    // size < kPaddingWidth rejected (pinned)
     std::pmr::string small(get_default_resource());
     small.assign("{}", 2);
     small.append(60, '\0'); // total 62
     CHECK_THROWS_AS((void)parse_in_situ(std::move(small)), ParseError);
 
-    // Non-NUL tail rejected (NEW check: pre-fix this parsed silently)
+    // Non-NUL tail rejected
     CHECK_THROWS_AS((void)parse_in_situ(make_padded('x')), ParseError);
     #ifndef NDEBUG
     CHECK_THROWS_WITH((void)parse_in_situ(make_padded('x')),
@@ -790,7 +790,6 @@ TEST_CASE("Parser: padding width contract") {
     static_assert(kPaddingWidth == 128,
                   "fixed padding = 2x the maximum supported uint8 batch (64)");
     // Behavioral side: a view with exactly kPaddingWidth padding works
-    // (regression pin)
     std::string content = R"([1,2,3])";
     std::string buf(content.size() + kPaddingWidth, '\0');
     memcpy(buf.data(), content.data(), content.size());
@@ -817,7 +816,7 @@ TEST_CASE("Parser: result entry positioned error") {
     REQUIRE(e.category() == Category::Parse);
     // no-slicing pin: the channel still holds the full ParseError (dynamic
     // type + machine channel survive the by-value copy; what() carries the
-    // offset segment, task 13 shape, mode-independent)
+    // offset segment, mode-independent)
     REQUIRE(dynamic_cast<const ParseError *>(&e) != nullptr);
     REQUIRE(std::string(e.what()).find(" at offset 1") != std::string::npos);
 }
@@ -910,7 +909,7 @@ TEST_CASE("Error: category") {
 }
 
 TEST_CASE("Parser: BOM rejected by default") {
-    // Default-OFF contract pin (task 23): a leading UTF-8 BOM (EF BB BF)
+    // Default-OFF contract pin: a leading UTF-8 BOM (EF BB BF)
     // is a grammar error by default. Full message: "Unexpected character
     // parsing value at offset 0" (value.cpp default branch) — what()'s
     // full text is not the house contract pin (error.hpp:47-50), the
@@ -963,7 +962,7 @@ TEST_CASE("Parser: BOM strip opt-in") {
     auto d3 = parse_view(buf.data(), content.size());
     REQUIRE(d3.root()["a"] == (int64_t)1);
 
-    // Offset honesty (ruling D): the strip advances m_curr, never
+    // Offset honesty: the strip advances m_curr, never
     // m_begin — the extra '2' sits at original-buffer index 5 (EF BB BF
     // '1' ' ' '2'); a shifted-view implementation would report 2
     try {
@@ -991,7 +990,7 @@ TEST_CASE("Parser: BOM strip opt-in") {
         REQUIRE(e.offset() == 0);
     }
 
-    // UTF-16 BOMs get no special-casing (ruling E): with strip ON they
+    // UTF-16 BOMs get no special-casing: with strip ON they
     // are still invalid UTF-8, rejected at offset 0
     try {
         (void)parse_copy(std::string("\xFF\xFE", 2) + "1");
@@ -1051,10 +1050,10 @@ TEST_CASE("Parser: jsonl BOM line-1 only") {
 
 TEST_CASE("Parser: invalid UTF-8 accepted by default")
 {
-    // Default-OFF contract pin (task 24): string content is a byte
+    // Default-OFF contract pin: string content is a byte
     // mirror — ill-formed UTF-8 is accepted and round-trips
-    // byte-identical. This case has NO guard: it must stay green
-    // forever (the regression wall for the default contract).
+    // byte-identical. This case has NO guard: the default contract
+    // must stay green unconditionally.
     std::string samples[] = {
         invalid_byte(),    // 0xFF: no such lead byte
         lone_cont(),       // 0x80: continuation without a lead
@@ -1101,7 +1100,7 @@ TEST_CASE("Parser: strict UTF-8 rejects malformed bytes")
 
     // Phase B — strict ON: each violation class rejected at its first
     // offending byte. Pin = type + offset + " at offset N" substring
-    // (task 13 caliber: what()'s full text is not the contract); the
+    // (what()'s full text is not the contract); the
     // message-family substring is added where the class is unambiguous.
     auto expect_off = [](std::string input, size_t off,
                          std::string_view family)
@@ -1141,7 +1140,7 @@ TEST_CASE("Parser: strict UTF-8 rejects malformed bytes")
     auto vd = parse_copy("\"" + valid_utf8() + "\"");
     REQUIRE(vd.root().as_string() == std::string_view(valid_utf8()));
 
-    // 24.1: completed 3-byte sequences for the constrained leads must
+    // Completed 3-byte sequences for the constrained leads must
     // pass with the corrected count — valid U+0800–U+0FFF (E0) and
     // U+D000–U+D7FF (ED), both edges. E1/EE are mid-range controls for
     // the already-correct unconstrained 3-byte branch.
@@ -1163,7 +1162,7 @@ TEST_CASE("Parser: strict UTF-8 rejects malformed bytes")
     auto p2 = parse_copy("\"\xE0\xA0\x80\\n\"");
     REQUIRE(p2.root().as_string() == std::string_view("\xE0\xA0\x80\n", 4));
 
-    // Escape face: already strict before this task; the knob neither
+    // Escape face: already strict; the knob neither
     // adds nor removes anything there (only type + offset pinned)
     auto pair = parse_copy(R"("\uD83D\uDE00")");
     REQUIRE(pair.root().as_string() == std::string_view("\xF0\x9F\x98\x80"));
@@ -1192,7 +1191,7 @@ TEST_CASE("Parser: strict UTF-8 rejects malformed bytes")
     expect_off(std::string("{\"\xFF\":1}", 7), 2,
                "Invalid UTF-8 lead byte in string");
 
-    // Result channel: the thin shell inherits the knob (task 16 precedent)
+    // Result channel: the thin shell inherits the knob
     auto r = parse_copy_result("\"a\xFF\"");
     REQUIRE(r.is_err());
     ParseError e = r.unwrap_err();
@@ -1255,7 +1254,7 @@ TEST_CASE("Parser: strict UTF-8 BOM boundary")
     auto d = parse_copy("\"" + bom() + "\"");
     REQUIRE(d.root().as_string() == std::string_view(bom()));
 
-    // Both-knob combination (task 23 + 24 orthogonality, executable):
+    // Both-knob combination (strip_bom/strict_utf8 orthogonality, executable):
     // strip_bom ON strips the byte-0 prefix, strict ON validates the
     // (BOM-free) content
     Config::instance().set_strip_bom(true);

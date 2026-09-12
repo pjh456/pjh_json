@@ -106,7 +106,7 @@ TEST_CASE("Literal: magic constants") {
 TEST_CASE("Literal: throw_parse_error") {
     CHECK_THROWS_AS(throw_parse_error("test error", "xxx", "xxx"), ParseError);
 
-    // Task 13: one definition for all build modes — "<msg> at offset N"
+    // One definition for all build modes — "<msg> at offset N"
     // (release no longer flattens to the literal "parse error").
     char data[] = "hello world";
     try {
@@ -218,26 +218,26 @@ TEST_CASE("ConstJson: parse strictness") {
     static_assert(!ConstJson::parse(std::string_view("\"a\x01" "b\"", 5)).valid);  // raw 0x01
     static_assert(!ConstJson::parse(std::string_view("\"a\x00" "b\"", 5)).valid);  // raw NUL
     static_assert(ConstJson::parse(std::string_view("\"a\x7f" "b\"", 5)).valid); // DEL (0x7F) is legal in strings
-    // Whitespace set regression pins (already aligned, must not regress)
+    // Whitespace set pins (already aligned, must not regress)
     static_assert(ConstJson::parse(" \t\r\n 42 \t").valid);
     static_assert(!ConstJson::parse(std::string_view("\x0b" "1", 2)).valid);  // VT is not whitespace
     static_assert(!ConstJson::parse(std::string_view("1\x0b", 2)).valid);
 
-    // BOM (task 23): the constexpr path is grammar-strict — 0xEF is not
+    // BOM: the constexpr path is grammar-strict — 0xEF is not
     // whitespace (validate.hpp:26-30) and no consteval knob can strip it
     // (std::atomic is not constexpr). Runtime strip_bom does NOT apply
-    // here: the divergence is by design (§1.4).
+    // here: the divergence is by design.
     static_assert(!ConstJson::parse(std::string_view("\xEF\xBB\xBF" "1", 4)).valid);
     static_assert(!ConstJson::parse(std::string_view("\xEF\xBB\xBF", 3)).valid);
     static_assert(ConstJson::parse("1").valid); // control: BOM-free is fine
 
-    // Raw-byte leniency (task 24 documented divergence): the constexpr
+    // Raw-byte leniency (documented divergence): the constexpr
     // validator stays raw-byte-lenient — the runtime strict_utf8 knob
     // cannot reach consteval (std::atomic is not constexpr).
     static_assert(ConstJson::parse(std::string_view("\"a\xFF" "b\"", 5)).valid);  // 0xFF passes (>= 0x20)
     static_assert(ConstJson::parse(std::string_view("\"a\xC0" "b\"", 5)).valid);  // overlong lead passes raw
 
-    // Range divergence (task 61): `valid` is a GRAMMAR verdict only. The
+    // Range divergence: `valid` is a GRAMMAR verdict only. The
     // constexpr validator has no double-magnitude concept, so out-of-range
     // magnitudes pass it, while to_document() applies the runtime range gate
     // and throws a positioned ParseError (same documented-divergence family

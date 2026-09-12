@@ -87,15 +87,14 @@ namespace pjh::json
     }
 
     /*
-     * Skip JSON5 trivia (task 40.1, Unicode-extended by 40.5): white space +
-     * comments.
+     * Skip JSON5 trivia: white space + comments.
      *
      * Every loop condition is explicitly m_curr/m_end-bounded. This is
      * load-bearing: parse_jsonl builds a Parser over a LINE SUB-VIEW of
      * the whole padded buffer, so past m_end sit the NEXT line's bytes,
      * not NUL padding. An unbounded scan (relying on padding) would let a
      * JSON5 blank/comment line consume the following line — recreating
-     * the task-04 `[[1],[1]]` silent-duplication bug.
+     * the `[[1],[1]]` silent-duplication bug.
      *
      * White space is the JSON5 1.0.0 §8 set: the four RFC bytes plus VT/FF
      * (grammar::is_json5_whitespace_ascii), and the multi-byte NBSP/LS/PS/

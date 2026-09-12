@@ -8,12 +8,12 @@
 
 namespace pjh::json
 {
-    /// @brief Runtime-only Unicode rules for the JSON5 grammar (task 40.5).
+    /// @brief Runtime-only Unicode rules for the JSON5 grammar.
     ///
     /// RFC 8259 is byte-oriented and never needs Unicode category data, so the
     /// generated range tables live here (a private, non-installed header)
     /// instead of in the shared constexpr grammar.hpp: only src/parser/*.cpp
-    /// includes them, and ConstJson/consteval stays byte-pure (task 64).
+    /// includes them, and ConstJson/consteval stays byte-pure.
     /// grammar.hpp keeps the small, table-free JSON5 rules.
     namespace unicode
     {
