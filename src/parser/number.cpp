@@ -158,15 +158,13 @@ namespace pjh::json
             return false;
         }
 
-        Json val;
         const char *err_pos = nullptr;
-        const ErrorCode ec = classify_number(start, m_curr, scan, val, err_pos);
+        const ErrorCode ec = classify_number(start, m_curr, scan, out, err_pos);
         if (ec != ErrorCode::None)
         {
             fail(ec, err_pos);
             return false;
         }
-        out = std::move(val);
         return true;
     }
 
