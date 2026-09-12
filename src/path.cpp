@@ -238,7 +238,11 @@ namespace pjh::json
 
     // --- contains ---
 
-    bool Json::contains(const Path &path) const noexcept
+    // Predicate: a miss or a wrong-type mid-walk hop is false, not an error.
+    // Not noexcept: hop() may allocate (decimal key for an index step over an
+    // object parent; exception-message construction on a miss) — an OOM must
+    // propagate rather than call std::terminate.
+    bool Json::contains(const Path &path) const
     {
         try
         {

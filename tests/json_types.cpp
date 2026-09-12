@@ -1091,6 +1091,12 @@ TEST_CASE("Path: find_path found and miss") {
 }
 
 TEST_CASE("Path: contains predicate") {
+    // Contract pin: the typed-path predicate is no longer noexcept — a hop
+    // allocates (decimal key) and a miss constructs an exception message;
+    // an OOM must propagate, not std::terminate.
+    static_assert(!noexcept(std::declval<const Json &>().contains(
+        std::declval<const Path &>())));
+
     auto doc = parse_copy(R"({"a":{"b":[10,20]}})");
     auto &root = doc.root();
     REQUIRE(root.contains("a.b[1]") == true);
@@ -1098,6 +1104,12 @@ TEST_CASE("Path: contains predicate") {
     REQUIRE(root.contains("z") == false); // missing key
     REQUIRE(root.contains("") == true); // empty path always true
     REQUIRE(root.contains(Path{}) == true); // typed overload
+
+    // Index step over an object parent => decimal-string key lookup; a miss
+    // must yield false (and, after the fix, must not be sitting under noexcept).
+    Path numeric_key;
+    numeric_key.emplace_back((size_t)9);
+    REQUIRE(root.contains(numeric_key) == false); // object has no key "9"
 
     // Wrong-type (scalar mid-walk) hop = false, not an error
     auto d2 = parse_copy(R"({"x":5})");

@@ -1151,12 +1151,16 @@ namespace pjh::json
          */
         [[nodiscard]] bool contains(std::string_view path) const;
         /**
-         * @brief Predicate by typed path (no parsing, no throw)
+         * @brief Predicate by typed path (no parsing)
          * @param path Sequence of key/index hops; empty = the root
          * @return true if every hop succeeds; a wrong-type (scalar mid-walk)
          *         hop is false, not an error
+         * @note Not noexcept: a hop may allocate — an index step over an
+         *       object parent forms its decimal key, and a missed hop
+         *       constructs an exception message. An OOM inside either must
+         *       propagate as std::bad_alloc, not std::terminate.
          */
-        [[nodiscard]] bool contains(const Path &path) const noexcept;
+        [[nodiscard]] bool contains(const Path &path) const;
         /**@}*/
 
     public:
