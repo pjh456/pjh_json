@@ -20,6 +20,7 @@
 #include "pjh_json/path.hpp"
 #include "pjh_json/std_interop.hpp"
 #include "pjh_json/string.hpp"
+#include "pjh_json/version.hpp"
 #include "pjh_json/writer.hpp"
 
 #endif // INCLUDE_PJH_JSON_HPP

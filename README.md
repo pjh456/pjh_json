@@ -177,6 +177,13 @@ used (non-portable artifacts); pass your own `CMAKE_CXX_FLAGS` if you want it lo
 > `kPaddingWidth` lives in `pjh_json/document.hpp`; the former `literal.hpp` /
 > `utils.hpp` are implementation details and are not part of the package.
 
+## Versioning
+
+Current version: **0.2.0**. `pjh_json` follows Semantic Versioning; because it
+is pre-1.0, a minor-version bump may be breaking. See
+[VERSIONING.md](VERSIONING.md) for the compatibility promise and
+[CHANGELOG.md](CHANGELOG.md) for release notes.
+
 ## Benchmark
 
 Google Benchmark, 2026-07-10, Windows x64, MinGW GCC 15.2, `-O3 -march=native -ffast-math -flto`. Time in nanoseconds, lower is better.

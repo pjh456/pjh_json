@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(
     pjh_json
-    VERSION 0.01
+    VERSION 0.2.0
     LANGUAGES CXX
 )
 
@@ -10,6 +10,28 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+
+# -------------------------
+# version.hpp <-> project(VERSION) sync guard
+# -------------------------
+# The version is exposed to consumers through include/pjh_json/version.hpp as
+# well as the CMake package. Keep the two in lockstep so the in-code constants
+# and `find_package(pjh_json X.Y)` can never disagree. See VERSIONING.md.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/pjh_json/version.hpp")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/include/pjh_json/version.hpp")
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/include/pjh_json/version.hpp" _pjh_version_hpp)
+    if(NOT _pjh_version_hpp MATCHES
+       "PJH_JSON_VERSION_STRING \"([0-9]+\\.[0-9]+\\.[0-9]+)\"")
+        message(FATAL_ERROR
+            "include/pjh_json/version.hpp: no PJH_JSON_VERSION_STRING \"X.Y.Z\" found")
+    endif()
+    if(NOT CMAKE_MATCH_1 STREQUAL pjh_json_VERSION)
+        message(FATAL_ERROR
+            "version.hpp (${CMAKE_MATCH_1}) != project VERSION "
+            "(${pjh_json_VERSION}); update both in the same commit.")
+    endif()
+endif()
 
 # -------------------------
 # option
@@ -177,10 +199,19 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     configure_package_config_file(cmake/pjh_jsonConfig.cmake.in
         ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfig.cmake
         INSTALL_DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
+    # Pre-1.0 the compatibility boundary is the MINOR version (SemVer §4):
+    # a 0.y consumer must not be silently satisfied by a 0.(y+1) package that
+    # may have removed API. From 1.0.0 the usual major boundary applies.
+    # See VERSIONING.md.
+    if(pjh_json_VERSION_MAJOR EQUAL 0)
+        set(PJH_JSON_PACKAGE_COMPATIBILITY SameMinorVersion)
+    else()
+        set(PJH_JSON_PACKAGE_COMPATIBILITY SameMajorVersion)
+    endif()
     write_basic_package_version_file(
         ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfigVersion.cmake
-        VERSION ${PROJECT_VERSION}
-        COMPATIBILITY SameMajorVersion)
+        VERSION ${pjh_json_VERSION}
+        COMPATIBILITY ${PJH_JSON_PACKAGE_COMPATIBILITY})
     install(FILES
         ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfig.cmake
         ${CMAKE_CURRENT_BINARY_DIR}/pjh_jsonConfigVersion.cmake
