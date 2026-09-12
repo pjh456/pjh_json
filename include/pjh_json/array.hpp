@@ -116,8 +116,12 @@ namespace pjh::json
          * @brief true if value exists in array
          * @param val Value to search (linear scan)
          * @return true if equal element found
+         * @note Comparison uses Json::operator==, which recurses into nested
+         *       Arrays/Objects and is not guaranteed noexcept (a comparison
+         *       path may allocate). Deliberately not noexcept so an
+         *       allocation failure propagates instead of terminating.
          */
-        [[nodiscard]] bool contains(const Json &val) const noexcept;
+        [[nodiscard]] bool contains(const Json &val) const;
 
         /**
          * @brief Resize to val elements

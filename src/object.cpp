@@ -526,31 +526,44 @@ namespace pjh::json
     }
 
     /*
-     * Content equality (order-insensitive).
+     * Content equality (order-insensitive), allocation-free.
      *
      * 1. Fast reject on size mismatch.
-     * 2. Sort pointers to entries by key, then compare element-wise.
-     *    O(n log n) instead of O(n^2).
+     * 2. For every entry of one side, find the same key on the other side
+     *    and compare values. find_slot never allocates and never throws; it
+     *    is O(1) when the looked-up side has a materialised index, else a
+     *    linear first-match sweep.
+     * 3. Always look *into* whichever side owns an index: iterating the
+     *    indexed side would pay a linear sweep per entry. Only when neither
+     *    side is indexed (n <= kIndexThreshold, or a parse/adopted object)
+     *    does the sweep run per key; below the threshold that is bounded.
+     *
+     * Duplicate keys (only an adopted Object(Vec) can carry them) resolve to
+     * the first occurrence, making the result deterministic instead of the
+     * old std::sort's unspecified order.
      */
     bool Object::operator==(const Object &other) const
     {
         if (size() != other.size())
             return false;
-        std::vector<const Entry *> a, b;
-        a.reserve(size());
-        b.reserve(size());
-        for (const auto &e : m_data) a.push_back(&e);
-        for (const auto &e : other.m_data) b.push_back(&e);
-        auto by_key = [](const Entry *x, const Entry *y) {
-            return static_cast<std::string_view>(x->first) <
-                   static_cast<std::string_view>(y->first);
-        };
-        std::sort(a.begin(), a.end(), by_key);
-        std::sort(b.begin(), b.end(), by_key);
-        for (size_t i = 0; i < a.size(); ++i)
+
+        if (other.m_index != nullptr || m_index == nullptr)
         {
-            if (a[i]->first != b[i]->first || a[i]->second != b[i]->second)
-                return false;
+            for (const Entry &e : m_data)
+            {
+                const size_t pos = other.find_slot(e.first);
+                if (pos == npos || other.m_data[pos].second != e.second)
+                    return false;
+            }
+        }
+        else
+        {
+            for (const Entry &e : other.m_data)
+            {
+                const size_t pos = find_slot(e.first);
+                if (pos == npos || m_data[pos].second != e.second)
+                    return false;
+            }
         }
         return true;
     }

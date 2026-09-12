@@ -805,6 +805,149 @@ TEST_CASE("Object: hash index duplicate adoptee") {
     REQUIRE(o.contains("other"));
 }
 
+// --- task 48: allocation-free Object equality + Array::contains noexcept ---
+
+TEST_CASE("Object: content equality large order-insensitive") {
+    constexpr int N = 256;
+    std::vector<std::string> keys;
+    keys.reserve(N);
+    for (int i = 0; i < N; ++i)
+        keys.push_back("eq_" + std::to_string(i));
+
+    // Both sides are above kIndexThreshold, so insert materialises the
+    // lookup index; two different insertion orders must compare equal.
+    Object a;
+    for (int i = 0; i < N; ++i)
+        a.insert(keys[static_cast<size_t>(i)], Json((int64_t)i));
+
+    Object b;
+    for (int i = N - 1; i >= 0; --i)
+        b.insert(keys[static_cast<size_t>(i)], Json((int64_t)i));
+
+    REQUIRE(a == b);
+    REQUIRE(b == a); // symmetric
+
+    // Value mismatch.
+    b.insert(keys[0], Json((int64_t)-1));
+    REQUIRE(a != b);
+    REQUIRE(b != a);
+    b.insert(keys[0], Json((int64_t)0));
+    REQUIRE(a == b);
+
+    // Same size, different key set: one key misses on the other side.
+    Object c;
+    for (int i = 0; i < N; ++i)
+        c.insert(keys[static_cast<size_t>(i)], Json((int64_t)i));
+    c.remove(keys[1]);
+    c.insert("eq_replaced", Json((int64_t)1));
+    REQUIRE(c.size() == a.size());
+    REQUIRE(a != c);
+
+    // Size difference rejects before any lookup.
+    c.remove("eq_replaced");
+    REQUIRE(a != c);
+
+    // Nested containers recurse order-insensitively through Json equality.
+    Object inner1;
+    inner1.insert("x", Json((int64_t)1));
+    inner1.insert("y", Json((int64_t)2));
+    Object inner2;
+    inner2.insert("y", Json((int64_t)2));
+    inner2.insert("x", Json((int64_t)1));
+    Object n1;
+    n1.insert("obj", Json(std::move(inner1)));
+    n1.insert("arr", Json(Array::of(Json((int64_t)7), Json("s"))));
+    Object n2;
+    n2.insert("arr", Json(Array::of(Json((int64_t)7), Json("s"))));
+    n2.insert("obj", Json(std::move(inner2)));
+    REQUIRE(n1 == n2);
+    REQUIRE(n2 == n1);
+}
+
+TEST_CASE("Object: content equality small and unindexed") {
+    constexpr int N = 16; // exactly kIndexThreshold: no index is built
+    std::vector<std::string> keys;
+    keys.reserve(N);
+    for (int i = 0; i < N; ++i)
+        keys.push_back("sm_" + std::to_string(i));
+
+    Object a;
+    for (int i = 0; i < N; ++i)
+        a.insert(keys[static_cast<size_t>(i)], Json((int64_t)i));
+    Object b;
+    for (int i = N - 1; i >= 0; --i)
+        b.insert(keys[static_cast<size_t>(i)], Json((int64_t)i));
+    REQUIRE(a == b);
+    REQUIRE(b == a);
+
+    // Object(Vec) adoption never materialises an index (both sides stay
+    // unindexed): the linear fallback must still compare correctly.
+    Object::Vec v;
+    v.reserve(N);
+    for (int i = 0; i < N; ++i)
+        v.emplace_back(String{std::string_view(keys[static_cast<size_t>(i)])},
+                       Json((int64_t)i));
+    Object adopted(std::move(v));
+    REQUIRE(a == adopted);
+    REQUIRE(adopted == a);
+    REQUIRE(b == adopted);
+
+    // data() drops the index on a large object; both sides then sweep
+    // linearly and a raw-patched value is visible to the comparison.
+    std::vector<std::string> big_keys;
+    big_keys.reserve(64);
+    for (int i = 0; i < 64; ++i)
+        big_keys.push_back("big_" + std::to_string(i));
+    Object big1;
+    Object big2;
+    for (int i = 0; i < 64; ++i)
+    {
+        big1.insert(big_keys[static_cast<size_t>(i)], Json((int64_t)i));
+        big2.insert(big_keys[static_cast<size_t>(i)], Json((int64_t)i));
+    }
+    (void)big1.data();
+    (void)big2.data();
+    REQUIRE(big1 == big2);
+    big2.data()[5].second = Json((int64_t)-9);
+    REQUIRE(big1 != big2);
+}
+
+TEST_CASE("Array: contains element") {
+    // Contract pins: Array::contains is not noexcept (comparison can
+    // allocate), Object::contains stays noexcept (index lookup only).
+    static_assert(!noexcept(std::declval<const Array &>().contains(
+        std::declval<const Json &>())));
+    static_assert(noexcept(std::declval<const Object &>().contains(
+        std::declval<std::string_view>())));
+
+    Array empty;
+    REQUIRE(!empty.contains(Json((int64_t)1)));
+
+    Array scalars = Array::of(Json((int64_t)1), Json("two"), Json(true));
+    REQUIRE(scalars.contains(Json((int64_t)1)));
+    REQUIRE(scalars.contains(Json("two")));
+    REQUIRE(scalars.contains(Json(true)));
+    REQUIRE(!scalars.contains(Json((int64_t)2)));
+    REQUIRE(!scalars.contains(Json(false)));
+
+    // A nested Object with a different insertion order must still be found:
+    // Object::operator== is order-insensitive through Array::contains.
+    Object o1;
+    o1.insert("a", Json((int64_t)1));
+    o1.insert("b", Json((int64_t)2));
+    Array arr = Array::of(Json(std::move(o1)));
+
+    Object probe;
+    probe.insert("b", Json((int64_t)2));
+    probe.insert("a", Json((int64_t)1));
+    REQUIRE(arr.contains(Json(std::move(probe))));
+
+    Object miss;
+    miss.insert("a", Json((int64_t)1));
+    miss.insert("b", Json((int64_t)99));
+    REQUIRE(!arr.contains(Json(std::move(miss))));
+}
+
 TEST_CASE("Path: at_path success") {
     auto doc = parse_copy(R"({"a":{"b":[10,20,{"c":true}]}})");
     auto &root = doc.root();

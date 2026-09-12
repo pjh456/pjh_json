@@ -105,8 +105,9 @@ namespace pjh::json
     bool Array::empty() const noexcept { return m_data.empty(); }
     void Array::clear() noexcept { return m_data.clear(); }
 
-    // Linear search via std::find using Json operator==
-    bool Array::contains(const Json &val) const noexcept
+    // Linear search via std::find using Json operator==. Not noexcept:
+    // the comparison recurses into nested containers and may allocate.
+    bool Array::contains(const Json &val) const
     {
         return std::find(
                    m_data.begin(),

@@ -421,6 +421,9 @@ namespace pjh::json
          * @brief Compare by content (order-insensitive)
          * @param other Object to compare with
          * @return true if same size and all key-value pairs match
+         * @note Allocation-free: keys are located through the internal
+         *       lookup index / linear sweep, not a temporary sort buffer.
+         *       Duplicate keys resolve to their first occurrence.
          */
         [[nodiscard]] bool operator==(const Object &other) const;
     };
