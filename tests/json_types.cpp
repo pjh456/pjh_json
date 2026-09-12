@@ -25,11 +25,16 @@ namespace
 
         [[nodiscard]] long long outstanding() const noexcept { return m_outstanding; }
         [[nodiscard]] size_t last_bytes() const noexcept { return m_last_bytes; }
+        /// Monotonic count of do_allocate calls (unlike outstanding(), not
+        /// affected by later deallocations) — used to pin allocation counts
+        /// of a sequence of operations.
+        [[nodiscard]] long long allocations() const noexcept { return m_allocations; }
 
     protected:
         void *do_allocate(std::size_t n, std::size_t align) override
         {
             ++m_outstanding;
+            ++m_allocations;
             m_last_bytes = n;
             return m_up->allocate(n, align);
         }
@@ -46,6 +51,7 @@ namespace
     private:
         std::unique_ptr<std::pmr::memory_resource> m_up;
         long long m_outstanding = 0;
+        long long m_allocations = 0;
         size_t m_last_bytes = 0;
     };
 
@@ -943,6 +949,49 @@ TEST_CASE("Object: content equality small and unindexed") {
     REQUIRE(big1 == big2);
     big2.data()[5].second = Json((int64_t)-9);
     REQUIRE(big1 != big2);
+}
+
+TEST_CASE("Object: content equality large unindexed lazy index") {
+    // Both sides are parse-shaped: built on the counting resource through
+    // Object(Vec) adoption, so neither carries an index. The first
+    // comparison must materialise the probed side's index once (a mutable,
+    // amortised cache write); every later comparison of the pair must be
+    // allocation-free. Executable guard against the both-unindexed O(n^2)
+    // regression (R_48 F1): a revert to a pure linear sweep allocates
+    // nothing on the first compare, and a per-comparison allocation would
+    // keep growing the counter.
+    TestCountingResource cr;
+    constexpr int N = 64; // > kIndexThreshold
+    std::vector<std::string> keys;
+    keys.reserve(N);
+    for (int i = 0; i < N; ++i)
+        keys.push_back("lz_" + std::to_string(i));
+
+    Object::Vec va{&cr};
+    Object::Vec vb{&cr};
+    va.reserve(N);
+    vb.reserve(N);
+    for (int i = 0; i < N; ++i)
+        va.emplace_back(String{std::string_view(keys[static_cast<size_t>(i)])},
+                        Json((int64_t)i));
+    for (int i = N - 1; i >= 0; --i)
+        vb.emplace_back(String{std::string_view(keys[static_cast<size_t>(i)])},
+                        Json((int64_t)i));
+    Object a(std::move(va));
+    Object b(std::move(vb));
+
+    const long long before = cr.allocations();
+    REQUIRE(a == b); // lazily builds b's index (one amortised allocation)
+    REQUIRE(cr.allocations() > before);
+    const long long after_first = cr.allocations();
+    for (int i = 0; i < 200; ++i)
+    {
+        REQUIRE(a == b);
+        REQUIRE(b == a);
+    }
+    REQUIRE(cr.allocations() == after_first); // no per-comparison allocation
+    REQUIRE(a == b);
+    REQUIRE(b == a);
 }
 
 TEST_CASE("Array: contains element") {

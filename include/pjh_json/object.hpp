@@ -39,6 +39,12 @@ namespace pjh::json
      *       use insert(key, val, res) (owned, copied into res) or clone().
      * @note The key is read-only through the iterators; data() remains the
      *       raw advanced surface (its key side is still writable by design).
+     * @note The lookup index is a cache (`m_data` stays the order source).
+     *       It is materialised lazily by the write paths and also by the
+     *       first equality comparison of a large (> kIndexThreshold)
+     *       unindexed object, so a `const` comparison may allocate once on
+     *       that first use and is therefore not safe to run concurrently
+     *       with any other access to the same object.
      */
     class Object
     {
@@ -133,8 +139,10 @@ namespace pjh::json
          * Cache only: an absent (or dropped) index means lookups fall back
          * to the linear scan, so a stale index can only be slow, never
          * wrong. Only materialised above kIndexThreshold by the write
-         * paths; below it the linear sweep of a handful of short keys
-         * beats hashing. Defined out of line (incomplete here).
+         * paths or lazily by the first equality comparison of a large
+         * unindexed object; below the threshold the linear sweep of a
+         * handful of short keys beats hashing. Defined out of line
+         * (incomplete here).
          */
         struct Index;
 
@@ -153,7 +161,10 @@ namespace pjh::json
 
         Vec m_data;
         std::pmr::memory_resource *m_resource{nullptr};
-        Index *m_index{nullptr};
+        /// Mutable cache: a const equality comparison may materialise it on
+        /// first use (index_ensure), so this is not a const-correctness hole
+        /// but a deliberate lazily-populated read cache (see operator==).
+        mutable Index *m_index{nullptr};
 
         /// First entry position whose key equals `key`, or npos. Uses the
         /// index when present, else the linear scan; never allocates. With
@@ -162,9 +173,16 @@ namespace pjh::json
         /// not pay off.
         [[nodiscard]] size_t find_slot(std::string_view key,
                                        bool rebuild = true) const noexcept;
+        /// Build the index when absent and the entry count is above
+        /// kIndexThreshold; otherwise a no-op. May allocate, so it is not
+        /// noexcept; called from operator== (and so may run through a const
+        /// object, mutating the mutable cache).
+        void index_ensure() const;
         /// (Re)build the index over every current entry (first-wins). Drops
         /// any existing index first, so a throw leaves a valid null cache.
-        void index_build();
+        /// May allocate and mutate the mutable cache; const so lazy callers
+        /// (operator==) can use it.
+        void index_build() const;
         /// Refill an existing slot array from m_data (first-wins), clearing
         /// the stale flag; never allocates.
         void index_refill(Index &idx) const noexcept;
@@ -176,7 +194,7 @@ namespace pjh::json
         /// Store `pos` under its key; skips a key already present.
         void index_insert(Index &idx, size_t pos) const noexcept;
         /// Release the index (no-op when absent); safe to call any time.
-        void index_free() noexcept;
+        void index_free() const noexcept;
 
         friend class Json;
 
@@ -422,9 +440,21 @@ namespace pjh::json
          * @brief Compare by content (order-insensitive)
          * @param other Object to compare with
          * @return true if same size and all key-value pairs match
-         * @note Allocation-free: keys are located through the internal
-         *       lookup index / linear sweep, not a temporary sort buffer.
-         *       Duplicate keys resolve to their first occurrence.
+         * @note Not a per-comparison allocation: keys are located through
+         *       the internal lookup index / linear sweep, not a temporary
+         *       sort buffer. A large (> kIndexThreshold) unindexed object
+         *       materialises its lookup index on first use, so the *first*
+         *       comparison may allocate once (a mutable cache write even
+         *       through this const method); later comparisons are
+         *       allocation-free and O(n) expected.
+         * @warning Duplicate keys — constructible only through the
+         *          Object(Vec) adoption or the mutable data() escape, never
+         *          through parse/insert/operator[] — resolve to their first
+         *          occurrence. For such objects the result is deterministic
+         *          but may depend on the operand order: equality can be
+         *          asymmetric and can report a false positive, so it is not
+         *          a valid equivalence relation. Objects built by the public
+         *          write paths never carry duplicate keys and compare exactly.
          */
         [[nodiscard]] bool operator==(const Object &other) const;
     };

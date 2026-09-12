@@ -287,7 +287,18 @@ namespace pjh::json
             index_insert(idx, i);
     }
 
-    void Object::index_build()
+    void Object::index_ensure() const
+    {
+        // Lazy cache completion for read-only callers: never touch small
+        // objects (the bounded linear sweep beats hashing there) and never
+        // rebuild an index that already exists (even a stale one — the
+        // lookup path refills that in place). May throw bad_alloc; the
+        // caller (operator==) is not noexcept.
+        if (m_index == nullptr && m_data.size() > kIndexThreshold)
+            index_build();
+    }
+
+    void Object::index_build() const
     {
         // Drop the old index first: everything past this point may throw,
         // and a null cache is always a correct (linear) fallback.
@@ -357,7 +368,7 @@ namespace pjh::json
             m_index->stale = true;
     }
 
-    void Object::index_free() noexcept
+    void Object::index_free() const noexcept
     {
         if (m_index == nullptr)
             return;
@@ -528,26 +539,35 @@ namespace pjh::json
     }
 
     /*
-     * Content equality (order-insensitive), allocation-free.
+     * Content equality (order-insensitive), allocation-free per comparison
+     * once the lookup indices exist.
      *
      * 1. Fast reject on size mismatch.
-     * 2. For every entry of one side, find the same key on the other side
+     * 2. If neither side has an index and the (equal) size is above
+     *    kIndexThreshold, materialise the index on the side we probe
+     *    (other) through the mutable cache: one amortised O(n) build turns
+     *    the per-key linear sweep — O(n^2) overall — into O(1) probes.
+     *    Below the threshold it is a no-op and the bounded ≤256 short-key
+     *    sweep stays.
+     * 3. For every entry of one side, find the same key on the other side
      *    and compare values. find_slot never allocates and never throws; it
      *    is O(1) when the looked-up side has a materialised index, else a
      *    linear first-match sweep.
-     * 3. Always look *into* whichever side owns an index: iterating the
-     *    indexed side would pay a linear sweep per entry. Only when neither
-     *    side is indexed (n <= kIndexThreshold, or a parse/adopted object)
-     *    does the sweep run per key; below the threshold that is bounded.
+     * 4. Always look *into* whichever side owns an index: iterating the
+     *    indexed side would pay a linear sweep per entry.
      *
      * Duplicate keys (only an adopted Object(Vec) can carry them) resolve to
      * the first occurrence, making the result deterministic instead of the
-     * old std::sort's unspecified order.
+     * old std::sort's unspecified order — but, when the iterated side
+     * carries duplicates, potentially asymmetric (documented on the header).
      */
     bool Object::operator==(const Object &other) const
     {
         if (size() != other.size())
             return false;
+
+        if (m_index == nullptr && other.m_index == nullptr)
+            other.index_ensure();
 
         if (other.m_index != nullptr || m_index == nullptr)
         {
