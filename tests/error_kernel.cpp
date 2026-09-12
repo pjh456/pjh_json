@@ -11,6 +11,7 @@
 #include <pjh_json/error.hpp>
 
 #include <cstddef>
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <type_traits>
