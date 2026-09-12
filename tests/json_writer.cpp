@@ -536,3 +536,31 @@ TEST_CASE("Writer: dump_to(std::string&) strong guarantee") {
     }
 #endif
 }
+
+TEST_CASE("Writer: shell equivalence") {
+    // The throwing dump entry and the Result entry are two shells over the
+    // same dump_impl: what() must agree byte-for-byte on failure.
+#ifndef __FAST_MATH__
+    auto bad = Json(std::numeric_limits<double>::quiet_NaN());
+    bool threw = false;
+    std::string what;
+    try { (void)dump(bad); }
+    catch (const JsonError &e) { threw = true; what = e.what(); }
+    auto r = dump_result(bad);
+    REQUIRE(r.is_err());
+    REQUIRE(threw);
+    REQUIRE(std::string(r.unwrap_err().what()) == what);
+#endif
+
+    auto d = parse_copy("[[]]"); // parse at the default depth first
+    MaxDepthGuard guard;         // restores entering max_depth
+    Config::instance().set_max_depth(1);
+    bool threw2 = false;
+    std::string what2;
+    try { (void)dump(d.root()); }
+    catch (const JsonError &e) { threw2 = true; what2 = e.what(); }
+    auto r2 = dump_result(d.root());
+    REQUIRE(r2.is_err());
+    REQUIRE(threw2);
+    REQUIRE(std::string(r2.unwrap_err().what()) == what2);
+}

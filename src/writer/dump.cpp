@@ -243,19 +243,33 @@ namespace pjh::json
     }
 
     /*
-     * Serialize JSON value into a new pmr::string
-     *
-     * 1. Allocate sink string from the given resource.
-     * 2. Recursively write the value tree.
+     * Result primitive: serialise into a fresh pmr::string from @p res. On
+     * failure the owned JsonError is materialised here, while any borrowed
+     * detail (e.g. @p path) is still alive.
      */
-    std::pmr::string dump(const Json &value, const DumpOptions &opts,
-                          std::pmr::memory_resource *res)
+    static pjh::result::Result<std::pmr::string, JsonError>
+    dump_impl(const Json &value, const DumpOptions &opts,
+              std::pmr::memory_resource *res)
     {
         DumpState st;
         std::pmr::string sink(res);
         if (!dump_value_to(sink, value, opts, st))
-            throw JsonError(st.error);
-        return sink;
+            return pjh::result::Result<std::pmr::string, JsonError>::Err(
+                JsonError(st.error));
+        return pjh::result::Result<std::pmr::string, JsonError>::Ok(
+            std::move(sink));
+    }
+
+    /*
+     * Compatibility shell over dump_impl (the Result form is the primitive).
+     */
+    std::pmr::string dump(const Json &value, const DumpOptions &opts,
+                          std::pmr::memory_resource *res)
+    {
+        auto r = dump_impl(value, opts, res);
+        if (r.is_err())
+            throw std::move(r).unwrap_err();
+        return std::move(r).unwrap();
     }
 
     /*
@@ -268,22 +282,41 @@ namespace pjh::json
     }
 
     /*
+     * Write raw data to file (binary mode). false => st.error carries a
+     * FileWrite* code with @p path as borrowed detail; the caller must
+     * materialise it before @p path dies.
+     */
+    bool write_file_impl(std::string_view path, std::string_view data, DumpState &st)
+    {
+        std::ofstream file(std::string(path), std::ios::binary);
+        if (!file.is_open())
+        {
+            st.fail(ErrorCode::FileWriteOpenFailed, path);
+            return false;
+        }
+        file.write(data.data(), static_cast<std::streamsize>(data.size()));
+        if (!file)
+        {
+            st.fail(ErrorCode::FileWriteFailed, path);
+            return false;
+        }
+        file.close();
+        if (!file)
+        {
+            st.fail(ErrorCode::FileWriteCloseFailed, path);
+            return false;
+        }
+        return true;
+    }
+
+    /*
      * Write raw data to file (binary mode)
      */
     void write_file(std::string_view path, std::string_view data)
     {
-        std::ofstream file(std::string(path), std::ios::binary);
-        if (!file.is_open())
-            throw JsonError(Error{ErrorCode::FileWriteOpenFailed,
-                                  Category::Json, 0, false, path});
-        file.write(data.data(), static_cast<std::streamsize>(data.size()));
-        if (!file)
-            throw JsonError(Error{ErrorCode::FileWriteFailed,
-                                  Category::Json, 0, false, path});
-        file.close();
-        if (!file)
-            throw JsonError(Error{ErrorCode::FileWriteCloseFailed,
-                                  Category::Json, 0, false, path});
+        DumpState st;
+        if (!write_file_impl(path, data, st))
+            throw JsonError(st.error); // path detail alive in this frame
     }
 
     /*
@@ -292,10 +325,27 @@ namespace pjh::json
      * 1. Dump into a pmr::string.
      * 2. Write the serialized content to disk.
      */
+    static pjh::result::Result<std::pmr::string, JsonError>
+    dump_file_impl(std::string_view path, const Json &value, const DumpOptions &opts)
+    {
+        auto dr = dump_impl(value, opts, Config::instance().resource());
+        if (dr.is_err())
+            return std::move(dr);
+        std::pmr::string out = std::move(dr).unwrap();
+
+        DumpState st;
+        if (!write_file_impl(path, out, st))
+            return pjh::result::Result<std::pmr::string, JsonError>::Err(
+                JsonError(st.error));
+        return pjh::result::Result<std::pmr::string, JsonError>::Ok(std::move(out));
+    }
+
     void dump_file(std::string_view path, const Json &value, const DumpOptions &opts)
     {
-        std::pmr::string out = dump(value, opts);
-        write_file(path, out);
+        auto r = dump_file_impl(path, value, opts);
+        if (r.is_err())
+            throw std::move(r).unwrap_err();
+        (void)std::move(r).unwrap();
     }
 
     /*
@@ -309,51 +359,26 @@ namespace pjh::json
     }
 
     /*
-     * Structured-entry shells (task 16): thin catch-and-wrap over the
-     * throwing writer entries. Every writer throw site is the base JsonError
-     * (no more-derived class exists on this side), so the single-cell ladder
-     * is complete: catch by value into the Result channel, nothing to
-     * rethrow (non-JsonError exceptions such as std::bad_alloc escape).
+     * *_result entries are the primitive form: each forwards straight to its
+     * zero-throw *_impl, which materialises the owned JsonError in its own
+     * frame. No catch anywhere; std::bad_alloc escapes unconverted.
      */
 
     pjh::result::Result<std::pmr::string, JsonError> dump_result(
         const Json &value, const DumpOptions &opts, std::pmr::memory_resource *res)
     {
-        try
-        {
-            return pjh::result::Result<std::pmr::string, JsonError>::Ok(dump(value, opts, res));
-        }
-        catch (const JsonError &e)
-        {
-            return pjh::result::Result<std::pmr::string, JsonError>::Err(JsonError(e));
-        }
+        return dump_impl(value, opts, res);
     }
 
     pjh::result::Result<std::pmr::string, JsonError> dump_result(
         const Document &doc, const DumpOptions &opts, std::pmr::memory_resource *res)
     {
-        try
-        {
-            return pjh::result::Result<std::pmr::string, JsonError>::Ok(dump(doc, opts, res));
-        }
-        catch (const JsonError &e)
-        {
-            return pjh::result::Result<std::pmr::string, JsonError>::Err(JsonError(e));
-        }
+        return dump_impl(doc.root(), opts, res);
     }
 
     pjh::result::Result<std::pmr::string, JsonError> dump_file_result(
         std::string_view path, const Json &value, const DumpOptions &opts)
     {
-        try
-        {
-            std::pmr::string out = dump(value, opts);
-            write_file(path, out);
-            return pjh::result::Result<std::pmr::string, JsonError>::Ok(std::move(out));
-        }
-        catch (const JsonError &e)
-        {
-            return pjh::result::Result<std::pmr::string, JsonError>::Err(JsonError(e));
-        }
+        return dump_file_impl(path, value, opts);
     }
 }

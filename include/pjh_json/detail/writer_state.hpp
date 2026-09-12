@@ -49,6 +49,15 @@ namespace pjh::json
      */
     [[nodiscard]] bool write_escaped_impl(std::pmr::string &sink, std::string_view s,
                                           bool ascii, DumpState &st);
+
+    /*
+     * Raw file write kernel (was write_file's body). false => st.error set to
+     * a FileWrite* code with @p path as borrowed detail. The public
+     * write_file() shell materialises the error in the same frame, and
+     * dump_file_impl/dump_jsonl_file_impl materialise it before returning.
+     */
+    [[nodiscard]] bool write_file_impl(std::string_view path, std::string_view data,
+                                       DumpState &st);
 }
 
 #endif // INCLUDE_PJH_JSON_DETAIL_WRITER_STATE_HPP

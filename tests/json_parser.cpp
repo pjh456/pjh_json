@@ -1297,3 +1297,64 @@ TEST_CASE("Parser: kernel status") {
                 "Unexpected character at offset 5");
     }
 }
+
+TEST_CASE("Parser: shell equivalence") {
+    // The throwing entry and the Result entry are two shells over the same
+    // *_impl: for every input the error state, offset, category and what()
+    // must agree byte-for-byte.
+    auto check = [](std::string_view in) {
+        bool threw = false;
+        size_t off = 0;
+        Category cat = Category::Json;
+        std::string what;
+        try {
+            (void)parse_copy(in);
+        } catch (const ParseError &e) {
+            threw = true;
+            off = e.offset();
+            cat = e.category();
+            what = e.what();
+        }
+        auto r = parse_copy_result(in);
+        REQUIRE(r.is_err() == threw);
+        if (threw) {
+            ParseError got = r.unwrap_err();
+            REQUIRE(got.offset() == off);
+            REQUIRE(got.category() == cat);
+            REQUIRE(std::string(got.what()) == what);
+        } else {
+            REQUIRE(r.is_ok());
+        }
+    };
+    check(R"({"a":1,"b":[true,null]})");
+    check("{");
+    check("[1,2");
+    check("1e400");
+    check("\"abc");
+    check("trueX");
+    check("");
+}
+
+TEST_CASE("Parser: result duplicate-key detail lifetime") {
+    ConfigGuard guard; // save/restore strict_duplicate_keys
+    Config::instance().set_strict_duplicate_keys(true);
+
+    // The borrowed key detail must be copied into the owned what() BEFORE the
+    // impl-local parse buffer dies (ASan pins the UAF if materialised late).
+    const char *in = R"({"a":1,"a":2})";
+    auto r = parse_copy_result(in);
+    REQUIRE(r.is_err());
+    ParseError e = r.unwrap_err();
+    REQUIRE(std::string(e.what()) == "Duplicate key \"a\" in object");
+    REQUIRE(e.offset() == 0);
+    REQUIRE(e.category() == Category::Parse);
+
+    bool threw = false;
+    try { (void)parse_copy(in); }
+    catch (const ParseError &t) {
+        threw = true;
+        REQUIRE(std::string(t.what()) == std::string(e.what()));
+        REQUIRE(t.offset() == e.offset());
+    }
+    REQUIRE(threw);
+}

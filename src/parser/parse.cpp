@@ -61,11 +61,22 @@ namespace pjh::json
             return arena ? arena.get() : std::pmr::new_delete_resource();
         }
 
-        // n + kPaddingWidth must not wrap size_t (pathological ~16 EB inputs).
-        void check_padded_fits(size_t n)
+        // size_t overflow gate for n + kPaddingWidth (was check_padded_fits,
+        // which threw; the impls record the kernel ErrorCode instead).
+        [[nodiscard]] bool padded_fits(size_t n) noexcept
         {
-            if (n > SIZE_MAX - kPaddingWidth)
-                throw ParseError("Input too large to pad");
+            return n <= SIZE_MAX - kPaddingWidth;
+        }
+
+        // Materialise a kernel failure as the owned public exception WHILE any
+        // borrowed detail is still alive. Called from the *_impl bodies only
+        // (never from the public shells): a duplicate-key detail points into a
+        // local parse buffer that dies at the impl's return, so the string
+        // copy must happen before that.
+        [[nodiscard]] pjh::result::Result<Document, ParseError>
+        parse_error(const Error &e)
+        {
+            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
         }
 
         // The UTF-8 BOM — the only BOM this library recognizes. Checked
@@ -150,10 +161,12 @@ namespace pjh::json
      * The parsed tree borrows strings from the buffer, which stays alive
      * inside the Document.
      */
-    Document parse_in_situ(std::pmr::string &&buffer, Storage storage)
+    static pjh::result::Result<Document, ParseError>
+    parse_in_situ_impl(std::pmr::string &&buffer, Storage storage)
     {
         if (buffer.size() < kPaddingWidth)
-            throw ParseError("Buffer too small for in-situ parse");
+            return parse_error(Error{ErrorCode::BufferTooSmall,
+                                     Category::Parse, 0, false, {}});
 
         // The contract (document.hpp) requires the trailing kPaddingWidth
         // bytes to be NUL. They are inside the buffer, hence readable:
@@ -164,7 +177,8 @@ namespace pjh::json
         for (size_t i = 0; i < kPaddingWidth; ++i)
         {
             if (pad[i] != '\0')
-                throw ParseError("In-situ buffer padding must be NUL bytes");
+                return parse_error(Error{ErrorCode::InSituPaddingNotNul,
+                                         Category::Parse, 0, false, {}});
         }
 
         size_t size = buffer.size() - kPaddingWidth;
@@ -172,9 +186,26 @@ namespace pjh::json
         auto arena = Document::make_arena(storage, block, false);
         Parser p(std::string_view(buffer.data(), size), arena_res(arena), true,
                 Config::instance().strip_bom(), Config::instance().strict_utf8());
-        Json root = p.parse();
-        return Document(std::move(arena), std::move(root), std::move(buffer),
-                        false, storage, block);
+        Json root;
+        if (!p.parse(root))
+            return parse_error(p.error()); // buffer alive -> borrowed detail safe
+
+        return pjh::result::Result<Document, ParseError>::Ok(
+            Document(std::move(arena), std::move(root), std::move(buffer),
+                     false, storage, block));
+    }
+
+    /*
+     * Compatibility shell: the Result form is the primitive; this entry
+     * materialises the owned ParseError (already done inside the impl) and
+     * throws it, or returns the Document.
+     */
+    Document parse_in_situ(std::pmr::string &&buffer, Storage storage)
+    {
+        auto r = parse_in_situ_impl(std::move(buffer), storage);
+        if (r.is_err())
+            throw std::move(r).unwrap_err();
+        return std::move(r).unwrap();
     }
 
     /*
@@ -186,13 +217,16 @@ namespace pjh::json
      * 4. Parse from the padded buffer.
      * 5. Return Document owning arena, tree, and buffer copy.
      */
-    Document parse_copy(std::string_view json, Storage storage)
+    static pjh::result::Result<Document, ParseError>
+    parse_copy_impl(std::string_view json, Storage storage)
     {
         size_t block = arena_block_for(json.size());
         auto arena = Document::make_arena(storage, block, false);
         std::pmr::memory_resource *res = arena_res(arena);
 
-        check_padded_fits(json.size());
+        if (!padded_fits(json.size()))
+            return parse_error(Error{ErrorCode::InputTooLarge,
+                                     Category::Parse, 0, false, {}});
 
         std::pmr::string buffer(res);
         buffer.resize(json.size() + kPaddingWidth, '\0');
@@ -203,9 +237,21 @@ namespace pjh::json
 
         Parser p(std::string_view(buffer.data(), json.size()), res, true,
                 Config::instance().strip_bom(), Config::instance().strict_utf8());
-        Json root = p.parse();
-        return Document(std::move(arena), std::move(root), std::move(buffer),
-                        false, storage, block);
+        Json root;
+        if (!p.parse(root))
+            return parse_error(p.error());
+
+        return pjh::result::Result<Document, ParseError>::Ok(
+            Document(std::move(arena), std::move(root), std::move(buffer),
+                     false, storage, block));
+    }
+
+    Document parse_copy(std::string_view json, Storage storage)
+    {
+        auto r = parse_copy_impl(json, storage);
+        if (r.is_err())
+            throw std::move(r).unwrap_err();
+        return std::move(r).unwrap();
     }
 
     /*
@@ -217,15 +263,28 @@ namespace pjh::json
      *
      * Caller must keep data alive for the Document's lifetime.
      */
-    Document parse_view(const char *data, size_t content_len, Storage storage)
+    static pjh::result::Result<Document, ParseError>
+    parse_view_impl(const char *data, size_t content_len, Storage storage)
     {
         size_t block = arena_block_for(content_len);
         auto arena = Document::make_arena(storage, block, false);
         Parser p(std::string_view(data, content_len), arena_res(arena), true,
                 Config::instance().strip_bom(), Config::instance().strict_utf8());
-        Json root = p.parse();
-        return Document(std::move(arena), std::move(root), std::pmr::string{},
-                        true, storage, block);
+        Json root;
+        if (!p.parse(root))
+            return parse_error(p.error());
+
+        return pjh::result::Result<Document, ParseError>::Ok(
+            Document(std::move(arena), std::move(root), std::pmr::string{},
+                     true, storage, block));
+    }
+
+    Document parse_view(const char *data, size_t content_len, Storage storage)
+    {
+        auto r = parse_view_impl(data, content_len, storage);
+        if (r.is_err())
+            throw std::move(r).unwrap_err();
+        return std::move(r).unwrap();
     }
 
     /*
@@ -239,14 +298,17 @@ namespace pjh::json
      *    d. Parse the line as a JSON value and append to an Array.
      * 3. Return Document containing the Array root.
      */
-    Document parse_jsonl(std::string_view input, Storage storage)
+    static pjh::result::Result<Document, ParseError>
+    parse_jsonl_impl(std::string_view input, Storage storage)
     {
         size_t block = arena_block_for(input.size());
         auto arena = Document::make_arena(storage, block, false);
         std::pmr::memory_resource *res = arena_res(arena);
 
         // single padded buffer owned by Document; each line borrows into it
-        check_padded_fits(input.size());
+        if (!padded_fits(input.size()))
+            return parse_error(Error{ErrorCode::InputTooLarge,
+                                     Category::Parse, 0, false, {}});
 
         std::pmr::string buffer(res);
         buffer.resize(input.size() + kPaddingWidth, '\0');
@@ -305,14 +367,26 @@ namespace pjh::json
                 // = line base).
                 Parser p(std::string_view(base + i, len), res, true, false,
                         Config::instance().strict_utf8());
-                arr.push_back(p.parse());
+                Json v;
+                if (!p.parse(v))
+                    return parse_error(p.error());
+                arr.push_back(std::move(v));
             }
 
             i = (nl < n) ? nl + 1 : n;
         }
 
-        return Document(std::move(arena), Json(std::move(arr)), std::move(buffer),
-                        false, storage, block);
+        return pjh::result::Result<Document, ParseError>::Ok(
+            Document(std::move(arena), Json(std::move(arr)), std::move(buffer),
+                     false, storage, block));
+    }
+
+    Document parse_jsonl(std::string_view input, Storage storage)
+    {
+        auto r = parse_jsonl_impl(input, storage);
+        if (r.is_err())
+            throw std::move(r).unwrap_err();
+        return std::move(r).unwrap();
     }
 
     /*
@@ -323,27 +397,41 @@ namespace pjh::json
      * 3. Read the entire file into the buffer.
      * 4. Delegate to parse_in_situ for parsing.
      */
-    Document parse_file(std::string_view filepath, Storage storage)
+    static pjh::result::Result<Document, ParseError>
+    parse_file_impl(std::string_view filepath, Storage storage)
     {
         std::string path(filepath);
         std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (!file.is_open())
-            throw ParseError("Failed to open file: " + path);
+            return parse_error(Error{ErrorCode::FileOpenFailed,
+                                     Category::Parse, 0, false, filepath});
 
         std::streamsize size = file.tellg();
         if (size < 0)
-            throw ParseError("Failed to get file size: " + path);
+            return parse_error(Error{ErrorCode::FileSizeFailed,
+                                     Category::Parse, 0, false, filepath});
         file.seekg(0, std::ios::beg);
 
-        check_padded_fits(static_cast<size_t>(size));
+        if (!padded_fits(static_cast<size_t>(size)))
+            return parse_error(Error{ErrorCode::InputTooLarge,
+                                     Category::Parse, 0, false, {}});
 
-        std::pmr::string buffer;
+        std::pmr::string buffer; // same default-resource buffer as before 79.4
         buffer.resize(size + kPaddingWidth, '\0');
 
         if (!file.read(buffer.data(), size))
-            throw ParseError("Failed to read file: " + path);
+            return parse_error(Error{ErrorCode::FileReadFailed,
+                                     Category::Parse, 0, false, filepath});
 
-        return parse_in_situ(std::move(buffer), storage);
+        return parse_in_situ_impl(std::move(buffer), storage);
+    }
+
+    Document parse_file(std::string_view filepath, Storage storage)
+    {
+        auto r = parse_file_impl(filepath, storage);
+        if (r.is_err())
+            throw std::move(r).unwrap_err();
+        return std::move(r).unwrap();
     }
 
     /*
@@ -364,10 +452,12 @@ namespace pjh::json
      *    failures; allocation failures propagate std::bad_alloc
      *    unconverted (plan 14 ruling).
      */
-    Document parse_from_istream(std::istream &in, Storage storage)
+    static pjh::result::Result<Document, ParseError>
+    parse_from_istream_impl(std::istream &in, Storage storage)
     {
         if (in.bad())
-            throw ParseError("Failed to read stream");
+            return parse_error(Error{ErrorCode::StreamReadFailed,
+                                     Category::Parse, 0, false, {}});
 
         std::pmr::string buffer;
         char chunk[kStreamChunk];
@@ -378,18 +468,28 @@ namespace pjh::json
             if (got > 0)
                 buffer.append(chunk, static_cast<size_t>(got));
             if (got == 0)
-                break;              // 0-byte read: end of stream, not an error
+                break; // 0-byte read: end of stream, not an error
             if (in.bad())
-                throw ParseError("Failed to read stream");
+                return parse_error(Error{ErrorCode::StreamReadFailed,
+                                         Category::Parse, 0, false, {}});
             if (in.fail())
-                break;              // clean end-of-stream mid-chunk
+                break; // clean end-of-stream mid-chunk
         }
 
-        check_padded_fits(buffer.size());
+        if (!padded_fits(buffer.size()))
+            return parse_error(Error{ErrorCode::InputTooLarge,
+                                     Category::Parse, 0, false, {}});
 
         buffer.resize(buffer.size() + kPaddingWidth, '\0');
+        return parse_in_situ_impl(std::move(buffer), storage);
+    }
 
-        return parse_in_situ(std::move(buffer), storage);
+    Document parse_from_istream(std::istream &in, Storage storage)
+    {
+        auto r = parse_from_istream_impl(in, storage);
+        if (r.is_err())
+            throw std::move(r).unwrap_err();
+        return std::move(r).unwrap();
     }
 
     /*
@@ -404,110 +504,40 @@ namespace pjh::json
     }
 
     /*
-     * Structured-entry shells (task 16): thin catch-and-wrap over the
-     * throwing entries. Ladder: ParseError -> stored by value (offset and
-     * category survive the copy — no slicing, E is pinned to the most
-     * derived class the core can throw); JsonError base -> rethrown (not a
-     * parse-core contract class today; keeping the cell is the safety rail
-     * against a future core introducing one — never stored, never swallowed).
+     * *_result entries are the primitive form: each forwards straight to its
+     * zero-throw *_impl, which materialises the owned ParseError in its own
+     * frame (while any borrowed detail is still alive). No catch anywhere;
      * std::bad_alloc and other non-JsonError exceptions escape unconverted.
      */
 
     pjh::result::Result<Document, ParseError> parse_in_situ_result(std::pmr::string &&buffer, Storage storage)
     {
-        try
-        {
-            return pjh::result::Result<Document, ParseError>::Ok(parse_in_situ(std::move(buffer), storage));
-        }
-        catch (const ParseError &e)
-        {
-            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
-        }
-        catch (const JsonError &)
-        {
-            throw;
-        }
+        return parse_in_situ_impl(std::move(buffer), storage);
     }
 
     pjh::result::Result<Document, ParseError> parse_copy_result(std::string_view json, Storage storage)
     {
-        try
-        {
-            return pjh::result::Result<Document, ParseError>::Ok(parse_copy(json, storage));
-        }
-        catch (const ParseError &e)
-        {
-            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
-        }
-        catch (const JsonError &)
-        {
-            throw;
-        }
+        return parse_copy_impl(json, storage);
     }
 
     pjh::result::Result<Document, ParseError> parse_view_result(const char *data, size_t content_len, Storage storage)
     {
-        try
-        {
-            return pjh::result::Result<Document, ParseError>::Ok(parse_view(data, content_len, storage));
-        }
-        catch (const ParseError &e)
-        {
-            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
-        }
-        catch (const JsonError &)
-        {
-            throw;
-        }
+        return parse_view_impl(data, content_len, storage);
     }
 
     pjh::result::Result<Document, ParseError> parse_jsonl_result(std::string_view input, Storage storage)
     {
-        try
-        {
-            return pjh::result::Result<Document, ParseError>::Ok(parse_jsonl(input, storage));
-        }
-        catch (const ParseError &e)
-        {
-            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
-        }
-        catch (const JsonError &)
-        {
-            throw;
-        }
+        return parse_jsonl_impl(input, storage);
     }
 
     pjh::result::Result<Document, ParseError> parse_file_result(std::string_view filepath, Storage storage)
     {
-        try
-        {
-            return pjh::result::Result<Document, ParseError>::Ok(parse_file(filepath, storage));
-        }
-        catch (const ParseError &e)
-        {
-            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
-        }
-        catch (const JsonError &)
-        {
-            throw;
-        }
+        return parse_file_impl(filepath, storage);
     }
 
     pjh::result::Result<Document, ParseError>
     parse_from_istream_result(std::istream &in, Storage storage)
     {
-        try
-        {
-            return pjh::result::Result<Document, ParseError>::Ok(
-                parse_from_istream(in, storage));
-        }
-        catch (const ParseError &e)
-        {
-            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
-        }
-        catch (const JsonError &)
-        {
-            throw;
-        }
+        return parse_from_istream_impl(in, storage);
     }
 }
