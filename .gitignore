@@ -1,7 +1,20 @@
 .vscode
 .vs
 build
-*.json
+build-*/
+# Benchmark data (roadmap 67) defaults to <build>/benchmarks/data, covered by the
+# build rules above. The eight root-level names are kept only as a legacy /
+# PJH_JSON_BENCH_DATA_DIR-override safety net; they mirror benchmark_test.cpp's
+# sizes table and benchmarks/CMakeLists.txt's legacy cleanup list. Every other
+# *.json (fixtures, etc.) must stay trackable.
+/1mb.json
+/10mb.json
+/30mb.json
+/50mb.json
+/100mb.json
+/200mb.json
+/500mb.json
+/1gb.json
 # libFuzzer crash/leak/timeout artifacts (default written to CWD by hand runs)
 fuzz/crash-*
 fuzz/leak-*
