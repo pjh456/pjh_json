@@ -403,7 +403,13 @@ namespace pjh::json
             if constexpr (sizeof...(Ts) == 0)
                 return ConstJsonArray<>{std::tuple<>()};
             else
-                return ConstJsonArray<decltype(to_const_json(std::forward<Ts>(args)))...>{
+                // decay_t: a container argument forwards as an rvalue reference
+                // from the to_const_json identity overload (T&&), so the
+                // deduced element type would otherwise become
+                // ConstJsonArray<...>&& and disagree with the decayed tuple
+                // std::make_tuple stores.
+                return ConstJsonArray<
+                    std::decay_t<decltype(to_const_json(std::forward<Ts>(args)))>...>{
                     std::make_tuple(to_const_json(std::forward<Ts>(args))...)};
         }
 

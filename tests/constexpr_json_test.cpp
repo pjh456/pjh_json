@@ -164,4 +164,15 @@ TEST_CASE("ConstJson: compile-time access") {
     static_assert(as_int(get<0>(get<1>(root).value)) == 1);
     static_assert(as_int(get<2>(get<1>(root).value)) == 3);
     static_assert(as_int(front(get<1>(root).value)) == 1);
+
+    // ---- direct nested-array elements: regression for decay of the value type ----
+    // A container argument reaches to_const_json's identity overload as an rvalue
+    // reference; the array factory must decay it or the declared element type
+    // (ConstJsonArray<...>&&) disagrees with the tuple std::make_tuple stores.
+    constexpr auto jagg = ConstJson::of(ConstJson::of(1, 2), ConstJson::of(3));
+    static_assert(is_array(jagg) && jagg.size() == 2);
+    static_assert(is_array(get<0>(jagg)) && get<0>(jagg).size() == 2);
+    static_assert(as_int(get<0>(get<0>(jagg))) == 1);
+    static_assert(as_int(get<1>(get<0>(jagg))) == 2);
+    static_assert(as_int(front(get<1>(jagg))) == 3);
 }
