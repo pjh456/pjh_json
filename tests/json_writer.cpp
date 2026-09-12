@@ -178,7 +178,8 @@ TEST_CASE("Writer: prettify") {
     REQUIRE(sv(out) == expected);
 }
 
-TEST_CASE("Writer: JSONL") {
+TEST_CASE("Writer: jsonl")
+{
     std::string_view input =
         "{\"id\":1,\"msg\":\"hi\"}\n"
         "{\"id\":2,\"msg\":\"line\\ntwo\"}\n"
@@ -201,7 +202,8 @@ TEST_CASE("Writer: JSONL") {
     REQUIRE(sv(out) == expected);
 }
 
-TEST_CASE("Writer: dump ascii") {
+TEST_CASE("Writer: dump ASCII")
+{
     auto d = parse_copy("\"caf\xC3\xA9 \xF0\x9F\x98\x80\"");
     auto out = dump(d.root(), DumpOptions{.ascii = true});
     REQUIRE(sv(out) == R"("caf\u00e9 \ud83d\ude00")");
@@ -423,7 +425,8 @@ TEST_CASE("Writer: jsonl file result entry") {
     REQUIRE(dynamic_cast<const JsonError *>(&e) != nullptr);
 }
 
-TEST_CASE("Writer: utf-8 pass-through and ascii validation") {
+TEST_CASE("Writer: UTF-8 pass-through and ASCII validation")
+{
     // json_writer.cpp has no shared ConfigGuard TU: local RAII guard, same
     // obligation as json_parser.cpp's (doctest has no teardown)
     struct StrictUtf8Guard

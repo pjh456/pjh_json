@@ -401,7 +401,7 @@ TEST_CASE("Json5: VT/FF ASCII whitespace")
     REQUIRE(parse_copy("true" + vt()).root().as_boolean() == true);
 }
 
-TEST_CASE("Json5: jsonl blank-line and line-bounded trivia (R1)")
+TEST_CASE("Json5: jsonl blank-line and line-bounded trivia")
 {
     Json5ConfigGuard guard;
     Config &cfg = Config::instance();

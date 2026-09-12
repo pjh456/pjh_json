@@ -1049,7 +1049,8 @@ TEST_CASE("Parser: jsonl BOM line-1 only") {
     }
 }
 
-TEST_CASE("Parser: invalid utf-8 accepted by default") {
+TEST_CASE("Parser: invalid UTF-8 accepted by default")
+{
     // Default-OFF contract pin (task 24): string content is a byte
     // mirror — ill-formed UTF-8 is accepted and round-trips
     // byte-identical. This case has NO guard: it must stay green
@@ -1086,7 +1087,8 @@ TEST_CASE("Parser: invalid utf-8 accepted by default") {
     }
 }
 
-TEST_CASE("Parser: strict utf-8 rejects malformed bytes") {
+TEST_CASE("Parser: strict UTF-8 rejects malformed bytes")
+{
     ConfigGuard guard; // first: save the entering state before any mutation
 
     // Phase A — default (strict OFF): every sample passes, byte-identical
@@ -1201,7 +1203,8 @@ TEST_CASE("Parser: strict utf-8 rejects malformed bytes") {
     REQUIRE(del.root().as_string() == std::string_view("a\x7F", 2));
 }
 
-TEST_CASE("Parser: strict utf-8 jsonl line offset") {
+TEST_CASE("Parser: strict UTF-8 jsonl line offset")
+{
     ConfigGuard guard; // first: save the entering state before any mutation
     Config::instance().set_strict_utf8(true);
 
@@ -1227,7 +1230,8 @@ TEST_CASE("Parser: strict utf-8 jsonl line offset") {
     REQUIRE(d.root().size() == 2);
 }
 
-TEST_CASE("Parser: strict utf-8 bom boundary") {
+TEST_CASE("Parser: strict UTF-8 BOM boundary")
+{
     ConfigGuard guard; // first: save the entering state before any mutation
     Config::instance().set_strip_bom(false);
     Config::instance().set_strict_utf8(true);

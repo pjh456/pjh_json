@@ -731,7 +731,7 @@ namespace
 // ---------------------------------------------------------------------------
 // A. parse_copy, default knobs
 // ---------------------------------------------------------------------------
-TEST_CASE("Differential errors: parse_copy default knobs, both channels")
+TEST_CASE("DifferentialErrors: parse_copy default knobs, both channels")
 {
     GoldenConfigGuard guard;
     for (const golden_row &r : kAllRows)
@@ -748,7 +748,7 @@ TEST_CASE("Differential errors: parse_copy default knobs, both channels")
 // ---------------------------------------------------------------------------
 // B. parse_copy with Config knobs (BOM / duplicate key / depth / strict UTF-8)
 // ---------------------------------------------------------------------------
-TEST_CASE("Differential errors: parse_copy with config knobs, both channels")
+TEST_CASE("DifferentialErrors: parse_copy with config knobs, both channels")
 {
     GoldenConfigGuard guard;
     for (const golden_row &r : kAllRows)
@@ -769,7 +769,7 @@ TEST_CASE("Differential errors: parse_copy with config knobs, both channels")
 // ---------------------------------------------------------------------------
 // C. Context-free parse entries (bespoke: distinct entry + resource shapes)
 // ---------------------------------------------------------------------------
-TEST_CASE("Differential errors: context-free parse entries")
+TEST_CASE("DifferentialErrors: context-free parse entries")
 {
     GoldenConfigGuard guard;
     set_parse_defaults();
@@ -906,7 +906,7 @@ TEST_CASE("Differential errors: context-free parse entries")
 // ---------------------------------------------------------------------------
 // D. jsonl (line-relative offsets)
 // ---------------------------------------------------------------------------
-TEST_CASE("Differential errors: jsonl line-relative offsets, both channels")
+TEST_CASE("DifferentialErrors: jsonl line-relative offsets, both channels")
 {
     GoldenConfigGuard guard;
     for (const golden_row &r : kAllRows)
@@ -927,7 +927,7 @@ TEST_CASE("Differential errors: jsonl line-relative offsets, both channels")
 // ---------------------------------------------------------------------------
 // E. Writer entries (Category::Json, no offset; bespoke typed drivers)
 // ---------------------------------------------------------------------------
-TEST_CASE("Differential errors: writer entries, both channels")
+TEST_CASE("DifferentialErrors: writer entries, both channels")
 {
     GoldenConfigGuard guard;
     set_parse_defaults();
@@ -1039,7 +1039,7 @@ TEST_CASE("Differential errors: writer entries, both channels")
 // Vocabulary coverage: every reachable ErrorCode has a golden row; the
 // defensive sites (no public deterministic trigger) are allowlisted.
 // ---------------------------------------------------------------------------
-TEST_CASE("Differential errors: every reachable ErrorCode has a golden row")
+TEST_CASE("DifferentialErrors: every reachable ErrorCode has a golden row")
 {
     // census §B: unreachable through the public API without changing code.
     constexpr ErrorCode kDefensive[] = {
