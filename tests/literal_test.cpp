@@ -79,6 +79,15 @@ TEST_CASE("Literal: constexpr string") {
 
     constexpr String s2 = std::string_view("world");
     REQUIRE(s1 != s2);
+
+    // Moved-from is a compile-time null view (not just a runtime contract).
+    static_assert([] {
+        String a = "hi";
+        String b(std::move(a));
+        return static_cast<std::string_view>(a).empty() &&
+               static_cast<std::string_view>(a).data() == nullptr &&
+               static_cast<std::string_view>(b) == std::string_view("hi");
+    }());
 }
 
 TEST_CASE("Literal: magic constants") {

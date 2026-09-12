@@ -1030,6 +1030,82 @@ TEST_CASE("String: release hands off ownership") {
     REQUIRE(cr.outstanding() == 0);
 }
 
+TEST_CASE("String: moved-from is a null view") {
+    const std::string src(48, 'm'); // > SSO
+    // (a) move-ctor <- View: source is zeroed, target content unchanged
+    {
+        String v{std::string_view(src)};
+        String w(std::move(v));
+        REQUIRE(!w.is_owned());
+        REQUIRE(static_cast<std::string_view>(v).empty());
+        REQUIRE(static_cast<std::string_view>(v).data() == nullptr);
+        REQUIRE(static_cast<std::string_view>(w) == std::string_view(src));
+    }
+    // (b) move-ctor <- Owned: source is zeroed, target still owned
+    {
+        String o{std::string_view(src)};
+        o.own(std::pmr::new_delete_resource());
+        String w(std::move(o));
+        REQUIRE(w.is_owned());
+        REQUIRE(static_cast<std::string_view>(o).empty());
+        REQUIRE(static_cast<std::string_view>(o).data() == nullptr);
+        REQUIRE(static_cast<std::string_view>(w) == std::string_view(src));
+    }
+    // (c) move-assign <- Owned into empty: placement-new rebuild
+    {
+        String o{std::string_view(src)};
+        o.own(std::pmr::new_delete_resource());
+        String d;
+        d = std::move(o);
+        REQUIRE(d.is_owned());
+        REQUIRE(static_cast<std::string_view>(o).empty());
+        REQUIRE(static_cast<std::string_view>(o).data() == nullptr);
+        REQUIRE(static_cast<std::string_view>(d) == std::string_view(src));
+    }
+    // (d) move-assign <- Owned into Owned: old target header must be freed
+    {
+        TestCountingResource cr;
+        {
+            String a{std::string_view(src)};
+            a.own(&cr);
+            String b{std::string_view(src)};
+            b.own(&cr);
+            // Two owned strings: header + buffer each (+ MSVC proxy per container).
+            REQUIRE(cr.outstanding() == 4 + 2 * kContainerOverhead);
+            b = std::move(a);
+            REQUIRE(static_cast<std::string_view>(b) == std::string_view(src));
+            REQUIRE(static_cast<std::string_view>(a).empty());
+            REQUIRE(static_cast<std::string_view>(a).data() == nullptr);
+            // Old b reclaimed; only b's new content remains.
+            REQUIRE(cr.outstanding() == 2 + kContainerOverhead);
+        }
+        REQUIRE(cr.outstanding() == 0);
+    }
+}
+
+TEST_CASE("String: release leaves a null view") {
+    TestCountingResource cr;
+    const std::string src(48, 'r');
+    String s{std::string_view(src)};
+    s.own(&cr);
+    std::pmr::string *p = s.release();
+    REQUIRE(p != nullptr);
+    REQUIRE(!s.is_owned());
+    REQUIRE(static_cast<std::string_view>(s).empty());            // pre-fix: false
+    REQUIRE(static_cast<std::string_view>(s).data() == nullptr); // pre-fix: non-null
+    String::destroy_owned(p);
+    REQUIRE(cr.outstanding() == 0);
+    // Pre-fix: s still held {freed header, 48}, so own() copied from freed
+    // memory (ASan UAF) and .empty() was false.
+    s.own(&cr);
+    REQUIRE(s.is_owned());
+    REQUIRE(static_cast<std::string_view>(s).empty());
+    // Borrowed release() stays a no-op: returns nullptr, content preserved.
+    String v{std::string_view(src)};
+    REQUIRE(v.release() == nullptr);
+    REQUIRE(static_cast<std::string_view>(v) == std::string_view(src));
+}
+
 TEST_CASE("Json: clone allocates header through resource") {
     TestCountingResource cr;
     static const char kCloneSrc[] = "clone-source-long-enough-to-exceed-sso-capacity";

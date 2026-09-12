@@ -5,6 +5,7 @@
 #include <string_view>
 #include <memory>
 #include <memory_resource>
+#include <new>
 #include <string>
 #include <type_traits>
 
@@ -185,7 +186,8 @@ namespace pjh::json
 
         /**
          * @brief Move construct (steals active member, marks source empty)
-         * @param other Source (left as empty view)
+         * @param other Source (left as an empty view: as_string_view().data()
+         *        == nullptr, whether it was View or Owned)
          */
         constexpr String(String &&other) noexcept : m_storage(other.m_storage)
         {
@@ -194,11 +196,13 @@ namespace pjh::json
             else
                 view_data = other.view_data;
             other.m_storage = Storage::View;
+            other.view_data = ViewData{nullptr, 0};
         }
 
         /**
-         * @brief Move assign (destroys old value, steals from source)
-         * @param other Source (left as empty view)
+         * @brief Move assign (destroys old value, rebuilds from source)
+         * @param other Source (left as an empty view: as_string_view().data()
+         *        == nullptr, whether it was View or Owned)
          * @return *this
          */
         String &operator=(String &&other) noexcept
@@ -206,12 +210,7 @@ namespace pjh::json
             if (this != &other)
             {
                 this->~String();
-                m_storage = other.m_storage;
-                if (other.m_storage == Storage::Owned)
-                    heap_ptr = other.heap_ptr;
-                else
-                    view_data = other.view_data;
-                other.m_storage = Storage::View;
+                ::new (static_cast<void *>(this)) String(std::move(other));
             }
             return *this;
         }
@@ -265,13 +264,15 @@ namespace pjh::json
         /**
          * @brief Release ownership of the internal pmr::string.
          *
-         * After this call, the String becomes an empty view. The caller
-         * takes ownership of the returned pointer and must free it with
+         * After this call, the String becomes an empty view
+         * (`as_string_view().data() == nullptr`). The caller takes ownership
+         * of the returned pointer and must free it with
          * String::destroy_owned(p) — NOT `delete`: the header was allocated
          * through a memory resource, and destroy_owned recovers that resource
          * from the string's own allocator.
          *
-         * @return Pointer to owned pmr::string, or nullptr if was borrowed.
+         * @return Pointer to owned pmr::string, or nullptr if was borrowed
+         *         (in which case the borrowed content is left untouched).
          */
         [[nodiscard]] constexpr std::pmr::string *release() noexcept
         {
@@ -279,6 +280,7 @@ namespace pjh::json
             {
                 auto *p = heap_ptr;
                 m_storage = Storage::View;
+                view_data = ViewData{nullptr, 0};
                 return p;
             }
             return nullptr;
