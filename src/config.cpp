@@ -98,8 +98,15 @@ namespace pjh::json
      * Release global document (must hold m_mutex).
      * Invalidate the fast-path cache before tearing the arena down: reset()
      * rebuilds the resource, so a stale cache would outlive the old object.
-     * Readers seeing null fall back to the locked path and block until the
-     * fresh resource is in place.
+     *
+     * The store(nullptr) is necessary but NOT sufficient for safety: a
+     * fast-path reader that already loaded the old non-null pointer is not
+     * blocked by m_mutex and may still dereference it after the arena is
+     * destroyed below. release()/reset() therefore require external
+     * quiescence — no concurrent resource() caller and no live value
+     * allocated from the global resource. See the class-level threading
+     * contract in config.hpp.
+     *
      * Debug check: if CountingResource is active, assert zero outstanding
      * allocations — ensures no dangling references from parsed objects.
      */

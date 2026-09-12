@@ -237,6 +237,35 @@ TEST_CASE("Config: release") {
     REQUIRE(doc.root()["after"] == "release");
 }
 
+TEST_CASE("Config: resource re-resolved after release") {
+    // Warm the fast-path cache with the pre-release resource.
+    std::pmr::memory_resource *before = Config::instance().resource();
+    REQUIRE(before != nullptr);
+
+    Config::instance().release();
+
+    // Contract: the old pointer is invalidated; the next resource() must
+    // re-resolve and hand out a live resource. (Do NOT assert
+    // after != before: allocator reuse can legitimately return the same
+    // address for the fresh arena, so pointer inequality is not a valid pin.)
+    std::pmr::memory_resource *after = Config::instance().resource();
+    REQUIRE(after != nullptr);
+
+    {
+        // Exercise the re-cached resource through the default-argument path:
+        // this allocates from the global resource iff the re-cache is correct.
+        Object o;                   // default arg = Config::instance().resource()
+        o.insert("k", Json((int64_t)1));
+        REQUIRE(o.size() == 1);
+    }   // scope exit destroys o through the re-cached resource
+
+    // reset restores defaults and tears the arena down in a quiescent,
+    // single-threaded call.
+    Config::instance().reset();
+    auto doc = parse_copy(R"({"after":"release"})");
+    REQUIRE(doc.root()["after"] == "release");
+}
+
 TEST_CASE("Config: max depth") {
     // Default: unlimited
     REQUIRE(Config::instance().max_depth() == 0);

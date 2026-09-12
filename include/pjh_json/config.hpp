@@ -25,13 +25,24 @@ namespace pjh::json
     /**
      * @brief Global configuration singleton (storage policy, global resource)
      *
-      * The knobs — strict_duplicate_keys, arena_block_size, max_depth,
-      * strip_bom, strict_utf8 and the storage policy — are lock-free atomics:
-      * their setters and getters may be called concurrently from any thread. The mutex guards only the
-     * global Document (allocator state and the resource-cache invalidation
-     * window). Knob semantics are capture-at-start: a value set mid-operation
-     * takes effect at the next operation start (strict_duplicate_keys is
-     * read at each object entry, i.e. from the next object onward).
+     * Threading contract:
+     * - The knobs (strict_duplicate_keys / arena_block_size / max_depth /
+     *   strip_bom / strict_utf8) and storage() are lock-free atomics: their
+     *   setters/getters may be called concurrently from any thread; values are
+     *   captured at operation start (strict_duplicate_keys is read at each
+     *   object entry, i.e. from the next object onward).
+     * - resource() may be called concurrently with itself and with any
+     *   operation that uses the returned resource, as long as no
+     *   release()/reset() overlaps.
+     * - release()/reset() are EXCLUSIVE global teardown: they destroy and
+     *   replace the global Document's arena, invalidating every pointer
+     *   previously returned by resource(). They must not run concurrently with
+     *   resource(), nor with any use of the global resource (including the
+     *   default-argument resolution of Array/Object/Parser/clone/dump/own/
+     *   insert and the lifetime of any value allocated through it). Callers
+     *   must guarantee quiescence and destroy all globally-allocated values
+     *   first. Holding a resource() pointer (or a value allocated from it)
+     *   across release()/reset() is use-after-free.
      * The global Document provides a shared memory resource used as the
      * default allocator throughout the library.
      */
@@ -60,6 +71,11 @@ namespace pjh::json
          * @note Lock-free in the common case: the pointer is cached atomically
          *       and only invalidated by release()/reset(); the shared lock is
          *       taken solely to re-cache after such an invalidation.
+         * @warning The returned pointer is invalidated by release()/reset(),
+         *          which destroy the arena object it points to. Do not retain
+         *          it across either call, and do not let release()/reset() run
+         *          on another thread while the pointer or any value allocated
+         *          through it is in use.
          */
         [[nodiscard]] std::pmr::memory_resource *resource() noexcept;
         /**
@@ -174,6 +190,11 @@ namespace pjh::json
          * @brief Release global document
          * @note In debug builds, asserts no outstanding allocations from the
          *       global resource.
+         * @warning Exclusive global teardown: destroys and replaces the global
+         *          arena. Not safe concurrently with resource() or with any use
+         *          of the global resource; all values allocated from it must be
+         *          destroyed and all other threads quiesced first. See the
+         *          class-level threading contract.
          */
         void release();
         /**
@@ -184,6 +205,11 @@ namespace pjh::json
          *       strict_utf8 = false, then release().
          * @note Knob restoration uses atomic stores, still performed under
          *       the lock, in service of release_locked().
+         * @warning Exclusive global teardown: destroys and replaces the global
+         *          arena. Not safe concurrently with resource() or with any use
+         *          of the global resource; all values allocated from it must be
+         *          destroyed and all other threads quiesced first. See the
+         *          class-level threading contract.
          */
         void reset();
 
