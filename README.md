@@ -69,7 +69,7 @@ channel. To resolve a path, `at_path()` throws, `find_path()` returns
 ## Example
 
 ```cpp
-#include "pjh_json/json.hpp"
+#include <pjh_json.hpp>
 
 using namespace pjh::json;
 

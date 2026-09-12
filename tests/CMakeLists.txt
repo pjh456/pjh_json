@@ -11,6 +11,7 @@ set(PJH_JSON_TEST_SOURCES
     access_result.cpp
     config_document.cpp
     constexpr_json_test.cpp
+    doc_examples.cpp
     json_constexpr_isolation.cpp
     json_fwd_isolation.cpp
     json_parser.cpp
@@ -39,6 +40,75 @@ add_executable(pjh_json_header_isolation header_isolation.cpp)
 target_link_libraries(pjh_json_header_isolation PRIVATE pjh_json doctest)
 
 doctest_discover_tests(pjh_json_header_isolation)
+
+# ---------------------------------------------------------------------------
+# Header self-containment (roadmap 64): every INSTALLED public header must
+# compile as the first and only pjh include in a TU. The installed surface is
+# include/pjh_json.hpp + include/pjh_json/*.hpp (pjh_json/detail/ is
+# build-tree-only and intentionally not checked here). Glob the module headers
+# so a newly added public header is checked automatically, then generate one
+# include-only TU per header into the build dir. This is an OBJECT library: the
+# normal `cmake --build` IS the gate (no link, no ctest entry).
+#
+# Deliberately NOT in PJH_JSON_TEST_SOURCES: these are not doctest TUs. Do not
+# add files under tests/self_containment/ to that list.
+# ---------------------------------------------------------------------------
+file(GLOB PJH_JSON_PUBLIC_MODULE_HEADERS CONFIGURE_DEPENDS
+     "${CMAKE_SOURCE_DIR}/include/pjh_json/*.hpp")
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/self_containment")
+
+set(PJH_JSON_SELFCONTAINMENT_SOURCES)
+set(_pjh_selfcheck_idx 0)
+foreach(_pjh_hdr IN LISTS PJH_JSON_PUBLIC_MODULE_HEADERS)
+    get_filename_component(_pjh_hdr_name "${_pjh_hdr}" NAME_WE)
+    set(_pjh_tu
+        "${CMAKE_CURRENT_BINARY_DIR}/self_containment/${_pjh_selfcheck_idx}_${_pjh_hdr_name}.cpp")
+    file(GENERATE OUTPUT "${_pjh_tu}"
+         CONTENT "#include <pjh_json/${_pjh_hdr_name}.hpp>\n")
+    list(APPEND PJH_JSON_SELFCONTAINMENT_SOURCES "${_pjh_tu}")
+    math(EXPR _pjh_selfcheck_idx "${_pjh_selfcheck_idx} + 1")
+endforeach()
+
+# The umbrella is part of the installed surface too.
+set(_pjh_umbrella_tu "${CMAKE_CURRENT_BINARY_DIR}/self_containment/umbrella.cpp")
+file(GENERATE OUTPUT "${_pjh_umbrella_tu}" CONTENT "#include <pjh_json.hpp>\n")
+list(APPEND PJH_JSON_SELFCONTAINMENT_SOURCES "${_pjh_umbrella_tu}")
+
+add_library(pjh_json_header_selfcheck OBJECT ${PJH_JSON_SELFCONTAINMENT_SOURCES})
+target_link_libraries(pjh_json_header_selfcheck PRIVATE pjh_json)
+if(PJH_JSON_SANITIZER_FLAGS)
+    target_compile_options(pjh_json_header_selfcheck PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
+endif()
+
+# ---------------------------------------------------------------------------
+# Negative compilation tests (roadmap 64): every tests/compile_fail/<case>.cpp
+# MUST fail to compile. Each case is an OBJECT library from EXCLUDE_FROM_ALL
+# (never built by a normal `cmake --build`); the ctest test builds just that one
+# target and WILL_FAIL inverts the expected failure. Using a real CMake target
+# (rather than a hand-spelled compiler command) keeps C++20, the pjh_json PUBLIC
+# include set (incl. pjh_result/xsimd) and GCC/Clang/MSVC driver differences
+# handled by CMake.
+#
+# These are NOT doctest TUs -> never add them to PJH_JSON_TEST_SOURCES.
+# ---------------------------------------------------------------------------
+function(pjh_json_add_compile_fail name)
+    add_library(compile_fail_${name} OBJECT EXCLUDE_FROM_ALL
+                "${CMAKE_CURRENT_SOURCE_DIR}/compile_fail/${name}.cpp")
+    target_link_libraries(compile_fail_${name} PRIVATE pjh_json)
+    add_test(NAME compile_fail.${name}
+             COMMAND ${CMAKE_COMMAND} --build "${CMAKE_BINARY_DIR}"
+                     --target compile_fail_${name})
+    set_tests_properties(compile_fail.${name} PROPERTIES
+                         WILL_FAIL TRUE RUN_SERIAL TRUE)
+endfunction()
+
+file(GLOB PJH_JSON_COMPILE_FAIL_CASES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/compile_fail/*.cpp")
+foreach(_pjh_bad IN LISTS PJH_JSON_COMPILE_FAIL_CASES)
+    get_filename_component(_pjh_bad_name "${_pjh_bad}" NAME_WE)
+    pjh_json_add_compile_fail("${_pjh_bad_name}")
+endforeach()
 
 # Sanitizer flags are PRIVATE to pjh_json (root CMakeLists, same pattern as
 # PJH_JSON_PGO_FLAGS). Re-apply them so the test TUs are instrumented and the
