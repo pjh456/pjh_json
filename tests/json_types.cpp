@@ -47,6 +47,17 @@ namespace
         size_t m_last_bytes = 0;
     };
 
+    // MSVC debug STL allocates a per-container _Container_proxy through the
+    // container's allocator, even for an empty std::pmr::string. It is not a
+    // leak: the proxy goes back when the container dies, so exact-count pins
+    // add this constant. It stays zero on libstdc++/libc++, keeping the
+    // header/buffer count pins exact there.
+#if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL > 0
+    constexpr long long kContainerOverhead = 1;
+#else
+    constexpr long long kContainerOverhead = 0;
+#endif
+
     // True iff f() throws TypeError (other exceptions propagate => case fails)
     template <typename F>
     bool threw_type_error(F &&f)
@@ -928,34 +939,102 @@ TEST_CASE("Path: parse_path invalid corpus") {
 
 TEST_CASE("Json: owned string ctor") {
     TestCountingResource cr;
-#if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL > 0
-    // MSVC debug STL allocates a per-container _Container_proxy through the
-    // container's allocator, even for an empty string. It is not a leak: the
-    // proxy goes back when the container dies (the return proof below still
-    // holds), so the exact-count pins add this constant. It stays zero on
-    // libstdc++/libc++, keeping the == 1 / == 0 pins exact there.
-    constexpr long long kContainerOverhead = 1;
-#else
-    constexpr long long kContainerOverhead = 0;
-#endif
     std::string src(48, 'a'); // > max SSO capacity (~23) => buffer must go through res
     std::string_view sv(src);
     {
         Json j(sv, &cr);
         REQUIRE(j.is_string());
         REQUIRE(j.as_string() == sv);
-        REQUIRE(cr.outstanding() == 1 + kContainerOverhead); // one buffer + optional proxy
+        // Header + buffer both go through res now (was buffer only):
+        // 1 header + 1 buffer + optional MSVC _Container_proxy.
+        REQUIRE(cr.outstanding() == 2 + kContainerOverhead);
         REQUIRE(cr.last_bytes() >= sv.size()); // host allocates sv.size(); >= is the portable pin
-    } // ~j -> buffer deallocates back into cr
+    } // ~j -> header and buffer deallocate back into cr
     REQUIRE(cr.outstanding() == 0);            // return proof (destroy() through res)
 
-    // Empty sv edge (same case): SSO => no content buffer; MSVC debug still
+    // Empty sv edge (same case): SSO => no content buffer, but the
+    // pmr::string object header still goes through res; MSVC debug also
     // allocates the per-container proxy, released when e dies.
     {
         Json e(std::string_view{}, &cr);
         REQUIRE(e.is_string());
         REQUIRE(e.as_string().empty());
-        REQUIRE(cr.outstanding() == kContainerOverhead);
+        REQUIRE(cr.outstanding() == 1 + kContainerOverhead);
+    }
+    REQUIRE(cr.outstanding() == 0);
+}
+
+TEST_CASE("String: own allocates header through resource") {
+    TestCountingResource cr;
+    std::string src(48, 's'); // > SSO => content buffer must go through res
+    {
+        String s{std::string_view(src)};
+        REQUIRE(!s.is_owned());
+        REQUIRE(cr.outstanding() == 0); // borrowed: no allocation yet
+        s.own(&cr);
+        REQUIRE(s.is_owned());
+        // 1 pmr::string object header + 1 content buffer (+ MSVC proxy).
+        REQUIRE(cr.outstanding() == 2 + kContainerOverhead);
+        REQUIRE(static_cast<std::string_view>(s) == std::string_view(src));
+    }
+    REQUIRE(cr.outstanding() == 0);
+
+    // Empty edge: SSO content, but the header still goes through cr.
+    {
+        String e{std::string_view{}};
+        e.own(&cr);
+        REQUIRE(e.is_owned());
+        REQUIRE(cr.outstanding() == 1 + kContainerOverhead);
+    }
+    REQUIRE(cr.outstanding() == 0);
+}
+
+TEST_CASE("String: release hands off ownership") {
+    TestCountingResource cr;
+    std::string src(48, 'r'); // > SSO => header + buffer
+    {
+        String s{std::string_view(src)};
+        s.own(&cr);
+        REQUIRE(cr.outstanding() == 2 + kContainerOverhead);
+
+        std::pmr::string *p = s.release();
+        REQUIRE(p != nullptr);
+        REQUIRE(!s.is_owned());
+        // Handoff does not free: header + buffer still outstanding.
+        REQUIRE(cr.outstanding() == 2 + kContainerOverhead);
+        REQUIRE(*p == src);
+
+        String::destroy_owned(p); // required release pair (never `delete`)
+        REQUIRE(cr.outstanding() == 0);
+    }
+
+    // Round-trip: release -> adopt via String(pmr::string*) -> scope exit
+    // destroys through the same resource (asserts the new adoption contract).
+    {
+        String s{std::string_view(src)};
+        s.own(&cr);
+        std::pmr::string *p = s.release();
+        {
+            String adopted(p);
+            REQUIRE(adopted.is_owned());
+            REQUIRE(static_cast<std::string_view>(adopted) == std::string_view(src));
+            REQUIRE(cr.outstanding() == 2 + kContainerOverhead);
+        } // ~adopted -> destroy_owned(p)
+        REQUIRE(cr.outstanding() == 0);
+    }
+    REQUIRE(cr.outstanding() == 0);
+}
+
+TEST_CASE("Json: clone allocates header through resource") {
+    TestCountingResource cr;
+    static const char kCloneSrc[] = "clone-source-long-enough-to-exceed-sso-capacity";
+    {
+        Json src(kCloneSrc); // borrowed view, no allocation
+        Json c = src.clone(&cr);
+        REQUIRE(c.is_string());
+        REQUIRE(c.as_string() == kCloneSrc);
+        // 1 cloned pmr::string header + 1 content buffer (+ MSVC proxy).
+        REQUIRE(cr.outstanding() == 2 + kContainerOverhead);
     }
     REQUIRE(cr.outstanding() == 0);
 }

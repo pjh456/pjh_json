@@ -163,11 +163,9 @@ namespace pjh::json
         case Type::StringOwned:
         {
             std::string_view sv = as_string();
-            std::pmr::string owned(sv, into);
-            auto *ptr = new std::pmr::string(std::move(owned));
             Json out;
             out.m_type = Type::StringOwned;
-            out.m_data.heap = ptr;
+            out.m_data.heap = String::make_owned(sv, into);
             return out;
         }
         case Type::ArrayType:

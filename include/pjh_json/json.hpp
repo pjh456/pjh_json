@@ -93,7 +93,8 @@ namespace pjh::json
          *
          * 1. Scalar types (null/boolean/integer/floating/StringView):
          *    nothing to free.
-         * 2. StringOwned: delete the heap-allocated pmr::string.
+         * 2. StringOwned: destroy the pmr::string header and its buffer
+         *    through the resource that produced them (String::destroy_owned).
          * 3. ArrayType/ObjectType: destroy in place, then deallocate
          *    via PMR using the resource stored in the container.
          */
@@ -102,7 +103,7 @@ namespace pjh::json
             switch (m_type)
             {
             case Type::StringOwned:
-                delete static_cast<std::pmr::string *>(m_data.heap);
+                String::destroy_owned(static_cast<std::pmr::string *>(m_data.heap));
                 break;
             case Type::ArrayType:
             {
@@ -214,13 +215,15 @@ namespace pjh::json
          * @brief Construct string from string_view (owned: content copied into res)
          * @param sv Source view — content is copied; the source may die
          *        afterwards (unlike Json(std::string_view), which borrows)
-         * @param res Resource for the string's heap buffer. Required
-         *        (no default: a defaulted parameter would make every 1-arg
-         *        Json(std::string_view) call ambiguous). nullptr falls back
-         *        to the global config resource. Must outlive this Json —
-         *        the buffer deallocates back into res on destruction.
-         * @note The pmr::string object lives on global new/delete; only
-         *       its buffer goes through res (same contract as String::own).
+         * @param res Resource for the string's object header and buffer.
+         *        Required (no default: a defaulted parameter would make
+         *        every 1-arg Json(std::string_view) call ambiguous). nullptr
+         *        falls back to the global config resource. Must outlive this
+         *        Json — both the header and the buffer deallocate back into
+         *        res on destruction.
+         * @note The pmr::string object header lives in res too (allocated via
+         *       polymorphic_allocator<pmr::string>), not on the global heap
+         *       (same contract as String::own).
          *       No shared ownership: move transfers the buffer; deep-copy
          *       with clone(res). To adopt an already-materialised String
          *       (zero-copy) use the 1-arg Json(String&&) constructor.
@@ -230,7 +233,7 @@ namespace pjh::json
         {
             if (!res)
                 res = Config::instance().resource();
-            m_data.heap = new std::pmr::string(sv, res);
+            m_data.heap = String::make_owned(sv, res);
         }
 
         /**
@@ -255,7 +258,8 @@ namespace pjh::json
          * @brief Construct from String rvalue (used by parser).
          *
          * Borrowed strings store {ptr, len} inline as StringView.
-         * Owned strings transfer the heap pointer via release().
+         * Owned strings transfer the header pointer via release();
+         * destruction frees it through String::destroy_owned.
          *
          * @param s String to adopt (must be an rvalue)
          */
@@ -369,7 +373,8 @@ namespace pjh::json
          * @brief Assign from String rvalue.
          *
          * Borrowed strings store {ptr, len} inline. Owned strings
-         * transfer the heap pointer. Old value is destroyed first.
+         * transfer the header pointer (freed through
+         * String::destroy_owned). Old value is destroyed first.
          *
          * @param s Source String (rvalue, ownership transferred)
          * @return *this
