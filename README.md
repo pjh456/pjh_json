@@ -199,6 +199,38 @@ used (non-portable artifacts); pass your own `CMAKE_CXX_FLAGS` if you want it lo
 (x86-64: `-march=native`; arm64/AppleClang: `-mcpu=native` — `-march=native` is
 rejected on Apple Silicon; never pass both).
 
+### Formatting & lint
+
+First-party C++ style is defined by the root `.clang-format` (Allman braces,
+4-space indent, indented namespace bodies, right-aligned pointers, 120-column
+limit). The style is a ratchet: CI only checks the **lines changed** by a
+commit/PR, so pre-existing deviations are tolerated but new ones are not.
+
+Pin the toolchain to **clang-format 18.1.8** (`clang-format-18` +
+`git-clang-format-18`; on Debian/Ubuntu `apt install clang-format-18`, otherwise
+`pip install clang-format==18.1.8`). Formatting output is not stable across
+major LLVM versions, so local and CI must match.
+
+```bash
+# check only the lines changed relative to main (same mechanism as CI)
+base=origin/main
+git fetch --no-tags origin main
+git-clang-format-18 --diff "$base"
+
+# fix those lines in place, including unstaged files (does not commit)
+git-clang-format-18 --force "$base"
+```
+
+`.clang-tidy` holds a conservative, report-only baseline (bugprone /
+performance / limited modernize); it is **not** a CI gate yet. Run it locally
+against a compile-commands database:
+
+```bash
+cmake -B build-tidy -G Ninja -S . -DCMAKE_CXX_COMPILER=clang++ \
+  -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+run-clang-tidy-18 -p build-tidy -quiet
+```
+
 ### Using the installed package
 
 ```cmake

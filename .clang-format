@@ -1,0 +1,74 @@
+# .clang-format — pjh_json first-party C++ style (roadmap 69).
+#
+# Tuned to reproduce the existing hand-written style (Allman braces, 4-space
+# indent, indented namespace bodies, right-aligned pointers) so that an
+# incremental `git-clang-format` pass over changed lines is close to a no-op.
+#
+# DO NOT turn on any of these three: the tree intentionally preserves author
+# include order, has no `// namespace` trailing comments, and hand-wraps
+# comments. Enabling them rewrites the whole repository.
+#   - SortIncludes / IncludeBlocks: Regroup
+#   - FixNamespaceComments
+#   - ReflowComments
+#
+# Toolchain: pin clang-format 18.1.8 locally and in CI (see detail 84 §1.3).
+---
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+
+# --- indentation -----------------------------------------------------------------
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+ConstructorInitializerIndentWidth: 4
+NamespaceIndentation: All          # namespace bodies are indented one level
+AccessModifierOffset: -4           # public:/private: at the class-key indent
+IndentCaseLabels: false            # case labels at the switch indent
+IndentPPDirectives: None           # config.cpp:116 is the only indented directive
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+EmptyLineBeforeAccessModifier: Leave   # do not insert/remove blank lines
+
+# --- braces ----------------------------------------------------------------------
+BreakBeforeBraces: Allman
+
+# --- line width ------------------------------------------------------------------
+ColumnLimit: 120
+
+# --- short constructs ------------------------------------------------------------
+AllowShortFunctionsOnASingleLine: Inline   # in-class one-liners (config.hpp, json.hpp)
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Never
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortLambdasOnASingleLine: Empty
+
+# --- pointers / references -------------------------------------------------------
+PointerAlignment: Right            # const char *p, T *p, std::pmr::string *
+ReferenceAlignment: Right
+DerivePointerAlignment: false
+
+# --- wrapping --------------------------------------------------------------------
+AlignAfterOpenBracket: Align
+BinPackArguments: true
+BinPackParameters: true
+AlignOperands: Align
+BreakBeforeBinaryOperators: None   # trailing `&&` / `||` (src/parser/*)
+BreakBeforeTernaryOperators: true
+AlignTrailingComments: true
+SpacesBeforeTrailingComments: 1
+PenaltyReturnTypeOnItsOwnLine: 200
+
+# --- constructor initializers ----------------------------------------------------
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: Never
+
+# --- includes: preserve author order (intentionally not sorted) -------------------
+SortIncludes: Never
+IncludeBlocks: Preserve
+
+# --- comments: leave hand-wrapped text and namespace closing braces alone ---------
+ReflowComments: false
+FixNamespaceComments: false

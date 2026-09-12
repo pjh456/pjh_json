@@ -114,6 +114,49 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  format:
+    name: Linux (clang-format, changed lines)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # need the base commit for merge-base/diff
+          submodules: false         # formatting is source-only; skip submodules
+
+      - name: Install pinned clang-format
+        run: |
+          # Pin LLVM 18.1.8: clang-format output is not stable across major
+          # versions, so local and CI must agree (see README "Formatting & lint").
+          sudo apt-get update
+          sudo apt-get install -y clang-format-18   # provides git-clang-format-18
+          clang-format-18 --version
+
+      - name: Check changed lines
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            BASE="origin/${{ github.base_ref }}"
+          else
+            BASE="${{ github.event.before }}"
+            # New-branch / force-push pushes send the all-zero SHA: fall back.
+            if ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+              BASE="HEAD~1"
+            fi
+            # First commit in the repo has no HEAD~1: nothing to compare.
+            if ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+              echo "No base commit to compare against; skipping."
+              exit 0
+            fi
+          fi
+          git-clang-format-18 --diff "$BASE" > /tmp/fmt.patch || true
+          if grep -q '^diff ' /tmp/fmt.patch; then
+            echo "::error::clang-format found changes in lines touched by this diff."
+            echo "Fix locally with:  git-clang-format-18 --force $BASE"
+            cat /tmp/fmt.patch
+            exit 1
+          fi
+
   sanitize:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest

@@ -1,0 +1,27 @@
+# .clang-tidy — conservative first-party baseline (roadmap 69).
+#
+# Curated on purpose: wildcard families such as bugprone-* or modernize-* are
+# too noisy to gate on before a measured zero-findings baseline exists. This
+# file is report-only for now; it is NOT wired into CI yet (see detail 84 §2.3).
+# Run locally with clang-tidy-18 (see README "Formatting & lint").
+---
+Checks: >
+  -*,
+  bugprone-dangling-handle,
+  bugprone-sizeof-expression,
+  bugprone-suspicious-memory-comparison,
+  bugprone-use-after-move,
+  performance-for-range-copy,
+  performance-move-const-arg,
+  performance-unnecessary-copy-initialization,
+  modernize-use-equals-delete,
+  modernize-use-nullptr,
+  modernize-use-override,
+  readability-const-return-type,
+  readability-redundant-smartptr-get
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*/(include|src)/.*'
+FormatStyle: file
+SystemHeaders: false
+UseColor: true
