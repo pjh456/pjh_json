@@ -24,7 +24,7 @@ int main()
 
     // 3. Parse in-situ (moves buffer ownership, zero-copy strings)
     std::pmr::string buf("{\"hello\":\"world\"}", std::pmr::get_default_resource());
-    buf.append(pjh::json::kPaddingWidth, '\0'); // SIMD padding (2x batch)
+    buf.append(pjh::json::kPaddingWidth, '\0'); // SIMD padding (fixed 2x max batch)
     auto doc3 = pjh::json::parse_in_situ(std::move(buf));
     std::cout << "in-situ: " << pjh::json::dump(doc3) << "\n";
 

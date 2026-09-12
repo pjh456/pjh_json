@@ -5,8 +5,6 @@
 #include <cmath>
 #include <limits>
 
-#include <xsimd/xsimd.hpp>
-
 #include <pjh_json/document.hpp>
 #include <pjh_json/parser.hpp>
 #include <pjh_json/writer.hpp>
@@ -655,23 +653,21 @@ TEST_CASE("Parser: in_situ padding") {
     #endif
 
     // Behavioral minimum-width pin: a buffer padded with exactly the
-    // contract width (2x the SIMD batch) must parse. A narrower contract
-    // leaves NULs inside the content range and trips "Extra characters
-    // after complete JSON value".
+    // contract width (kPaddingWidth NUL bytes) must parse. A narrower
+    // contract leaves NULs inside the content range and trips "Extra
+    // characters after complete JSON value".
     std::pmr::string isitu_buf(get_default_resource());
     isitu_buf.assign(R"({"a":1})");
-    isitu_buf.append(2 * xsimd::batch<uint8_t>::size, '\0');
+    isitu_buf.append(kPaddingWidth, '\0');
     auto isitu_doc = parse_in_situ(std::move(isitu_buf));
     REQUIRE(isitu_doc.root()["a"] == (int64_t)1);
 }
 
 TEST_CASE("Parser: padding width contract") {
-    // The documented contract (parser.hpp / document.hpp) pins the padding
-    // to kPaddingWidth NUL bytes; the width is 2x the SIMD batch, derived at
-    // compile time so an ISA widening keeps the 2x invariant automatically.
-    // Pin the identity so a padding change must update this test and the
-    // docs in lockstep.
-    REQUIRE(kPaddingWidth == 2 * xsimd::batch<uint8_t>::size);
+    // Fixed padding contract: kPaddingWidth is ISA-independent, pinned so a
+    // change must update this test and the docs in lockstep.
+    static_assert(kPaddingWidth == 128,
+                  "fixed padding = 2x the maximum supported uint8 batch (64)");
     // Behavioral side: a view with exactly kPaddingWidth padding works
     // (regression pin)
     std::string content = R"([1,2,3])";

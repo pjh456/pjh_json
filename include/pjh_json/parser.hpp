@@ -16,7 +16,7 @@ namespace pjh::json
     /**
      * @brief Recursive-descent JSON parser (requires padded buffer)
      *
-     * Uses SIMD (via xsimd) for whitespace skipping and string scanning.
+     * Uses SIMD for whitespace skipping and string scanning.
      * The SIMD scan may read up to one batch (kPaddingWidth NUL bytes) past
      * the content, so the input range must carry that much NUL padding.
      * parse_copy(), parse_file(), parse_from_istream() and parse_jsonl() pad
@@ -100,7 +100,7 @@ namespace pjh::json
 
     private:
         /**
-         * @brief Skip whitespace (SIMD-accelerated via xsimd)
+         * @brief Skip whitespace (SIMD-accelerated)
          */
         void skip_whitespace();
         /**

@@ -6,8 +6,6 @@
 #include <string>
 #include <string_view>
 
-#include <xsimd/xsimd.hpp>
-
 #include <pjh_json/document.hpp>
 #include <pjh_json/config.hpp>
 #include <pjh_json/writer.hpp>
@@ -53,9 +51,9 @@ TEST_CASE("Document: move assignment no UAF") {
     REQUIRE(d2.root()["k"].size() == 3);
     REQUIRE(d2.root()["n"] == (int64_t)42);
     REQUIRE(d2.is_view() == false);
-    // Exact allocation-site pin: buffer is content + kPaddingWidth, and the
-    // contract pins kPaddingWidth to 2x the SIMD batch (32-byte content).
-    REQUIRE(d2.buffer().size() == 32 + 2 * xsimd::batch<uint8_t>::size);
+    // Exact allocation-site pin: buffer is content + kPaddingWidth
+    // (32-byte content).
+    REQUIRE(d2.buffer().size() == 32 + kPaddingWidth);
     REQUIRE(d1.root().is_null());
     REQUIRE(d1.buffer().empty());
 
@@ -82,8 +80,8 @@ TEST_CASE("Document: move ctor no UAF") {
         // moved-to is self-contained (semantics intact, dump intact)
         REQUIRE(b.root()["k"].size() == 3);
         REQUIRE(b.root()["n"] == (int64_t)42);
-        // Exact allocation-site pin (same 32-byte content + 2x-batch padding)
-        REQUIRE(b.buffer().size() == 32 + 2 * xsimd::batch<uint8_t>::size);
+        // Exact allocation-site pin (same 32-byte content + kPaddingWidth)
+        REQUIRE(b.buffer().size() == 32 + kPaddingWidth);
         REQUIRE(b.is_view() == false);
         REQUIRE(dump(b) == R"({"k":[1,2,3],"s":"hello","n":42})");
         // moved-from surface state
@@ -153,7 +151,7 @@ TEST_CASE("Document: move assign foreign-resource source buffer no UAF") {
     std::string content(64, ' ');
     content += R"(["hello"])";
     buf.assign(content.data(), content.size());
-    buf.append(2 * xsimd::batch<uint8_t>::size, '\0');  // kPaddingWidth NUL tail
+    buf.append(kPaddingWidth, '\0');  // kPaddingWidth NUL tail
 
     auto src = parse_in_situ(std::move(buf), Storage::Pooled);
     REQUIRE(src.root()[0] == "hello");

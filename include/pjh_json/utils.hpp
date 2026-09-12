@@ -7,26 +7,23 @@
 #include <cstdint>
 #include <string>
 
-#include <xsimd/xsimd.hpp>
-
 namespace pjh::json
 {
 
     /**
      * @brief Required trailing NUL padding for padded parse entry points
      *
-     * SIMD wide loads (xsimd::batch<uint8_t>, width 16/32/64 by target ISA)
-     * may read up to one full batch past the logical end of the content.
-     * The contract carries 2x that width of headroom (compile-time derived,
-     * so an ISA widening keeps the 2x invariant automatically), so
-     * parse_in_situ/parse_view require at least this many NUL bytes beyond
-     * the content; parse_copy/parse_file/parse_jsonl pad automatically.
-     * parse_in_situ verifies the tail at runtime; parse_view cannot (a check
-     * would itself overread) - that is a hard caller contract.
-     * @note If the library and a caller TU are built with different arch
-     * flags, their batch widths differ; pad with the wider of the two.
+     * SIMD wide loads read up to one full uint8 batch past the logical end of
+     * the content. The implementation caps that batch at 64 bytes (the lane
+     * mask is a uint64_t), so this contract reserves a fixed 2x that ceiling
+     * (128 NUL bytes). The value is ISA-independent and therefore identical
+     * in the library and every consumer TU. parse_in_situ/parse_view require
+     * at least this many NUL bytes beyond the content; parse_copy/parse_file/
+     * parse_jsonl pad automatically. parse_in_situ verifies the tail at
+     * runtime; parse_view cannot (a check would itself overread) - that is a
+     * hard caller contract.
      */
-    inline constexpr size_t kPaddingWidth = 2 * xsimd::batch<uint8_t>::size;
+    inline constexpr size_t kPaddingWidth = 128;
 
 #ifdef NDEBUG
 #define PJH_JSON_NOEXCEPT noexcept

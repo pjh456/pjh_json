@@ -213,7 +213,7 @@ namespace pjh::json
      * @param sink  Output string (appended to)
      * @param s     Raw string to escape and emit
      * @param ascii If true, escape non-ASCII as \\uXXXX
-      * @note Uses SIMD (xsimd) for fast scanning of characters needing escape.
+      * @note Uses SIMD for fast scanning of characters needing escape.
       * @throws JsonError if s contains invalid UTF-8 (only when ascii=true)
       * @note The strict_utf8 Config knob does NOT apply here: non-ascii
       *       mode is a byte mirror (ill-formed UTF-8 round-trips
