@@ -82,7 +82,14 @@ target_include_directories(pjh_json
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-set_target_properties(pjh_json PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+# Consumer-facing imported name: the build-tree alias `pjh::json` (:75) is not
+# exported (CMake: ALIAS targets cannot be installed/exported), so the install
+# export must reproduce the same spelling: NAMESPACE pjh:: + EXPORT_NAME json
+# makes `find_package(pjh_json)` yield `pjh::json`.
+set_target_properties(pjh_json PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    EXPORT_NAME json)
 target_compile_options(pjh_json PRIVATE -std=c++20)
 
 # -------------------------
@@ -192,6 +199,7 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
 
     install(TARGETS pjh_json xsimd EXPORT pjh_jsonTargets)   # pjh_result 不入集（文件级守卫全有全无）
     install(EXPORT pjh_jsonTargets
+        NAMESPACE pjh::
         FILE pjh_jsonTargets.cmake
         DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
     # Public headers only: pjh_json/detail/ holds internal headers reachable in
