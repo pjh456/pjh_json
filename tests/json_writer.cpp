@@ -708,14 +708,22 @@ TEST_CASE("Writer: pretty deep nesting output")
 
     // 4) No per-line allocation: the pmr sink grows geometrically, so the
     //    allocation count is O(log output), far below the ~2*512 indent runs.
-    //    A per-line indent rebuild/allocation (the real implementation-level
-    //    quadratic) would blow this bound immediately. Bounds are loose to
-    //    tolerate libstdc++/libc++/MSVC growth policies.
+    //    The allocation-count check is the load-bearing tripwire: a per-line
+    //    indent rebuild/allocation (the real implementation-level quadratic)
+    //    emits one allocation per line (~1023 > 64 here) and reds immediately.
+    //    The byte check below is only a coarse super-linear sanity guard: a
+    //    per-line rebuild's *extra* requested bytes are ~output/2, so they
+    //    stay under any sane byte bound — the count check is what catches it.
+    //    Growth-policy ratio varies: MSVC measured 2,340,261 bytes for the
+    //    524,288-byte output (~4.46x) in CI run 34711230405, while
+    //    libstdc++/libc++ stay under ~3x. 16x keeps generous headroom over
+    //    the observed MSVC ratio yet still flags wildly super-linear
+    //    allocation (e.g. quadratic in the output size).
     CountingResource cr;
     auto out_c = dump(d512.root(), DumpOptions{.pretty = true, .indent = 2}, &cr);
     REQUIRE(out_c.size() == out.size());
-    REQUIRE(cr.allocations <= 64);       // not O(depth) = 512
-    REQUIRE(cr.bytes <= 4 * out.size()); // total allocated bytes O(output)
+    REQUIRE(cr.allocations <= 64);        // not O(depth) = 512
+    REQUIRE(cr.bytes <= 16 * out.size()); // observed <= ~4.5x; 16x headroom
 
     // 5) Cap interaction: the bound is depth-based, not size-based. 513 levels
     //    under the default bound is rejected on the pretty path too (parse it
