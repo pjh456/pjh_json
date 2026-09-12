@@ -124,6 +124,12 @@ TEST_CASE("Document: reset no UAF") {
     REQUIRE(doc.buffer().empty());
     REQUIRE(doc.resource() != nullptr);
     REQUIRE(doc.is_view() == false);
+    // The internal empty buffer must not be rebound onto the (counted) arena:
+    // MSVC debug's per-container _Container_proxy would otherwise persist as
+    // an outstanding allocation and trip the Config release probe. Compare
+    // the resource() raw pointer, never allocators with operator==.
+    REQUIRE(doc.buffer().get_allocator().resource()
+            == std::pmr::new_delete_resource());
     // still usable after reset
     doc = parse_copy(R"({"x":1})");
     REQUIRE(doc.root()["x"] == (int64_t)1);
@@ -134,6 +140,8 @@ TEST_CASE("Document: reset no UAF") {
     REQUIRE(adoc.root().is_null());
     REQUIRE(adoc.buffer().empty());
     REQUIRE(adoc.resource() != nullptr);
+    REQUIRE(adoc.buffer().get_allocator().resource()
+            == std::pmr::new_delete_resource());
 }
 
 TEST_CASE("Config: release") {

@@ -642,21 +642,35 @@ TEST_CASE("Path: parse_path invalid corpus") {
 
 TEST_CASE("Json: owned string ctor") {
     TestCountingResource cr;
+#if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL > 0
+    // MSVC debug STL allocates a per-container _Container_proxy through the
+    // container's allocator, even for an empty string. It is not a leak: the
+    // proxy goes back when the container dies (the return proof below still
+    // holds), so the exact-count pins add this constant. It stays zero on
+    // libstdc++/libc++, keeping the == 1 / == 0 pins exact there.
+    constexpr long long kContainerOverhead = 1;
+#else
+    constexpr long long kContainerOverhead = 0;
+#endif
     std::string src(48, 'a'); // > max SSO capacity (~23) => buffer must go through res
     std::string_view sv(src);
     {
         Json j(sv, &cr);
         REQUIRE(j.is_string());
         REQUIRE(j.as_string() == sv);
-        REQUIRE(cr.outstanding() == 1);        // exactly one buffer allocation
+        REQUIRE(cr.outstanding() == 1 + kContainerOverhead); // one buffer + optional proxy
         REQUIRE(cr.last_bytes() >= sv.size()); // host allocates sv.size(); >= is the portable pin
     } // ~j -> buffer deallocates back into cr
     REQUIRE(cr.outstanding() == 0);            // return proof (destroy() through res)
 
-    // Empty sv edge (same case): SSO => zero res allocation
-    Json e(std::string_view{}, &cr);
-    REQUIRE(e.is_string());
-    REQUIRE(e.as_string().empty());
+    // Empty sv edge (same case): SSO => no content buffer; MSVC debug still
+    // allocates the per-container proxy, released when e dies.
+    {
+        Json e(std::string_view{}, &cr);
+        REQUIRE(e.is_string());
+        REQUIRE(e.as_string().empty());
+        REQUIRE(cr.outstanding() == kContainerOverhead);
+    }
     REQUIRE(cr.outstanding() == 0);
 }
 

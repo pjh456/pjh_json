@@ -144,6 +144,17 @@ namespace pjh::json
      * 3. The moved-from source is left self-contained: its buffer is
      *    rebuilt bound to the immortal new_delete_resource, so it never
      *    keeps a pointer to the arena that moved into this document.
+     * 4. An empty source buffer is rebuilt bound to new_delete_resource
+     *    instead of the source's resource. reset()'s temporary buffer is
+     *    always empty (its delegated ctor uses std::pmr::string{}), and the
+     *    global Config Document's own empty m_buffer is rebound by reset();
+     *    binding that empty buffer to the counted arena would make MSVC's
+     *    debug _Container_proxy allocation (one per container, even empty)
+     *    show up as an outstanding allocation and permanently trip
+     *    Config::release_locked()'s zero-outstanding assertion. This
+     *    matches the delegated ctor and the moved-from rebind above. A
+     *    non-empty source buffer still binds to the source's resource — the
+     *    parse-produced path is unchanged.
      */
     Document &Document::operator=(Document &&other) noexcept
     {
@@ -155,8 +166,12 @@ namespace pjh::json
             m_root = std::move(other.m_root);
 
             m_buffer.~PmrString();
-            ::new (static_cast<void *>(std::addressof(m_buffer)))
-                PmrString(std::move(other.m_buffer), res);
+            if (other.m_buffer.empty())
+                ::new (static_cast<void *>(std::addressof(m_buffer)))
+                    PmrString(std::pmr::new_delete_resource());
+            else
+                ::new (static_cast<void *>(std::addressof(m_buffer)))
+                    PmrString(std::move(other.m_buffer), res);
 
             m_arena = std::move(other.m_arena);
 
