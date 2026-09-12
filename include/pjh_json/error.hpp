@@ -29,6 +29,280 @@ namespace pjh::json
     enum class Category { Parse, Type, Json };
 
     /**
+     * @brief Zero-allocation kernel error vocabulary (one key per failure site)
+     *
+     * The parser and writer kernels record failures as a fixed-size Error
+     * carrying one of these keys; message_of() is the single source of truth
+     * for the human-readable text. This is the key for the kernel slot and
+     * the message table only.
+     *
+     * @note Kernel vocabulary, NOT a stable machine contract: the public
+     *       exception classes keep their class-level Category contract
+     *       (task 16/53). This enum does not change ParseError::category();
+     *       it is deliberately site-level while Category stays class-level.
+     * @note Not part of any public Result channel today. The public
+     *       *_result entries keep their ParseError / JsonError E types
+     *       (plan 79 §3.3/§3.7 Variant A); Error is materialised into an
+     *       exception before it leaves the implementation.
+     * @note OOM is not in this vocabulary: std::bad_alloc remains an
+     *       environment failure and propagates unconverted (plan 79 §3.2).
+     */
+    enum class ErrorCode : uint16_t
+    {
+        None = 0, // slot empty sentinel
+
+        // ---- parser, positioned: what() appends " at offset N" ----------
+        ExtraCharactersAfterValue,
+        MaxDepthExceeded,
+        ExpectedCommaOrBracket,
+        InvalidLiteral,
+        InvalidLiteralTrailing,
+        NumberNoIntDigits,
+        NumberLeadingZero,
+        NumberNoFracDigits,
+        NumberNoExpDigits,
+        NumberOutOfRange,
+        NumberInvalidFormat,
+        ExpectedStringKey,
+        ExpectedColon,
+        UnexpectedEndOfObject,
+        ExpectedCommaOrBrace,
+        ExpectedQuote,
+        UnterminatedString,
+        UnescapedControl,
+        InvalidHexDigit,
+        InvalidEscapeChar,
+        InvalidSurrogatePair,
+        ExpectedLowSurrogate,
+        LoneLowSurrogate,
+        UnexpectedCharacter,
+        UnexpectedEndOfInput,
+        UnexpectedValueCharacter,
+
+        // ---- malformed UTF-8 string content ----------------------------
+        // Shared by the parser and the ascii-dump writer: the message is
+        // identical, the producing side sets Error::category (plan 79 §3.3).
+        Utf8Overlong,
+        Utf8InvalidLead,
+        Utf8InvalidContinuation,
+        Utf8Surrogate,
+        Utf8ExceedsMax,
+        Utf8Truncated,
+
+        // ---- parser, context-free (offset 0, no position suffix) -------
+        InputTooLarge,
+        ParserRequiresPadding,
+        BufferTooSmall,
+        InSituPaddingNotNul,
+        DuplicateKey,
+        InvalidCodepoint,
+        FileOpenFailed,
+        FileSizeFailed,
+        FileReadFailed,
+        StreamReadFailed,
+
+        // ---- writer, context-free (Category::Json) ---------------------
+        NonFiniteDouble,
+        FormatDoubleFailed,
+        FormatIntFailed,
+        DumpMaxDepthExceeded,
+        FileWriteOpenFailed,
+        FileWriteFailed,
+        FileWriteCloseFailed,
+        StreamWriteFailed,
+    };
+
+    /**
+     * @brief Static message table for ErrorCode (single source of truth)
+     *
+     * Reproduces the pre-79.1 exception text byte for byte. Context-free
+     * detail-carrying codes carry a `{}` placeholder (recorded by the
+     * golden capture, `.w1mer/results/79_golden_errors.md`); Error::format()
+     * substitutes the borrowed detail. The parser/writer are not wired to
+     * this table yet (stages 79.2/79.3).
+     *
+     * @param c Kernel error key
+     * @return Static message for @p c; empty for ErrorCode::None
+     */
+    constexpr std::string_view message_of(ErrorCode c) noexcept
+    {
+        switch (c)
+        {
+        case ErrorCode::None:
+            return "";
+        case ErrorCode::ExtraCharactersAfterValue:
+            return "Extra characters after complete JSON value";
+        case ErrorCode::MaxDepthExceeded:
+            return "Maximum nesting depth exceeded";
+        case ErrorCode::ExpectedCommaOrBracket:
+            return "Expected ',' or ']' in array";
+        case ErrorCode::InvalidLiteral:
+            return "Invalid literal, expected true/false/null";
+        case ErrorCode::InvalidLiteralTrailing:
+            return "Invalid literal, unexpected characters after true/false/null";
+        case ErrorCode::NumberNoIntDigits:
+            return "Invalid number: no digits after '-'";
+        case ErrorCode::NumberLeadingZero:
+            return "Invalid number: leading zeros are not allowed";
+        case ErrorCode::NumberNoFracDigits:
+            return "Invalid number: no digits after decimal point";
+        case ErrorCode::NumberNoExpDigits:
+            return "Invalid number: no digits in exponent";
+        case ErrorCode::NumberOutOfRange:
+            return "Number out of double range";
+        case ErrorCode::NumberInvalidFormat:
+            return "Invalid number format";
+        case ErrorCode::ExpectedStringKey:
+            return "Expected string key in object";
+        case ErrorCode::ExpectedColon:
+            return "Expected ':' in object";
+        case ErrorCode::UnexpectedEndOfObject:
+            return "Unexpected end of object";
+        case ErrorCode::ExpectedCommaOrBrace:
+            return "Expected ',' or '}' in object";
+        case ErrorCode::ExpectedQuote:
+            return "Expected '\"'";
+        case ErrorCode::UnterminatedString:
+            return "Unterminated string";
+        case ErrorCode::UnescapedControl:
+            return "Unescaped control character in string";
+        case ErrorCode::InvalidHexDigit:
+            return "Invalid hex digit in unicode escape";
+        case ErrorCode::InvalidEscapeChar:
+            return "Invalid escape character";
+        case ErrorCode::InvalidSurrogatePair:
+            return "Invalid surrogate pair";
+        case ErrorCode::ExpectedLowSurrogate:
+            return "Expected low surrogate";
+        case ErrorCode::LoneLowSurrogate:
+            return "Lone low surrogate, expected high surrogate first";
+        case ErrorCode::UnexpectedCharacter:
+            return "Unexpected character";
+        case ErrorCode::UnexpectedEndOfInput:
+            return "Unexpected end of input";
+        case ErrorCode::UnexpectedValueCharacter:
+            return "Unexpected character parsing value";
+        case ErrorCode::Utf8Overlong:
+            return "Overlong UTF-8 sequence in string";
+        case ErrorCode::Utf8InvalidLead:
+            return "Invalid UTF-8 lead byte in string";
+        case ErrorCode::Utf8InvalidContinuation:
+            return "Invalid UTF-8 continuation byte in string";
+        case ErrorCode::Utf8Surrogate:
+            return "UTF-8 surrogate codepoint in string";
+        case ErrorCode::Utf8ExceedsMax:
+            return "UTF-8 codepoint exceeds U+10FFFF in string";
+        case ErrorCode::Utf8Truncated:
+            return "Truncated UTF-8 sequence in string";
+        case ErrorCode::InputTooLarge:
+            return "Input too large to pad";
+        case ErrorCode::ParserRequiresPadding:
+            return "Parser requires NUL padding (kPaddingWidth trailing"
+                   " NUL bytes); use the parse_* entry points";
+        case ErrorCode::BufferTooSmall:
+            return "Buffer too small for in-situ parse";
+        case ErrorCode::InSituPaddingNotNul:
+            return "In-situ buffer padding must be NUL bytes";
+        case ErrorCode::DuplicateKey:
+            return "Duplicate key \"{}\" in object";
+        case ErrorCode::InvalidCodepoint:
+            return "Invalid unicode codepoint";
+        case ErrorCode::FileOpenFailed:
+            return "Failed to open file: {}";
+        case ErrorCode::FileSizeFailed:
+            return "Failed to get file size: {}";
+        case ErrorCode::FileReadFailed:
+            return "Failed to read file: {}";
+        case ErrorCode::StreamReadFailed:
+            return "Failed to read stream";
+        case ErrorCode::NonFiniteDouble:
+            return "Cannot serialize non-finite double (NaN/Inf) to JSON";
+        case ErrorCode::FormatDoubleFailed:
+            return "Failed to format double";
+        case ErrorCode::FormatIntFailed:
+            return "Failed to format integer";
+        case ErrorCode::DumpMaxDepthExceeded:
+            return "Maximum nesting depth exceeded during dump";
+        case ErrorCode::FileWriteOpenFailed:
+            return "Failed to open file for writing: {}";
+        case ErrorCode::FileWriteFailed:
+            return "Failed to write file: {}";
+        case ErrorCode::FileWriteCloseFailed:
+            return "Failed to close file: {}";
+        case ErrorCode::StreamWriteFailed:
+            return "Failed to write to stream";
+        }
+        return "";
+    }
+
+    /**
+     * @brief Fixed-size, zero-allocation kernel failure value
+     *
+     * Trivially copyable and nothrow-move: the parser/writer error slot is
+     * an inline member, so recording/propagating a failure allocates
+     * nothing. Constructing or copying an Error never allocates; format()
+     * is the cold materialisation step that does.
+     *
+     * @note `detail` is a BORROWED view (a file path or a duplicate key)
+     *       into a caller/local buffer. It is valid only until the kernel
+     *       result is materialised into ParseError/JsonError (done in the
+     *       same call frame by the public entries) and MUST NOT outlive
+     *       that. Error is not part of any public Result channel today
+     *       (plan 79 §3.7 Variant A/B).
+     * @note Structurally satisfies pjh::result::Diagnostic (message() +
+     *       kind()); error.hpp deliberately does not include pjh_result,
+     *       so the concept is asserted in the test TU instead.
+     * @note Kernel vocabulary, not a stable machine contract: the public
+     *       exception classes keep their class-level Category contract.
+     */
+    struct Error
+    {
+        ErrorCode code = ErrorCode::None;
+        Category category = Category::Parse; // set by the producing side
+        size_t position = 0;                 // byte offset; 0 when !positioned
+        bool positioned = false;             // true => format() appends " at offset N"
+        std::string_view detail{};           // borrowed; "{}" substitution
+
+        [[nodiscard]] bool has_error() const noexcept
+        {
+            return code != ErrorCode::None;
+        }
+        [[nodiscard]] size_t offset() const noexcept { return position; }
+        [[nodiscard]] Category kind() const noexcept { return category; }
+        [[nodiscard]] std::string_view message() const noexcept
+        {
+            return message_of(code);
+        }
+
+        /**
+         * @brief Build the full what() text (allocates)
+         * @return message_of(code) with `{}` replaced by detail (when
+         *         present) and " at offset N" appended when positioned
+         */
+        [[nodiscard]] std::string format() const;
+    };
+
+    inline std::string Error::format() const
+    {
+        std::string out(message_of(code));
+        if (!detail.empty())
+        {
+            const auto p = out.find("{}");
+            if (p != std::string::npos)
+                out.replace(p, 2, detail);
+            // No placeholder: detail contributes nothing (defensive; every
+            // detail-carrying code carries "{}" — pinned by the golden table
+            // and the 79.5 consistency assert).
+        }
+        if (positioned)
+            out += " at offset " + std::to_string(position);
+        return out;
+    }
+
+    static_assert(std::is_trivially_copyable_v<Error>);
+    static_assert(std::is_nothrow_move_constructible_v<Error>);
+
+    /**
      * @brief Machine tag for a path-typed access failure
      */
     enum class AccessErrorKind
@@ -112,6 +386,16 @@ namespace pjh::json
         using std::runtime_error::runtime_error;
 
         /**
+         * @brief Materialize a kernel failure as a JSON error
+         * @param e Fixed-size kernel Error; its format() becomes what()
+         * @note Compatibility materialisation point for the zero-allocation
+         *       kernel (task 79). The public exception contract
+         *       (type / category / what()) is unchanged; detail is copied
+         *       into the owned what() string, so @p e may be transient.
+         */
+        explicit JsonError(const Error &e) : std::runtime_error(e.format()) {}
+
+        /**
          * @brief Machine-readable class (see Category)
          * @return Category::Json for the base class
          */
@@ -156,6 +440,18 @@ namespace pjh::json
          */
         ParseError(std::string msg, size_t offset)
             : JsonError(std::move(msg)), m_offset(offset)
+        {
+        }
+
+        /**
+         * @brief Materialize a positioned kernel failure
+         * @param e Fixed-size kernel Error; e.offset() becomes offset()
+         * @note Compatibility materialisation point for the zero-allocation
+         *       kernel (task 79). Category stays Category::Parse and the
+         *       what() text is built from the same static message table.
+         */
+        explicit ParseError(const Error &e)
+            : JsonError(e.format()), m_offset(e.offset())
         {
         }
 
