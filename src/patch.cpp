@@ -444,15 +444,16 @@ namespace pjh::json
             if (from.empty())
                 return R::Err(make_error(PatchErrorKind::RootOperation, op_index,
                                          op_name, from_text));
+            // RFC 6902 4.4: "from" MUST exist, including for a self-move no-op.
+            auto resolved = resolve_slot(shadow, from, SlotMode::Existing,
+                                         op_index, op_name, from_text);
+            if (resolved.is_err())
+                return R::Err(std::move(resolved).unwrap_err());
             if (from == path)
                 return R::Ok(); // same location: defined no-op
             if (is_proper_prefix(from, path))
                 return R::Err(make_error(PatchErrorKind::MoveIntoDescendant,
                                          op_index, op_name, path_text));
-            auto resolved = resolve_slot(shadow, from, SlotMode::Existing,
-                                         op_index, op_name, from_text);
-            if (resolved.is_err())
-                return R::Err(std::move(resolved).unwrap_err());
             Slot slot = std::move(resolved).unwrap();
             Json moved;
             if (slot.object)

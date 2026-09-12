@@ -276,6 +276,17 @@ TEST_CASE("Patch: move semantics")
         CHECK(apply_text(target, R"([{"op":"move","from":"/a","path":"/a"}])").is_ok());
         REQUIRE(text_of(target) == R"({"a":1,"b":2})");
     }
+    // from == path at a missing location still fails: RFC 6902 4.4 requires
+    // "from" to exist even when the move is a self-target no-op.
+    {
+        Json target = parse_json(R"({"a":1})");
+        const auto r = apply_text(
+            target, R"([{"op":"move","from":"/missing","path":"/missing"}])");
+        REQUIRE(r.is_err());
+        REQUIRE(r.unwrap_err().code() == PatchErrorKind::PathNotFound);
+        REQUIRE(r.unwrap_err().pointer() == "/missing");
+        REQUIRE(text_of(target) == R"({"a":1})");
+    }
     // from missing -> PathNotFound, pointer is the from pointer.
     {
         Json target = parse_json(R"({"a":1})");
