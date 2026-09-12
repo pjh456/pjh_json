@@ -17,6 +17,7 @@
 #include "pjh_json/json_fwd.hpp"
 #include "pjh_json/object.hpp"
 #include "pjh_json/parser.hpp"
+#include "pjh_json/patch.hpp"
 #include "pjh_json/path.hpp"
 #include "pjh_json/std_interop.hpp"
 #include "pjh_json/stream.hpp"

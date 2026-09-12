@@ -42,6 +42,7 @@ set(PJH_JSON_TEST_SOURCES
     json_constexpr_isolation.cpp
     json_fwd_isolation.cpp
     json_parser.cpp
+    json_patch.cpp
     json_types.cpp
     json_writer.cpp
     literal_test.cpp

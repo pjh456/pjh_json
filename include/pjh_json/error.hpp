@@ -16,8 +16,8 @@ namespace pjh::json
      * @brief Machine-readable error class (no RTTI needed)
      *
      * One value per concrete exception class: ParseError -> Parse,
-     * TypeError -> Type, base JsonError (writer/serialization + write-side
-     * file I/O) -> Json.
+     * TypeError -> Type, PatchError -> Patch, base JsonError
+     * (writer/serialization + write-side file I/O) -> Json.
      *
      * @note Deliberately class-level, not site-level: an Io value is not
      *       expressible per class — file I/O failures are ParseError on the
@@ -26,7 +26,7 @@ namespace pjh::json
      *       throw sites; the "Failed to <verb> file" message family stays the
      *       human distinction (what() is an implementation detail either way).
      */
-    enum class Category { Parse, Type, Json };
+    enum class Category { Parse, Type, Json, Patch };
 
     /**
      * @brief Zero-allocation kernel error vocabulary (one key per failure site)
@@ -375,6 +375,56 @@ namespace pjh::json
     static_assert(std::is_nothrow_move_constructible_v<AccessError>);
 
     /**
+     * @brief Machine tag for an RFC 6902 JSON Patch application failure
+     */
+    enum class PatchErrorKind
+    {
+        InvalidPatchDocument, // top-level not an array / op not an object / missing member
+        UnknownOp,            // "op" is not one of add/remove/replace/move/copy/test
+        InvalidPointer,       // RFC 6901 grammar error (bad escape / missing leading '/')
+        PathNotFound,         // path or from does not resolve
+        TypeMismatch,         // parent node is not a container, or the op cannot apply
+        IndexOutOfRange,      // array index >= size (or > size for add)
+        InvalidArrayIndex,    // leading zero / overflow / '-' in a non-add position
+        TestFailed,           // test value not equal
+        MoveIntoDescendant,   // from is a proper prefix of path
+        RootOperation         // remove/move-from applied to the root pointer
+    };
+
+    /**
+     * @brief Stable name of a PatchErrorKind (machine tag rendering)
+     * @param k Patch error kind
+     * @return Static PascalCase name; empty for an out-of-range value
+     */
+    [[nodiscard]] constexpr std::string_view patch_error_kind_name(PatchErrorKind k) noexcept
+    {
+        switch (k)
+        {
+        case PatchErrorKind::InvalidPatchDocument:
+            return "InvalidPatchDocument";
+        case PatchErrorKind::UnknownOp:
+            return "UnknownOp";
+        case PatchErrorKind::InvalidPointer:
+            return "InvalidPointer";
+        case PatchErrorKind::PathNotFound:
+            return "PathNotFound";
+        case PatchErrorKind::TypeMismatch:
+            return "TypeMismatch";
+        case PatchErrorKind::IndexOutOfRange:
+            return "IndexOutOfRange";
+        case PatchErrorKind::InvalidArrayIndex:
+            return "InvalidArrayIndex";
+        case PatchErrorKind::TestFailed:
+            return "TestFailed";
+        case PatchErrorKind::MoveIntoDescendant:
+            return "MoveIntoDescendant";
+        case PatchErrorKind::RootOperation:
+            return "RootOperation";
+        }
+        return "";
+    }
+
+    /**
      * @brief Base exception for all JSON errors
      */
     class JsonError : public std::runtime_error
@@ -492,6 +542,142 @@ namespace pjh::json
         {
             return Category::Type;
         }
+    };
+
+    namespace detail
+    {
+        /**
+         * @brief Build the what() text of a PatchError (allocates)
+         * @param k Patch error kind
+         * @param op Operation name (raw when unknown)
+         * @param pointer Failing JSON Pointer (path or from)
+         * @param detail Optional extra detail appended as ": <detail>"
+         * @return House-style short message fragment
+         */
+        [[nodiscard]] inline std::string patch_error_message(
+            PatchErrorKind k, std::string_view op, std::string_view pointer,
+            std::string_view detail)
+        {
+            std::string msg;
+            switch (k)
+            {
+            case PatchErrorKind::InvalidPatchDocument:
+                msg = "invalid patch document";
+                break;
+            case PatchErrorKind::UnknownOp:
+                msg = "unknown patch op: ";
+                msg += op;
+                break;
+            case PatchErrorKind::InvalidPointer:
+                msg = "invalid JSON pointer: ";
+                msg += pointer;
+                break;
+            case PatchErrorKind::PathNotFound:
+                msg = "path not found: ";
+                msg += pointer;
+                break;
+            case PatchErrorKind::TypeMismatch:
+                msg = "type mismatch at ";
+                msg += pointer;
+                break;
+            case PatchErrorKind::IndexOutOfRange:
+                msg = "index out of range: ";
+                msg += pointer;
+                break;
+            case PatchErrorKind::InvalidArrayIndex:
+                msg = "invalid array index: ";
+                msg += pointer;
+                break;
+            case PatchErrorKind::TestFailed:
+                msg = "test failed at ";
+                msg += pointer;
+                break;
+            case PatchErrorKind::MoveIntoDescendant:
+                msg = "cannot move into a descendant: ";
+                msg += pointer;
+                break;
+            case PatchErrorKind::RootOperation:
+                msg = "cannot remove or move the document root";
+                break;
+            }
+            if (!detail.empty())
+            {
+                msg += ": ";
+                msg += detail;
+            }
+            return msg;
+        }
+    }
+
+    /**
+     * @brief Structured RFC 6902 patch application failure
+     *
+     * Carries the operation context a caller needs to locate the failing
+     * operation: patch-array index, operation name, JSON Pointer and a
+     * machine tag. Satisfies pjh::result::Diagnostic (message()/kind()) via
+     * JsonError, so a Result carrying it can be rendered by
+     * pjh::result::render().
+     *
+     * @note Unlike AccessError (a value that is never thrown), PatchError
+     *       derives JsonError because it is both thrown by the compatibility
+     *       shell and carried as the E of Result<void, PatchError>.
+     * @note op() is the raw "op" value for UnknownOp and the canonical name
+     *       otherwise; pointer() is the failing "path" (or "from" when the
+     *       failure is on the move/copy source).
+     */
+    class PatchError : public JsonError
+    {
+    public:
+        /**
+         * @brief Construct a structured patch failure
+         * @param code Machine tag
+         * @param op_index 0-based index of the failing operation
+         * @param op Operation name ("op" member; raw when unknown)
+         * @param pointer Failing JSON Pointer (path or from)
+         * @param detail Optional detail appended to what()
+         */
+        PatchError(PatchErrorKind code, size_t op_index, std::string op,
+                   std::string pointer, std::string detail = {})
+            : JsonError(detail::patch_error_message(code, op, pointer, detail)),
+              m_code(code), m_op_index(op_index), m_op(std::move(op)),
+              m_pointer(std::move(pointer))
+        {
+        }
+
+        /**
+         * @brief Machine tag for the failure
+         */
+        [[nodiscard]] PatchErrorKind code() const noexcept { return m_code; }
+
+        /**
+         * @brief 0-based index of the failing operation in the patch array
+         */
+        [[nodiscard]] size_t op_index() const noexcept { return m_op_index; }
+
+        /**
+         * @brief Name of the failing operation ("op" member; raw when unknown)
+         */
+        [[nodiscard]] std::string_view op() const noexcept { return m_op; }
+
+        /**
+         * @brief Failing JSON Pointer (path, or from for a source failure)
+         */
+        [[nodiscard]] std::string_view pointer() const noexcept { return m_pointer; }
+
+        /**
+         * @brief Machine-readable class (see Category)
+         * @return Category::Patch
+         */
+        [[nodiscard]] Category category() const noexcept override
+        {
+            return Category::Patch;
+        }
+
+    private:
+        PatchErrorKind m_code;
+        size_t m_op_index;
+        std::string m_op;
+        std::string m_pointer;
     };
 
 }
