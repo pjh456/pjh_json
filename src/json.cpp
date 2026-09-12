@@ -149,6 +149,8 @@ namespace pjh::json
      */
     Json Json::clone(std::pmr::memory_resource *into) const
     {
+        if (!into)
+            into = Config::instance().resource();
         switch (m_type)
         {
         case Type::Null:

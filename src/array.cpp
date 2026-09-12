@@ -35,6 +35,8 @@ namespace pjh::json
      */
     Array Array::clone(std::pmr::memory_resource *into) const
     {
+        if (!into)
+            into = Config::instance().resource();
         Array out(into);
         out.reserve(m_data.size());
         for (const Json &e : m_data)

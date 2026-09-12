@@ -321,7 +321,8 @@ namespace pjh::json
 
         /**
          * @brief Deep copy into specified memory resource
-         * @param into Allocator for copied values (default: global config resource)
+         * @param into Allocator for copied values (default: global config
+         *        resource; nullptr also falls back to it)
          * @return Independent deep copy
          * @note Strings are materialised (owned) in the target resource.
          */

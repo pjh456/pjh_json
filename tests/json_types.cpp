@@ -227,6 +227,39 @@ TEST_CASE("Json: clone") {
     REQUIRE(cloned["nums"][2] == (int64_t)3);
 }
 
+TEST_CASE("Json: clone null resource falls back to config") {
+    static const char kLong[] = "clone-null-source-long-enough-to-exceed-sso-cap";
+    // Object root with a borrowed string value: pre-fix the value's
+    // String::make_owned(nullptr) dereferences a null polymorphic_allocator
+    // (deterministic SEGV); post-fix it resolves the global Config resource.
+    {
+        auto doc = parse_copy(R"({"s":"clone-null-source-long-enough-to-exceed-sso-cap"})");
+        Json c = doc.root().clone(nullptr);
+        doc.reset();                       // prove independence from the source buffer
+        REQUIRE(c.is_object());
+        REQUIRE(c["s"] == std::string_view(kLong));
+    }
+
+    // Array::clone(nullptr): element string clone is the load-bearing path.
+    Array a = Array::of(Json(kLong));
+    Array ca = a.clone(nullptr);
+    REQUIRE(ca.size() == 1);
+    REQUIRE(ca[0].as_string() == std::string_view(kLong));
+
+    // Object::clone(nullptr): owned key + value clone.
+    Object o;
+    o.insert("k-null", Json(kLong));
+    Object co = o.clone(nullptr);
+    REQUIRE(co.size() == 1);
+    REQUIRE(co.at("k-null").as_string() == std::string_view(kLong));
+
+    // Already-safe controls (existing fallbacks, must stay green).
+    Json jo = Json::own(kLong, nullptr);
+    REQUIRE(jo.as_string() == std::string_view(kLong));
+    Json built(std::string_view(kLong), nullptr);
+    REQUIRE(built.as_string() == std::string_view(kLong));
+}
+
 TEST_CASE("Object: owned key insert") {
     std::pmr::memory_resource *mr = std::pmr::new_delete_resource();
     Object obj;
