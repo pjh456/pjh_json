@@ -6,7 +6,9 @@
 #include "json.hpp"
 #include "json_constexpr.hpp"
 
+#include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -28,9 +30,12 @@
 ///       `include/pjh_json.hpp`: including it pulls in `json_constexpr.hpp`
 ///       (and thus `validate.hpp`), which the umbrella keeps opt-in (task 59).
 /// @note This is a JSON-Schema-*inspired* keyword subset, not a conformant
-///       draft 2020-12 implementation. Only `type`, `required`, `properties`
-///       and `items` are implemented in the structural core (38.1). Unknown
-///       keywords are ignored for forward compatibility.
+///       draft 2020-12 implementation. The structural core (38.1) implements
+///       `type`, `required`, `properties` and `items`; the value constraints
+///       (38.2) add `enum`, `const`, `minLength`/`maxLength`,
+///       `minItems`/`maxItems`, `minimum`/`maximum` and
+///       `additionalProperties: false`. Unknown keywords are ignored for
+///       forward compatibility.
 /// @note Documented deviations from JSON Schema:
 ///       - `"type":"integer"` is tag-based (`Json::is_int()`): `1.0` parses as
 ///         a Floating node here and is rejected, although the mathematical
@@ -39,6 +44,16 @@
 ///       - Keywords apply only inside their domain (a `required` keyword is
 ///         ignored for a non-object instance) and the first failure
 ///         short-circuits.
+///       - `enum`/`const` compare with `Json::operator==`, so the comparison
+///         is tag-strict: an Integer `1` does not equal a Floating `1.0`.
+///       - `minLength`/`maxLength` count Unicode code points (bytes that are
+///         not UTF-8 continuation bytes), not raw bytes.
+///       - `minimum`/`maximum` are inclusive and accept an Integer or a
+///         Floating bound; both Integer and Floating instances are numbers.
+///       - `additionalProperties` accepts only a boolean: `false` rejects
+///         keys not listed in the same node's `properties`, `true` allows
+///         them. The sub-schema form (validate extra keys against a schema)
+///         is out of scope for this MVP.
 ///       - `"type"` is always evaluated first regardless of authored order;
 ///         the remaining keywords run in authored order.
 ///       - The schema must be a `ConstJsonObject`; a scalar or array schema is
@@ -322,7 +337,344 @@ namespace pjh::json::schema
             }
         }
 
-        // ---- keyword dispatch ----------------------------------------------
+        // ---- enum / const --------------------------------------------------
+
+        /// @brief Render a runtime value for an error message (cold path).
+        [[nodiscard]] inline std::string value_repr(const Json &value)
+        {
+            if (value.is_null())
+                return "null";
+            if (value.is_boolean())
+                return value.as_boolean() ? "true" : "false";
+            if (value.is_int())
+                return std::to_string(value.as_int());
+            if (value.is_float())
+            {
+                char buf[32];
+                const auto r = std::to_chars(buf, buf + sizeof(buf), value.as_float());
+                return std::string(buf, r.ptr);
+            }
+            if (value.is_string())
+                return "\"" + std::string(value.as_string()) + "\"";
+            return std::string(pjh::json::detail::type_name(value));
+        }
+
+        /// @brief `enum`: the instance must equal one of the schema array
+        ///        members under the `Json::operator==` model.
+        template <typename V>
+        [[nodiscard]] schema_result check_enum(const V &schema_value, const Json &value, PathBuf &pb)
+        {
+            if constexpr (!is_const_json_array_v<V>)
+            {
+                return invalid_schema(pb.s, "enum", "array of values");
+            }
+            else
+            {
+                const Json allowed = to_runtime(schema_value);
+                const Array &values = allowed.as_array();
+                for (std::size_t i = 0; i < values.size(); ++i)
+                {
+                    if (value == values[i])
+                        return ok();
+                }
+                return schema_result::Err(
+                    SchemaError(SchemaErrorKind::EnumMismatch, pb.s, "one of enum", value_repr(value), "enum"));
+            }
+        }
+
+        /// @brief `const`: exact equality with the single schema value.
+        template <typename V>
+        [[nodiscard]] schema_result check_const(const V &schema_value, const Json &value, PathBuf &pb)
+        {
+            const Json expected = to_runtime(schema_value);
+            if (value == expected)
+                return ok();
+            return schema_result::Err(
+                SchemaError(SchemaErrorKind::ConstMismatch, pb.s, "const value", value_repr(value), "const"));
+        }
+
+        // ---- length / items bounds -----------------------------------------
+
+        /// @brief Number of Unicode code points (bytes that are not UTF-8
+        ///        continuation bytes); invalid UTF-8 is counted as best effort.
+        [[nodiscard]] inline std::size_t utf8_code_point_length(std::string_view s) noexcept
+        {
+            std::size_t n = 0;
+            for (char c : s)
+            {
+                if ((static_cast<unsigned char>(c) & 0xC0) != 0x80)
+                    ++n;
+            }
+            return n;
+        }
+
+        /// @brief Read a non-negative integer keyword argument.
+        /// @return false when the argument is not a non-negative ConstJsonInt.
+        template <typename V>
+        [[nodiscard]] bool non_negative_int_bound(const V &schema_value, std::int64_t &out) noexcept
+        {
+            if constexpr (std::is_same_v<std::decay_t<V>, ConstJsonInt>)
+            {
+                out = schema_value.v;
+                return schema_value.v >= 0;
+            }
+            else
+            {
+                (void)schema_value;
+                (void)out;
+                return false;
+            }
+        }
+
+        /// @brief `minLength`: code-point count >= N (strings only).
+        template <typename V>
+        [[nodiscard]] schema_result check_min_length(const V &schema_value, const Json &value, PathBuf &pb)
+        {
+            std::int64_t bound = 0;
+            if (!non_negative_int_bound(schema_value, bound))
+                return invalid_schema(pb.s, "minLength", "non-negative integer");
+            if (!value.is_string())
+                return ok(); // keyword outside its domain
+            const std::size_t len = utf8_code_point_length(value.as_string());
+            if (len >= static_cast<std::size_t>(bound))
+                return ok();
+            return schema_result::Err(SchemaError(SchemaErrorKind::TooShort, pb.s, "length>=" + std::to_string(bound),
+                                                  std::to_string(len), "minLength"));
+        }
+
+        /// @brief `maxLength`: code-point count <= N (strings only).
+        template <typename V>
+        [[nodiscard]] schema_result check_max_length(const V &schema_value, const Json &value, PathBuf &pb)
+        {
+            std::int64_t bound = 0;
+            if (!non_negative_int_bound(schema_value, bound))
+                return invalid_schema(pb.s, "maxLength", "non-negative integer");
+            if (!value.is_string())
+                return ok();
+            const std::size_t len = utf8_code_point_length(value.as_string());
+            if (len <= static_cast<std::size_t>(bound))
+                return ok();
+            return schema_result::Err(SchemaError(SchemaErrorKind::TooLong, pb.s, "length<=" + std::to_string(bound),
+                                                  std::to_string(len), "maxLength"));
+        }
+
+        /// @brief `minItems`: array size >= N (arrays only).
+        template <typename V>
+        [[nodiscard]] schema_result check_min_items(const V &schema_value, const Json &value, PathBuf &pb)
+        {
+            std::int64_t bound = 0;
+            if (!non_negative_int_bound(schema_value, bound))
+                return invalid_schema(pb.s, "minItems", "non-negative integer");
+            if (!value.is_array())
+                return ok();
+            const std::size_t size = value.as_array().size();
+            if (size >= static_cast<std::size_t>(bound))
+                return ok();
+            return schema_result::Err(SchemaError(SchemaErrorKind::TooShort, pb.s, "items>=" + std::to_string(bound),
+                                                  std::to_string(size), "minItems"));
+        }
+
+        /// @brief `maxItems`: array size <= N (arrays only).
+        template <typename V>
+        [[nodiscard]] schema_result check_max_items(const V &schema_value, const Json &value, PathBuf &pb)
+        {
+            std::int64_t bound = 0;
+            if (!non_negative_int_bound(schema_value, bound))
+                return invalid_schema(pb.s, "maxItems", "non-negative integer");
+            if (!value.is_array())
+                return ok();
+            const std::size_t size = value.as_array().size();
+            if (size <= static_cast<std::size_t>(bound))
+                return ok();
+            return schema_result::Err(SchemaError(SchemaErrorKind::TooLong, pb.s, "items<=" + std::to_string(bound),
+                                                  std::to_string(size), "maxItems"));
+        }
+
+        // ---- numeric bounds ------------------------------------------------
+
+        /// @brief A numeric keyword bound (Integer or Floating schema value).
+        struct NumericBound
+        {
+            bool is_integer = true; ///< true: compare through `i`; false: through `d`
+            std::int64_t i = 0;     ///< Integer bound when is_integer
+            double d = 0.0;         ///< Floating bound (also the widened Integer)
+        };
+
+        /// @brief Read a numeric keyword argument.
+        /// @return false when the argument is neither ConstJsonInt nor
+        ///         ConstJsonDouble (reported as InvalidSchema by the caller).
+        template <typename V> [[nodiscard]] bool numeric_bound_of(const V &schema_value, NumericBound &out) noexcept
+        {
+            if constexpr (std::is_same_v<std::decay_t<V>, ConstJsonInt>)
+            {
+                out.is_integer = true;
+                out.i = schema_value.v;
+                out.d = static_cast<double>(schema_value.v);
+                return true;
+            }
+            else if constexpr (std::is_same_v<std::decay_t<V>, ConstJsonDouble>)
+            {
+                out.is_integer = false;
+                out.i = 0;
+                out.d = schema_value.v;
+                return true;
+            }
+            else
+            {
+                (void)schema_value;
+                (void)out;
+                return false;
+            }
+        }
+
+        /// @brief Render a numeric bound for an error message.
+        [[nodiscard]] inline std::string numeric_bound_text(const NumericBound &bound)
+        {
+            if (bound.is_integer)
+                return std::to_string(bound.i);
+            char buf[32];
+            const auto r = std::to_chars(buf, buf + sizeof(buf), bound.d);
+            return std::string(buf, r.ptr);
+        }
+
+        /// @brief value >= bound, preserving int64 precision when both are int.
+        [[nodiscard]] inline bool above_or_equal(const Json &value, const NumericBound &bound) noexcept
+        {
+            if (value.is_int())
+            {
+                if (bound.is_integer)
+                    return value.as_int() >= bound.i;
+                return static_cast<double>(value.as_int()) >= bound.d;
+            }
+            if (bound.is_integer)
+                return value.as_float() >= static_cast<double>(bound.i);
+            return value.as_float() >= bound.d;
+        }
+
+        /// @brief value <= bound, preserving int64 precision when both are int.
+        [[nodiscard]] inline bool below_or_equal(const Json &value, const NumericBound &bound) noexcept
+        {
+            if (value.is_int())
+            {
+                if (bound.is_integer)
+                    return value.as_int() <= bound.i;
+                return static_cast<double>(value.as_int()) <= bound.d;
+            }
+            if (bound.is_integer)
+                return value.as_float() <= static_cast<double>(bound.i);
+            return value.as_float() <= bound.d;
+        }
+
+        /// @brief `minimum`: value >= bound (inclusive, numbers only).
+        template <typename V>
+        [[nodiscard]] schema_result check_minimum(const V &schema_value, const Json &value, PathBuf &pb)
+        {
+            NumericBound bound{};
+            if (!numeric_bound_of(schema_value, bound))
+                return invalid_schema(pb.s, "minimum", "number");
+            if (!value.is_number())
+                return ok();
+            if (above_or_equal(value, bound))
+                return ok();
+            return schema_result::Err(SchemaError(SchemaErrorKind::BelowMinimum, pb.s, ">=" + numeric_bound_text(bound),
+                                                  value_repr(value), "minimum"));
+        }
+
+        /// @brief `maximum`: value <= bound (inclusive, numbers only).
+        template <typename V>
+        [[nodiscard]] schema_result check_maximum(const V &schema_value, const Json &value, PathBuf &pb)
+        {
+            NumericBound bound{};
+            if (!numeric_bound_of(schema_value, bound))
+                return invalid_schema(pb.s, "maximum", "number");
+            if (!value.is_number())
+                return ok();
+            if (below_or_equal(value, bound))
+                return ok();
+            return schema_result::Err(SchemaError(SchemaErrorKind::AboveMaximum, pb.s, "<=" + numeric_bound_text(bound),
+                                                  value_repr(value), "maximum"));
+        }
+
+        // ---- additionalProperties ------------------------------------------
+
+        /// @brief True when @p key is a declared key of a `properties` object.
+        template <typename PV> [[nodiscard]] bool properties_has_key(const PV &props, std::string_view key)
+        {
+            if constexpr (!is_const_json_object_v<PV>)
+            {
+                (void)props;
+                (void)key;
+                return false;
+            }
+            else
+            {
+                (void)props;
+                (void)key;
+                using Entries = std::decay_t<decltype(props.entries)>;
+                constexpr std::size_t n = std::tuple_size_v<Entries>;
+                bool found = false;
+                [&]<std::size_t... I>(std::index_sequence<I...>)
+                {
+                    ((found = found || (std::get<I>(props.entries).key == key)), ...);
+                }(std::make_index_sequence<n>{});
+                return found;
+            }
+        }
+
+        /// @brief True when @p key is declared in the node's `properties`.
+        template <typename Parent> [[nodiscard]] bool is_declared_property(const Parent &parent, std::string_view key)
+        {
+            (void)parent;
+            (void)key;
+            using Entries = std::decay_t<decltype(parent.entries)>;
+            constexpr std::size_t n = std::tuple_size_v<Entries>;
+            bool found = false;
+            [&]<std::size_t... I>(std::index_sequence<I...>)
+            {
+                ((found = found || (std::get<I>(parent.entries).key == "properties" &&
+                                    properties_has_key(std::get<I>(parent.entries).value, key))),
+                 ...);
+            }(std::make_index_sequence<n>{});
+            return found;
+        }
+
+        /// @brief `additionalProperties`: `false` rejects keys not declared in
+        ///        the same node's `properties`; `true` (or an absent keyword)
+        ///        allows them. Non-boolean arguments are InvalidSchema.
+        template <typename Parent, typename APV>
+        [[nodiscard]] schema_result check_additional_properties(const Parent &parent, const APV &ap_value,
+                                                                const Json &value, PathBuf &pb)
+        {
+            if constexpr (!std::is_same_v<std::decay_t<APV>, ConstJsonBool>)
+            {
+                (void)parent;
+                (void)ap_value;
+                (void)value;
+                return invalid_schema(pb.s, "additionalProperties", "boolean");
+            }
+            else
+            {
+                if (ap_value.v)
+                    return ok(); // true: extra keys allowed
+                if (!value.is_object())
+                    return ok(); // keyword outside its domain
+
+                const Object &obj = value.as_object();
+                for (const auto &entry : obj)
+                {
+                    const std::string_view key = entry.first;
+                    if (is_declared_property(parent, key))
+                        continue;
+                    const std::size_t mark = pb.push_key(key);
+                    schema_result r =
+                        schema_result::Err(SchemaError(SchemaErrorKind::UnexpectedProperty, pb.s, "declared property",
+                                                       "unexpected", "additionalProperties"));
+                    pb.rewind(mark);
+                    return r;
+                }
+                return ok();
+            }
+        }
 
         /// @brief Dispatch one non-`type` keyword; unknown keywords are ignored.
         template <typename V>
@@ -335,6 +687,22 @@ namespace pjh::json::schema
                 return check_properties(schema_value, value, pb);
             if (keyword == "items")
                 return check_items(schema_value, value, pb);
+            if (keyword == "enum")
+                return check_enum(schema_value, value, pb);
+            if (keyword == "const")
+                return check_const(schema_value, value, pb);
+            if (keyword == "minLength")
+                return check_min_length(schema_value, value, pb);
+            if (keyword == "maxLength")
+                return check_max_length(schema_value, value, pb);
+            if (keyword == "minItems")
+                return check_min_items(schema_value, value, pb);
+            if (keyword == "maxItems")
+                return check_max_items(schema_value, value, pb);
+            if (keyword == "minimum")
+                return check_minimum(schema_value, value, pb);
+            if (keyword == "maximum")
+                return check_maximum(schema_value, value, pb);
             return ok();
         }
 
@@ -373,6 +741,10 @@ namespace pjh::json::schema
                                       {
                                           if (entry.key == "type")
                                               return ok();
+                                          // additionalProperties needs the
+                                          // sibling `properties` of this node.
+                                          if (entry.key == "additionalProperties")
+                                              return check_additional_properties(schema, entry.value, value, pb);
                                           return apply_keyword(entry.key, entry.value, value, pb);
                                       });
             }
