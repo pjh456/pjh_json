@@ -19,7 +19,8 @@ namespace pjh::json
      * Uses SIMD (via xsimd) for whitespace skipping and string scanning.
      * The SIMD scan may read up to one batch (kPaddingWidth NUL bytes) past
      * the content, so the input range must carry that much NUL padding.
-     * parse_copy(), parse_file() and parse_jsonl() pad automatically;
+     * parse_copy(), parse_file(), parse_from_istream() and parse_jsonl() pad
+     * automatically;
      * parse_in_situ() and parse_view() require caller-provided padding
      * (parse_in_situ verifies the tail, parse_view cannot — see
      * kPaddingWidth).
@@ -49,10 +50,11 @@ namespace pjh::json
            *       parse_jsonl's per-line parsers pass false (the BOM is
            *       consumed once at the whole-input start).
            * @param strict_utf8 Validate raw UTF-8 in string content
-           *       (Config::strict_utf8); all five parse entries pass it.
+           *       (Config::strict_utf8); all six parse entries pass it.
            * @note If assume_padded is false, parse() will immediately throw ParseError.
-           *       All five parse_* entry points set it to true:
-           *       parse_copy/parse_file/parse_jsonl over self-padded buffers,
+           *       All six parse_* entry points set it to true:
+           *       parse_copy/parse_file/parse_from_istream/parse_jsonl over
+           *       self-padded buffers,
            *       parse_in_situ/parse_view over caller-padded buffers.
            */
           explicit Parser(

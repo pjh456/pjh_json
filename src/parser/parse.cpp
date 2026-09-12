@@ -1,6 +1,7 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/document.hpp"
 #include <fstream>
+#include <istream>
 #include <cstring>
 
 namespace pjh::json
@@ -8,6 +9,8 @@ namespace pjh::json
     namespace
     {
         constexpr size_t kBlock = 4096;
+        // Read block for the whole-stream buffering loop.
+        constexpr size_t kStreamChunk = 8192;
         // Largest auto-scaled block: 16 GB on 64-bit size_t, 1 GB on 32-bit
         // where `size_t(1) << 34` would shift by the full type width (UB).
 #if SIZE_MAX > 0xFFFFFFFFu
@@ -320,6 +323,52 @@ namespace pjh::json
     }
 
     /*
+     * Parse JSON from an input stream (whole-stream buffer, then delegate)
+     *
+     * 1. A stream already in bad state fails as a read error (context-free).
+     * 2. Read the remaining content in kStreamChunk blocks. A 0-byte
+     *    extraction is the normal end (empty stream, or clean EOF at a
+     *    chunk boundary) and is NOT a read failure: implementations may set
+     *    badbit on a 0-byte read, so the badbit test only applies to
+     *    partial reads (hard I/O errors surface there, e.g. filebuf EIO).
+     * 3. Pad with kPaddingWidth NUL bytes and delegate to parse_in_situ
+     *    (same delegation parse_file uses at parse.cpp:322) — padding
+     *    check, arena sizing, Parser construction and Document
+     *    bookkeeping all happen there.
+     * 4. Offsets are relative to the stream start (buffer start); read
+     *    failures are context-free (offset 0), like parse_file's I/O
+     *    failures; allocation failures propagate std::bad_alloc
+     *    unconverted (plan 14 ruling).
+     */
+    Document parse_from_istream(std::istream &in, Storage storage)
+    {
+        if (in.bad())
+            throw ParseError("Failed to read stream");
+
+        std::pmr::string buffer;
+        char chunk[kStreamChunk];
+        for (;;)
+        {
+            in.read(chunk, static_cast<std::streamsize>(sizeof chunk));
+            const std::streamsize got = in.gcount();
+            if (got > 0)
+                buffer.append(chunk, static_cast<size_t>(got));
+            if (got == 0)
+                break;              // 0-byte read: end of stream, not an error
+            if (in.bad())
+                throw ParseError("Failed to read stream");
+            if (in.fail())
+                break;              // clean end-of-stream mid-chunk
+        }
+
+        check_padded_fits(buffer.size());
+
+        buffer.resize(buffer.size() + kPaddingWidth, '\0');
+
+        return parse_in_situ(std::move(buffer), storage);
+    }
+
+    /*
      * Structured-entry shells (task 16): thin catch-and-wrap over the
      * throwing entries. Ladder: ParseError -> stored by value (offset and
      * category survive the copy — no slicing, E is pinned to the most
@@ -398,6 +447,24 @@ namespace pjh::json
         try
         {
             return pjh::result::Result<Document, ParseError>::Ok(parse_file(filepath, storage));
+        }
+        catch (const ParseError &e)
+        {
+            return pjh::result::Result<Document, ParseError>::Err(ParseError(e));
+        }
+        catch (const JsonError &)
+        {
+            throw;
+        }
+    }
+
+    pjh::result::Result<Document, ParseError>
+    parse_from_istream_result(std::istream &in, Storage storage)
+    {
+        try
+        {
+            return pjh::result::Result<Document, ParseError>::Ok(
+                parse_from_istream(in, storage));
         }
         catch (const ParseError &e)
         {

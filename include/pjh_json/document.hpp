@@ -4,6 +4,7 @@
 #include <memory>
 #include <memory_resource>
 #include <string_view>
+#include <iosfwd>
 
 #include <pjh_result/result.hpp>
 #include "json.hpp"
@@ -252,6 +253,34 @@ namespace pjh::json
         Storage storage = Config::instance().storage());
 
     /**
+     * @brief Parse JSON from an input stream
+     * @param in  Input stream; its remaining content is read fully into a
+     *            padded buffer (the stream is consumed to end)
+     * @param storage Allocation strategy (default: global config)
+     * @return Document owning the parsed tree and the buffered stream
+     *         content
+     * @throws ParseError if the stream read fails (context-free, offset 0),
+     *         or the content is invalid JSON (positioned, offsets relative
+     *         to the stream start)
+     * @note Whole-stream buffering: memory = input size + kPaddingWidth
+     *       NUL bytes + the DOM. This is NOT incremental parsing
+     *       (roadmap 35) — the parser runs only on the complete in-memory
+     *       buffer. The stream itself may be any source (stringstream,
+     *       file, socket, pipe, filtering stream): no seek/tellg is used.
+     * @note All Config parse knobs (max_depth, strict_duplicate_keys,
+     *       strip_bom, strict_utf8) apply unchanged: the entry delegates to
+     *       parse_in_situ and reads none of them itself.
+     * @note A stream presenting no data (empty, drained, or at end) parses
+     *       as empty input: ParseError, offset 0. A stream already in bad
+     *       state reports the read failure instead.
+     * @note The compile-time path (ConstJson::parse) is string_view-only by
+     *       construction; there is no stream form.
+     */
+    [[nodiscard]] Document parse_from_istream(
+        std::istream &in,
+        Storage storage = Config::instance().storage());
+
+    /**
      * @brief Parse buffer with trailing kPaddingWidth-byte padding (result form)
      * @param buffer Padded pmr::string (must have kPaddingWidth extra NUL
      *               bytes)
@@ -334,6 +363,23 @@ namespace pjh::json
      */
     [[nodiscard]] pjh::result::Result<Document, ParseError> parse_file_result(
         std::string_view filepath,
+        Storage storage = Config::instance().storage());
+
+    /**
+     * @brief Parse JSON from an input stream (result form)
+     * @param in  Input stream (same contract as parse_from_istream)
+     * @param storage Allocation strategy (default: global config)
+     * @return Result holding the Document on success, or the ParseError
+     *         (copied by value, offset preserved) on failure
+     * @throws std::bad_alloc propagates unconverted; a non-contract
+     *         JsonError escaping the parse core (unreachable in the current
+     *         core) is rethrown
+     * @note Same contract as parse_from_istream; thin catch-and-wrap shell.
+     *       Stream read failures are context-free (offset 0).
+     */
+    [[nodiscard]] pjh::result::Result<Document, ParseError>
+    parse_from_istream_result(
+        std::istream &in,
         Storage storage = Config::instance().storage());
 
     /// @cond DOXYGEN_SKIP
