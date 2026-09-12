@@ -1721,6 +1721,26 @@ namespace pjh::json
         const Object::Vec *m{nullptr};
     };
 
+    /// @cond DOXYGEN_SKIP
+    template <class... Ts>
+        requires(std::constructible_from<Json, Ts> && ...)
+    inline Array Array::of(Ts &&...vals)
+    {
+        Array a;
+        a.reserve(sizeof...(vals));
+        (a.push_back(Json(std::forward<Ts>(vals))), ...);
+        return a;
+    }
+
+    template <class... Es>
+        requires(std::convertible_to<Es, Object::Entry> && ...)
+    inline Object Object::of(Es &&...entries)
+    {
+        Object o;
+        (o.insert(Object::Entry(std::forward<Es>(entries))), ...);
+        return o;
+    }
+    /// @endcond
 }
 
 // std::hash<Json> — content-based (equal values hash equal; the payload

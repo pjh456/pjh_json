@@ -259,6 +259,8 @@ namespace pjh::json
          * @tparam Es Types convertible to Object::Entry
          * @param entries Key-value pairs to insert
          * @return Object containing all entries
+         * @note Definition lives in <pjh_json/json.hpp>, the header that
+         *       completes Json; include it (or the umbrella) to instantiate.
          */
         template <class... Es>
             requires(std::convertible_to<Es, Object::Entry> && ...)

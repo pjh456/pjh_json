@@ -91,6 +91,8 @@ namespace pjh::json
          * @tparam Ts Types constructible as Json
          * @param vals Values to populate (forwarded to Json ctors)
          * @return Array containing all vals in order
+         * @note Definition lives in <pjh_json/json.hpp>, the header that
+         *       completes Json; include it (or the umbrella) to instantiate.
          */
         template <class... Ts>
             requires(std::constructible_from<Json, Ts> && ...)

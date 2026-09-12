@@ -11,6 +11,7 @@ set(PJH_JSON_TEST_SOURCES
     access_result.cpp
     config_document.cpp
     constexpr_json_test.cpp
+    header_isolation.cpp
     json_parser.cpp
     json_types.cpp
     json_writer.cpp
