@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <filesystem>
 #include <stdexcept>
 
 #include <pjh_json/document.hpp>
@@ -387,4 +388,34 @@ TEST_CASE("File: parse stream short name") {
             REQUIRE(e.offset() == 0);
         }
     }
+}
+
+TEST_CASE("File: directory read is a context-free open failure") {
+    const std::string dir = "pjh_dir_read_test"; // a directory, not a file
+    std::error_code ec;
+    std::filesystem::create_directory(dir, ec);
+    REQUIRE_FALSE(ec);
+
+    const std::string expect = "Failed to open file: " + dir;
+
+    // Throwing shell: typed, context-free ParseError — never std::length_error.
+    // (An escaping length_error/bad_alloc is not caught here and fails the case.)
+    try {
+        (void)parse_file(dir);
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.category() == Category::Parse);
+        REQUIRE(e.offset() == 0);
+        REQUIRE(std::string(e.what()) == expect);
+    }
+
+    // Result shell: same classification in the error channel.
+    auto r = parse_file_result(dir);
+    REQUIRE(r.is_err());
+    ParseError e = r.unwrap_err();
+    REQUIRE(e.category() == Category::Parse);
+    REQUIRE(e.offset() == 0);
+    REQUIRE(std::string(e.what()) == expect);
+
+    std::filesystem::remove(dir, ec);
 }

@@ -5,6 +5,8 @@
 #include <fstream>
 #include <istream>
 #include <cstring>
+#include <filesystem>
+#include <system_error>
 
 namespace pjh::json
 {
@@ -401,6 +403,20 @@ namespace pjh::json
     parse_file_impl(std::string_view filepath, Storage storage)
     {
         std::string path(filepath);
+
+        // A directory is not a readable JSON file. On POSIX some filesystem /
+        // libc combinations let std::ifstream open a directory anyway; tellg()
+        // then reports an unusable value (INT64_MAX on ext4/overlayfs) that
+        // passes the signed and padded_fits guards, after which resize() throws
+        // std::length_error. Reject the path up front as a context-free open
+        // failure: this both matches the archived golden behavior and makes the
+        // classification filesystem-independent (tmpfs already fails is_open()).
+        // is_directory uses the error_code overload: it never throws.
+        std::error_code ec;
+        if (std::filesystem::is_directory(path, ec))
+            return parse_error(Error{ErrorCode::FileOpenFailed,
+                                     Category::Parse, 0, false, filepath});
+
         std::ifstream file(path, std::ios::binary | std::ios::ate);
         if (!file.is_open())
             return parse_error(Error{ErrorCode::FileOpenFailed,
@@ -417,6 +433,16 @@ namespace pjh::json
                                      Category::Parse, 0, false, {}});
 
         std::pmr::string buffer; // same default-resource buffer as before 79.4
+        // tellg() can report a value that passes padded_fits yet exceeds the
+        // buffer's representable size (e.g. INT64_MAX); resize() would then
+        // throw std::length_error instead of a typed ParseError. Reject anything
+        // the buffer cannot hold before allocating. This is exactly resize()'s
+        // precondition, so it is portable across standard libraries.
+        if (buffer.max_size() < kPaddingWidth ||
+            static_cast<size_t>(size) > buffer.max_size() - kPaddingWidth)
+            return parse_error(Error{ErrorCode::FileSizeFailed,
+                                     Category::Parse, 0, false, filepath});
+
         buffer.resize(size + kPaddingWidth, '\0');
 
         if (!file.read(buffer.data(), size))

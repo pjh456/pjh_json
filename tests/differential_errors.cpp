@@ -26,16 +26,13 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <type_traits>
-
-#ifndef _WIN32
-#include <filesystem>
 #include <system_error>
-#endif
+#include <type_traits>
 
 using namespace pjh::json;
 
@@ -864,57 +861,32 @@ TEST_CASE("Differential errors: context-free parse entries")
         verify_row(*r, thr, res, true);
     }
 
-#ifndef _WIN32
-    // Optional POSIX row: whether std::ifstream opens a directory at all is
-    // filesystem-dependent. tmpfs rejects it -> FileOpenFailed; ext4 /
-    // overlayfs can open it, after which the read-side kernel currently
-    // surfaces std::length_error (tellg() == INT64_MAX) instead of a
-    // context-free ParseError. Assert the golden tuple only when the host
-    // actually reports FileOpenFailed; a relative directory keeps the path
-    // portable (no hardcoded /tmp). The probe is isolated so a host-specific
-    // throw cannot redden the case, while verify_row (a real failure) stays
-    // outside the catch.
+    // Directory path: not a readable file. The is_directory pre-check makes
+    // the classification filesystem-independent, so this row is assertable on
+    // every platform (including Windows, where ifstream already failed).
     {
         const std::string dir = "pjh_t79_dir_probe";
         std::error_code ec;
         std::filesystem::create_directory(dir, ec);
         const std::string expect = "Failed to open file: " + dir;
-        observed thr;
-        observed res;
-        bool probed = false;
-        try
-        {
-            thr = observe_throw([&] { (void)parse_file(dir); });
-            res = observe_result(parse_file_result(dir));
-            probed = true;
-        }
-        catch (const std::exception &)
-        {
-            // Directory opened and the read-side kernel threw; see above.
-        }
+
+        auto thr = observe_throw([&] { (void)parse_file(dir); });
+        auto res = observe_result(parse_file_result(dir));
+
         std::filesystem::remove(dir, ec);
-        if (probed && thr.threw && thr.is_parse_error && thr.offset == 0 &&
-            thr.what == expect)
-        {
-            golden_row r{};
-            r.label = "file.directory_read";
-            r.group = Group::ContextFree;
-            r.code = ErrorCode::FileOpenFailed;
-            r.category = Category::Parse;
-            r.offset = 0;
-            r.positioned = false;
-            r.what = expect;
-            r.detail = dir;
-            r.input = dir;
-            verify_row(r, thr, res, true);
-        }
-        else
-        {
-            MESSAGE("file.directory_read skipped: host ifstream directory-open "
-                    "behavior differs");
-        }
+
+        golden_row r{};
+        r.label = "file.directory_read";
+        r.group = Group::ContextFree;
+        r.code = ErrorCode::FileOpenFailed;
+        r.category = Category::Parse;
+        r.offset = 0;
+        r.positioned = false;
+        r.what = expect;
+        r.detail = dir;
+        r.input = dir;
+        verify_row(r, thr, res, true);
     }
-#endif
 }
 
 // ---------------------------------------------------------------------------
