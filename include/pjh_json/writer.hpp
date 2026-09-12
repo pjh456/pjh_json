@@ -18,6 +18,13 @@ namespace pjh::json
      *       any other value makes the dump fail with a JsonError
      *       (Category::Json) before any output byte is written. Compact mode
      *       ignores @c indent_char and never validates it.
+     * @note Pretty output size is inherent to the input shape, not an
+     *       implementation-side leak: a depth-D chain re-indents every line,
+     *       so it emits @c indent * Theta(D^2) bytes (the deepest line alone
+     *       is @c indent * (D-1) bytes). Each indent run is one linear append.
+     *       The default @c Config::max_depth (512) bounds the default worst
+     *       case to ~512 KiB; @c indent is a @c uint8_t (<= 255), so a
+     *       user-chosen indent scales that bound (up to ~63.5 MiB at 255).
      */
     struct DumpOptions
     {

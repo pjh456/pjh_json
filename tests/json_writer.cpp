@@ -40,6 +40,29 @@ namespace
             Config::instance().set_max_depth(m_max_depth);
         }
     };
+
+    // Local allocation counter (no dependency on the private
+    // src/counting_resource.hpp). It forwards to new_delete_resource, so the
+    // same resource frees what it allocated.
+    struct CountingResource : std::pmr::memory_resource
+    {
+        size_t allocations = 0;
+        size_t bytes = 0;
+
+        void *do_allocate(size_t n, size_t a) override
+        {
+            ++allocations;
+            bytes += n;
+            return std::pmr::new_delete_resource()->allocate(n, a);
+        }
+
+        void do_deallocate(void *p, size_t n, size_t a) override
+        {
+            std::pmr::new_delete_resource()->deallocate(p, n, a);
+        }
+
+        bool do_is_equal(const std::pmr::memory_resource &o) const noexcept override { return this == &o; }
+    };
 }
 
 TEST_CASE("Writer: dump compact") {
@@ -640,4 +663,65 @@ TEST_CASE("Writer: indent_char validation")
     // JSONL has no DumpOptions and is structurally compact: unaffected.
     Array arr = Array::of(Json(1), Json(2));
     REQUIRE(sv(dump_jsonl(arr)) == "1\n2\n");
+}
+
+TEST_CASE("Writer: pretty deep nesting output")
+{
+    MaxDepthGuard guard; // RAII: restores entering max_depth, even on throw
+
+    // Purely synthetic depth-D chain: "["*D + "]"*D (innermost empty array).
+    auto deep = [](size_t n)
+    {
+        return std::string(n, '[') + std::string(n, ']');
+    };
+
+    // 1) Format pin (small chain). The innermost empty array is "[]" with no
+    //    newline/indent, so only the D-1 non-empty levels emit one.
+    auto d3 = parse_copy(deep(3));
+    auto p3 = dump(d3.root(), DumpOptions{.pretty = true, .indent = 2});
+    REQUIRE(sv(p3) == "[\n  [\n    []\n  ]\n]");
+
+    // 2) Exact Theta(D^2) size, derived from "each non-empty level emits a
+    //    newline + depth*w indent bytes": size(n,w) = w*(n-1)^2 + 4n - 2.
+    //    The quadratic term is the pretty output volume itself; the writer
+    //    emits each indent run with a single linear append.
+    for (size_t n : {size_t(2), size_t(3), size_t(5), size_t(16), size_t(64)})
+    {
+        CAPTURE(n);
+        auto d = parse_copy(deep(n));
+        auto out = dump(d.root(), DumpOptions{.pretty = true, .indent = 4});
+        REQUIRE(out.size() == 4 * (n - 1) * (n - 1) + 4 * n - 2);
+    }
+
+    // 3) Default cap worst case is bounded: n = 512, w = 2 -> exactly 512 KiB.
+    auto d512 = parse_copy(deep(Config::kDefaultMaxDepth));
+    auto out = dump(d512.root(), DumpOptions{.pretty = true, .indent = 2});
+    REQUIRE(out.size() == (size_t)524288); // 2*511^2 + 4*512 - 2
+    REQUIRE(out.front() == '[');
+    REQUIRE(out.back() == ']');
+
+    // A large (but legal) uint8_t indent scales that bound; w = 8 -> ~2.0 MiB
+    // (8*511^2 + 4*512 - 2 = 2,091,014).
+    auto out8 = dump(d512.root(), DumpOptions{.pretty = true, .indent = 8});
+    REQUIRE(out8.size() ==
+            8 * (Config::kDefaultMaxDepth - 1) * (Config::kDefaultMaxDepth - 1) + 4 * Config::kDefaultMaxDepth - 2);
+
+    // 4) No per-line allocation: the pmr sink grows geometrically, so the
+    //    allocation count is O(log output), far below the ~2*512 indent runs.
+    //    A per-line indent rebuild/allocation (the real implementation-level
+    //    quadratic) would blow this bound immediately. Bounds are loose to
+    //    tolerate libstdc++/libc++/MSVC growth policies.
+    CountingResource cr;
+    auto out_c = dump(d512.root(), DumpOptions{.pretty = true, .indent = 2}, &cr);
+    REQUIRE(out_c.size() == out.size());
+    REQUIRE(cr.allocations <= 64);       // not O(depth) = 512
+    REQUIRE(cr.bytes <= 4 * out.size()); // total allocated bytes O(output)
+
+    // 5) Cap interaction: the bound is depth-based, not size-based. 513 levels
+    //    under the default bound is rejected on the pretty path too (parse it
+    //    with the limit lifted, then restore and dump).
+    Config::instance().set_max_depth(Config::kUnlimitedDepth);
+    auto over = parse_copy(deep(Config::kDefaultMaxDepth + 1));
+    Config::instance().set_max_depth(Config::kDefaultMaxDepth);
+    REQUIRE_THROWS_AS((void)dump(over.root(), DumpOptions{.pretty = true, .indent = 2}), JsonError);
 }
