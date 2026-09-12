@@ -564,3 +564,80 @@ TEST_CASE("Writer: shell equivalence") {
     REQUIRE(threw2);
     REQUIRE(std::string(r2.unwrap_err().what()) == what2);
 }
+
+TEST_CASE("Writer: indent_char validation")
+{
+    auto d = parse_copy(R"({"a":1,"b":[2,3]})");
+
+    // Legal values (' ' and '\t') keep working. The default is pinned by
+    // "Writer: dump pretty"; here both are compared side by side.
+    REQUIRE(sv(dump(d.root(), DumpOptions{.pretty = true})) ==
+            sv(dump(d.root(), DumpOptions{.pretty = true, .indent_char = ' '})));
+    REQUIRE(sv(dump(d.root(), DumpOptions{.pretty = true, .indent = 1, .indent_char = '\t'})) ==
+            "{\n\t\"a\": 1,\n\t\"b\": [\n\t\t2,\n\t\t3\n\t]\n}");
+
+    // ' ' / '\t' are the only accepted bytes. '\n' and '\r' are RFC 8259
+    // whitespace but are still rejected: write_indent already emits a newline,
+    // so they would degenerate into doubled line breaks.
+    const char bad_chars[] = {'"', '\\', '\x00', '\x01', '\x0B', '\x0C', '\n', '\r', '\x7F', '\xFF'};
+    for (char c : bad_chars)
+    {
+        CAPTURE(static_cast<int>(static_cast<unsigned char>(c)));
+        DumpOptions opts{.pretty = true, .indent_char = c};
+
+        bool threw = false;
+        std::string what;
+        try
+        {
+            (void)dump(d.root(), opts);
+        }
+        catch (const JsonError &e)
+        {
+            threw = true;
+            what = e.what();
+            REQUIRE(e.category() == Category::Json);
+        }
+        REQUIRE(threw);
+        REQUIRE(what == "Invalid indent character: expected space or tab");
+
+        // Result channel must agree byte for byte (shell equivalence).
+        auto r = dump_result(d.root(), opts);
+        REQUIRE(r.is_err());
+        const JsonError &re = r.unwrap_err();
+        REQUIRE(re.category() == Category::Json);
+        REQUIRE(std::string(re.what()) == what);
+    }
+
+    // The guard lives in dump_value_to, before write_indent: the contract is
+    // independent of the root shape, so empty containers and scalars are
+    // rejected too (unlike a check placed at the indent emission point).
+    const DumpOptions bad{.pretty = true, .indent_char = '"'};
+    REQUIRE_THROWS_AS((void)dump(parse_copy("[]").root(), bad), JsonError);
+    REQUIRE_THROWS_AS((void)dump(parse_copy("{}").root(), bad), JsonError);
+    REQUIRE_THROWS_AS((void)dump(Json(nullptr), bad), JsonError);
+    REQUIRE_THROWS_AS((void)dump(Json(42), bad), JsonError);
+
+    // Strong guarantee: the failure precedes any byte, so the direct-write
+    // pmr::string sink and the materializing std::string sink both keep their
+    // previous content.
+    {
+        std::pmr::string pmr_sink = "keep";
+        REQUIRE_THROWS_AS(dump_to(pmr_sink, d.root(), bad), JsonError);
+        REQUIRE(sv(pmr_sink) == "keep");
+    }
+    {
+        std::string sink = "keep";
+        REQUIRE_THROWS_AS(dump_to(sink, d.root(), bad), JsonError);
+        REQUIRE(sink == "keep");
+    }
+
+    // Compact mode ignores indent_char entirely (no validation, no error).
+    REQUIRE(sv(dump(d.root(), DumpOptions{.indent_char = '"'})) == sv(dump(d.root())));
+
+    // prettify funnels through dump(): the invalid option is rejected there.
+    REQUIRE_THROWS_AS((void)prettify(R"({"a":1})", bad), JsonError);
+
+    // JSONL has no DumpOptions and is structurally compact: unaffected.
+    Array arr = Array::of(Json(1), Json(2));
+    REQUIRE(sv(dump_jsonl(arr)) == "1\n2\n");
+}

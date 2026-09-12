@@ -14,12 +14,16 @@ namespace pjh::json
 {
     /**
      * @brief Serialization options
+     * @note When @c pretty is true, @c indent_char must be @c ' ' or @c '\t';
+     *       any other value makes the dump fail with a JsonError
+     *       (Category::Json) before any output byte is written. Compact mode
+     *       ignores @c indent_char and never validates it.
      */
     struct DumpOptions
     {
         bool pretty = false;    // false = compact, true = indented
         uint8_t indent = 2;     // spaces per level when pretty
-        char indent_char = ' '; // ' ' or '\t'
+        char indent_char = ' '; // ' ' or '\t' only; pretty dump fails otherwise
         bool ascii = false;     // true = escape non-ASCII as \uXXXX
         bool sort_keys = false; // true = emit object keys sorted
     };
@@ -32,7 +36,8 @@ namespace pjh::json
      * @param opts  Formatting options
      * @param res   Memory resource for output string (default: global config)
      * @return Serialized JSON string
-     * @throws JsonError if value contains non-finite double (NaN/Inf)
+     * @throws JsonError if value contains non-finite double (NaN/Inf), or if
+     *         opts.pretty is true and opts.indent_char is neither ' ' nor '\t'
      * @note dump never emits a BOM: the output starts with the first
      *       value byte. A U+FEFF code point stored in a string is data,
      *       not a prefix — it round-trips as raw UTF-8 (normal mode) or
@@ -54,7 +59,8 @@ namespace pjh::json
      * @param opts Formatting options
      * @param res  Memory resource for output string (default: global config)
      * @return Serialized JSON string
-     * @throws JsonError if root contains non-finite double (NaN/Inf)
+     * @throws JsonError if root contains non-finite double (NaN/Inf), or if
+     *         opts.pretty is true and opts.indent_char is neither ' ' nor '\t'
      */
     [[nodiscard]] std::pmr::string dump(
         const Document &doc,
@@ -102,7 +108,8 @@ namespace pjh::json
      * @param sink Output string (appended to)
      * @param value Json tree to serialize
      * @param opts  Formatting options
-     * @throws JsonError if value contains non-finite double (NaN/Inf)
+     * @throws JsonError if value contains non-finite double (NaN/Inf), or if
+     *         opts.pretty is true and opts.indent_char is neither ' ' nor '\t'
      */
     void dump_to(std::pmr::string &sink, const Json &value, const DumpOptions &opts = {});
 
@@ -111,7 +118,8 @@ namespace pjh::json
      * @param sink Output string (appended to, never cleared)
      * @param value Json tree to serialize
      * @param opts  Formatting options
-     * @throws JsonError if value contains non-finite double (NaN/Inf)
+     * @throws JsonError if value contains non-finite double (NaN/Inf), or if
+     *         opts.pretty is true and opts.indent_char is neither ' ' nor '\t'
      * @note Append semantics, identical to dump_to(std::pmr::string&): the
      *       sink keeps its previous content. The value is serialized into a
      *       temporary pmr::string and then appended, so serialization
@@ -126,10 +134,11 @@ namespace pjh::json
      * @param os    Output stream
      * @param value Json tree to serialize
       * @param opts  Formatting options
-      * @throws JsonError if value contains non-finite double (NaN/Inf), or the
-      *                   stream write fails
+      * @throws JsonError if value contains non-finite double (NaN/Inf), or
+      *                   opts.pretty is true with an invalid indent_char, or
+      *                   the stream write fails
       */
-     void dump_to(std::ostream &os, const Json &value, const DumpOptions &opts = {});
+    void dump_to(std::ostream &os, const Json &value, const DumpOptions &opts = {});
 
     /**
      * @brief Serialize and write to file
@@ -137,8 +146,9 @@ namespace pjh::json
      * @param value Json tree to serialize
      * @param opts  Formatting options
       * @throws JsonError if file cannot be opened, written, or closed, or value
-      *                   contains non-finite double
-     */
+      *                   contains non-finite double, or opts.pretty is true
+      *                   with an invalid indent_char
+      */
     void dump_file(std::string_view path, const Json &value, const DumpOptions &opts = {});
 
     /**
@@ -229,7 +239,8 @@ namespace pjh::json
      * @param res  Memory resource (default: global config)
      * @return Serialized JSON string with specified formatting
      * @throws ParseError if input is invalid JSON
-     * @throws JsonError if value contains non-finite double
+     * @throws JsonError if value contains non-finite double, or if opts.pretty
+     *         is true and opts.indent_char is neither ' ' nor '\t'
      */
     [[nodiscard]] std::pmr::string prettify(
         std::string_view json,

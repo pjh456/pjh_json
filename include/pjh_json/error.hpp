@@ -119,6 +119,7 @@ namespace pjh::json
         FileWriteFailed,
         FileWriteCloseFailed,
         StreamWriteFailed,
+        InvalidIndentChar, // appended: preserve existing enumerator values
     };
 
     /**
@@ -240,6 +241,8 @@ namespace pjh::json
             return "Failed to close file: {}";
         case ErrorCode::StreamWriteFailed:
             return "Failed to write to stream";
+        case ErrorCode::InvalidIndentChar:
+            return "Invalid indent character: expected space or tab";
         }
         return "";
     }

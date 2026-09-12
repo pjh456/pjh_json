@@ -155,6 +155,8 @@ namespace
         size_t           max_depth = Config::kDefaultMaxDepth;
     };
 
+    // Hand-aligned golden table (one row per case): keep rows byte-identical.
+    // clang-format off
     constexpr golden_row kAllRows[] = {
         // ---- A. parse_copy, default knobs --------------------------------
         {.label = "parse.extra_chars",
@@ -594,10 +596,17 @@ namespace
          .what = "Failed to open file for writing: pjh_no_such_dir_xyz/t79.jsonl",
          .input = "pjh_no_such_dir_xyz/t79.jsonl",
          .detail = "pjh_no_such_dir_xyz/t79.jsonl"},
+        {.label = "writer.invalid_indent_char",
+         .group = Group::Writer,
+         .code = ErrorCode::InvalidIndentChar,
+         .parse_error = false,
+         .category = Category::Json,
+         .what = "Invalid indent character: expected space or tab"},
     };
+    // clang-format on
 
     constexpr size_t kRowCount = sizeof(kAllRows) / sizeof(kAllRows[0]);
-    static_assert(kRowCount == 62, "62 deterministic golden rows (the optional "
+    static_assert(kRowCount == 63, "63 deterministic golden rows (the optional "
                                    "POSIX directory row is checked separately)");
 
     const golden_row *find_row(std::string_view label)
@@ -1008,6 +1017,22 @@ TEST_CASE("Differential errors: writer entries, both channels")
         auto res = observe_result(dump_jsonl_file_result(r->input, arr));
         verify_row(*r, thr, res, true);
     }
+
+    // writer.invalid_indent_char: pretty dump rejects an indent byte that is
+    // not space/tab before writing anything (root shape is irrelevant).
+    {
+        const golden_row *r = find_row("writer.invalid_indent_char");
+        REQUIRE(r != nullptr);
+        DumpOptions opts{.pretty = true, .indent_char = '"'};
+        Json v(nullptr);
+        auto thr = observe_throw(
+            [&]
+            {
+                (void)dump(v, opts);
+            });
+        auto res = observe_result(dump_result(v, opts));
+        verify_row(*r, thr, res, true);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1031,7 +1056,7 @@ TEST_CASE("Differential errors: every reachable ErrorCode has a golden row")
                 return true;
         return false;
     };
-    for (uint16_t i = 1; i <= static_cast<uint16_t>(ErrorCode::StreamWriteFailed); ++i)
+    for (uint16_t i = 1; i <= static_cast<uint16_t>(ErrorCode::InvalidIndentChar); ++i)
     {
         const auto c = static_cast<ErrorCode>(i);
         bool defensive = false;

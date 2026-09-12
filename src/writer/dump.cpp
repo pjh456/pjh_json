@@ -213,6 +213,17 @@ namespace pjh::json
     [[nodiscard]] bool dump_value_to(std::pmr::string &sink, const Json &value,
                                      const DumpOptions &opts, DumpState &st)
     {
+        // indent_char is only read when pretty. Reject anything but space/tab
+        // before the first byte is written: ' ' and '\t' are the only
+        // characters that yield well-formed, non-degenerate indentation
+        // (RFC 8259 also allows \n / \r, but write_indent already emits a
+        // newline). The early return keeps the strong guarantee for every
+        // sink, including the direct-write pmr::string overload.
+        if (opts.pretty && opts.indent_char != ' ' && opts.indent_char != '\t')
+        {
+            st.fail(ErrorCode::InvalidIndentChar);
+            return false;
+        }
         return write_value(sink, value, opts, 0, Config::instance().max_depth(), st);
     }
 

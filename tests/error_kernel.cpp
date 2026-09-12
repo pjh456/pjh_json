@@ -51,7 +51,9 @@ namespace
     };
 
     // Every kernel code except None, in table order. `msg` mirrors
-    // message_of byte for byte (detail-carrying rows carry "{}").
+    // message_of byte for byte (detail-carrying rows carry "{}"). Hand-aligned
+    // one-row-per-code table: keep rows byte-identical.
+    // clang-format off
     constexpr Row kRows[] = {
         {ErrorCode::ExtraCharactersAfterValue,
          "Extra characters after complete JSON value", true, Category::Parse},
@@ -154,7 +156,10 @@ namespace
          "Failed to close file: {}", false, Category::Json},
         {ErrorCode::StreamWriteFailed,
          "Failed to write to stream", false, Category::Json},
+        {ErrorCode::InvalidIndentChar,
+         "Invalid indent character: expected space or tab", false, Category::Json},
     };
+    // clang-format on
 
     constexpr size_t kPosition = 7;
     constexpr std::string_view kDetail = "X";
