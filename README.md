@@ -170,7 +170,9 @@ cmake --build build
 
 The library injects no optimization or ISA flags of its own — pick the level with the
 standard `-DCMAKE_BUILD_TYPE=Release` (or `Debug`). `-march=native` is deliberately not
-used (non-portable artifacts); pass your own `CMAKE_CXX_FLAGS` if you want it locally.
+used (non-portable artifacts); pass your own `CMAKE_CXX_FLAGS` if you want it locally
+(x86-64: `-march=native`; arm64/AppleClang: `-mcpu=native` — `-march=native` is
+rejected on Apple Silicon; never pass both).
 
 > Only public headers are installed: `<prefix>/include/pjh_json.hpp` and
 > `<prefix>/include/pjh_json/**`, minus the internal `pjh_json/detail/`.

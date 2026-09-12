@@ -152,6 +152,16 @@ endif()
 # and unsupported by AppleClang on arm64). SIMD width follows xsimd's default
 # architecture; runtime ISA dispatch is tracked in the roadmap.
 #
+# Portability rule if an ISA/arch knob is ever added: keep it PRIVATE and
+# re-apply it to every in-repo executable (the PJH_JSON_PGO_FLAGS /
+# PJH_JSON_SANITIZER_FLAGS pattern), and spell it per architecture:
+#   - x86-64:            -march=native (or -march=<target>)
+#   - arm64/AppleClang:  -mcpu=native   (-march=native is rejected on Apple
+#                        Silicon and incomplete on Clang)
+#   - MSVC:              no native equivalent (no-op)
+# Never pass -mcpu and -march together. Runtime ISA dispatch (baseline ISA +
+# runtime CPU detection) is the portable alternative; see the roadmap.
+#
 # PGO flags are PRIVATE to pjh_json: a pre-built static library cannot be
 # re-profiled by a consumer, and inherited instrumentation/link flags would be
 # meaningless (and, for GENERATE, unsound) on the consumer side. The same list
