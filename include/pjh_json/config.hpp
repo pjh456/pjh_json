@@ -216,20 +216,24 @@ namespace pjh::json
          *       accepts line comments, slash-star block comments
          *       (non-nesting), one trailing comma per array/object,
          *       single-quoted strings, ASCII unquoted identifiers as
-         *       object keys, and the JSON5 ASCII whitespace bytes
-         *       VT (0x0B) / FF (0x0C).
-         * @note This is a PARTIAL JSON5 1.0.0 mode: JSON5 numbers
-         *       (hex, leading `+`, leading/trailing `.`), `Infinity`/
-         *       `NaN`, JSON5-only string escapes and line continuations,
-         *       and Unicode identifiers/whitespace are still rejected;
-         *       they land in later sub-tasks. Unsupported JSON5
-         *       constructs fail with existing ErrorCodes (no JSON5-only
-         *       error is introduced).
+         *       object keys, the JSON5 ASCII whitespace bytes
+         *       VT (0x0B) / FF (0x0C), the JSON5 number spellings
+         *       (hex, leading `+`, leading/trailing `.`) and the
+         *       `Infinity`/`NaN` literals with an optional `+`/`-`.
+         * @note This is a PARTIAL JSON5 1.0.0 mode: Unicode identifiers
+         *       and Unicode whitespace are still rejected; they land in
+         *       a later sub-task. Unsupported JSON5 constructs fail with
+         *       existing ErrorCodes (no JSON5-only error is introduced).
          * @note Output is always RFC 8259: dump() is unaffected by this
          *       knob, so a JSON5 parse followed by dump is a lossy
          *       normalization (comments dropped, single quotes and
          *       unquoted keys rewritten to double quotes, trailing
          *       commas removed, whitespace collapsed by the options).
+         * @note A parsed non-finite double (`Infinity`/`NaN`) has no
+         *       RFC 8259 spelling and cannot be dumped: dump() rejects it
+         *       with a JsonError ("Cannot serialize non-finite double").
+         *       That is a documented round-trip break inherent to a
+         *       RFC-only writer, not a parse failure.
          * @note The compile-time path (ConstJson::parse) cannot read
          *       runtime config (std::atomic is not constexpr): it stays
          *       RFC-only regardless of this knob.

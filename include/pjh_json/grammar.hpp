@@ -308,6 +308,43 @@ namespace pjh::json
             return number_error::ok;
         }
 
+        // ---- JSON5 1.0.0 §6 non-finite literals (task 40.4) ---------------
+        // `Infinity` and `NaN` are NumericLiterals in JSON5 1.0.0, each
+        // optionally preceded by `+` or `-` (the sign is consumed by the
+        // runtime caller, which owns the value mapping). The RFC scanner
+        // above keeps rejecting both spellings byte for byte.
+
+        /// @brief JSON5 non-finite numeric literal spellings.
+        enum class json5_nonfinite
+        {
+            none,     ///< not a non-finite literal
+            infinity, ///< `Infinity`
+            nan       ///< `NaN`
+        };
+
+        /// @brief Match `Infinity` or `NaN` at @p p (sign already consumed).
+        /// @param p Cursor; advanced past the spelling on success, untouched
+        ///        on failure.
+        /// @param e End of the input range (`m_end`); matching is bounded by
+        ///        it, never by NUL padding.
+        /// @param out Receives the matched spelling; `none` on failure.
+        /// @return true iff the exact, case-sensitive spelling matched.
+        constexpr bool match_json5_nonfinite(const char *&p, const char *e, json5_nonfinite &out) noexcept
+        {
+            out = json5_nonfinite::none;
+            if (match_literal(p, e, "Infinity"))
+            {
+                out = json5_nonfinite::infinity;
+                return true;
+            }
+            if (match_literal(p, e, "NaN"))
+            {
+                out = json5_nonfinite::nan;
+                return true;
+            }
+            return false;
+        }
+
         // ---- JSON5 1.0.0 §5.2 string escapes (task 40.3) ------------------
         // Pure additions alongside short_escape_value: the RFC helper is
         // byte-for-byte unchanged. JSON5 adds the `\'` and `\v` single

@@ -57,9 +57,10 @@ namespace pjh::json
                 out = std::move(s);
                 return true;
             }
-            // JSON5 number leading '+' / leading '.' (40.2); the RFC switch
-            // keeps its '-'/digit cases byte-for-byte.
-            if (m_json5 && (*m_curr == '+' || *m_curr == '.'))
+            // JSON5 numbers with a leading '+'/'.' (40.2) and the
+            // Infinity/NaN literals (40.4); the RFC switch keeps its
+            // '-'/digit cases byte-for-byte.
+            if (m_json5 && (*m_curr == '+' || *m_curr == '.' || *m_curr == 'I' || *m_curr == 'N'))
                 return parse_number(out);
             fail(ErrorCode::UnexpectedCharacter, m_curr);
             return false;
@@ -124,8 +125,9 @@ namespace pjh::json
                 out = std::move(s);
                 return true;
             }
-            // JSON5 number leading '+' / leading '.' (40.2).
-            if (m_json5 && (*m_curr == '+' || *m_curr == '.'))
+            // JSON5 numbers with a leading '+'/'.' (40.2) and the
+            // Infinity/NaN literals (40.4).
+            if (m_json5 && (*m_curr == '+' || *m_curr == '.' || *m_curr == 'I' || *m_curr == 'N'))
                 return parse_number(out);
             fail(ErrorCode::UnexpectedValueCharacter, m_curr);
             return false;

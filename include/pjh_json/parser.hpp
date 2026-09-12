@@ -246,12 +246,17 @@ namespace pjh::json
          */
         [[nodiscard]] bool parse_number(Json &out);
         /**
-         * @brief Parse a JSON5 number (hex / leading '+' / omitted dot side)
+         * @brief Parse a JSON5 number (hex / leading '+' / omitted dot side /
+         *        `Infinity` / `NaN`)
          * @return false on failure (recorded in m_error)
          * @note Only reachable when the ctor captured Config::json5();
          *       parse_number() dispatches to it at its head. Reuses the RFC
-         *       error vocabulary (no new ErrorCode). `Infinity`/`NaN` are
-         *       deferred to task 40.4 and still fail here.
+         *       error vocabulary (no new ErrorCode).
+         * @note `Infinity`/`NaN` (with an optional leading `+`/`-`) become the
+         *       IEEE non-finite doubles; the spelling match is a bounded
+         *       `grammar::match_json5_nonfinite`, so a trailing byte
+         *       (`Infinityx`, `NaNx`) is left for the structural/trailing
+         *       checks and rejected there.
          * @note Hex magnitudes beyond int64 fall to double, matching the
          *       RFC decimal policy (task 06/61); a hex magnitude outside the
          *       finite-double range is NumberOutOfRange.

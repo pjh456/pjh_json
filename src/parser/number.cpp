@@ -169,10 +169,40 @@ namespace pjh::json
      *    (sign included), and the double fallback feeds from_chars the token
      *    without an explicit JSON5 '+', which the standard does not accept.
      *    from_chars general already understands `.5`, `5.` and `5.e3`.
+     * 4. `Infinity`/`NaN` (task 40.4), each with an optional `+`/`-`, are
+     *    tested first and produce the std::numeric_limits constants. This is
+     *    a pure bit/materialisation path: no from_chars, no isfinite and no
+     *    FP comparison, so -ffast-math cannot change which spellings are
+     *    accepted (contrast the writer, which needs isfinite and is
+     *    documented as fast-math sensitive).
      */
     bool Parser::parse_number_json5(Json &out)
     {
         const char *const start = m_curr;
+
+        // JSON5 1.0.0 §6: Infinity | NaN with an optional leading sign. The
+        // check precedes the numeric scanner, whose decimal path would
+        // otherwise stop on the 'I'/'N' first byte and report no_int_digits.
+        {
+            const char *p = m_curr;
+            bool negative = false;
+            if (p < m_end && (*p == '+' || *p == '-'))
+            {
+                negative = (*p == '-');
+                ++p;
+            }
+            grammar::json5_nonfinite nf = grammar::json5_nonfinite::none;
+            if (grammar::match_json5_nonfinite(p, m_end, nf))
+            {
+                m_curr = p;
+                double d = (nf == grammar::json5_nonfinite::infinity) ? std::numeric_limits<double>::infinity()
+                                                                      : std::numeric_limits<double>::quiet_NaN();
+                // `-NaN` is still NaN (the sign sets only the sign bit);
+                // `-Infinity` is negative infinity.
+                out = Json(negative ? -d : d);
+                return true;
+            }
+        }
 
         grammar::number_scan_json5 scan;
         switch (grammar::scan_number_json5(m_curr, m_end, scan))

@@ -24,6 +24,17 @@ namespace pjh::json
      * 2. Format via std::to_chars (shortest round-trip representation).
      * 3. If the output is a bare integer (no '.' or 'e'), append ".0"
      *    to distinguish float from int64 on round-trip.
+     *
+     * Fast-math constraint (task 40.4): the finite test below is
+     * std::isfinite. RFC 8259 has no NaN/Inf spelling, so this is the single
+     * gate that stops to_chars from emitting "inf"/"nan" (invalid JSON). With
+     * -ffast-math / -ffinite-math-only the compiler may fold std::isfinite to
+     * true and the gate disappears. The library deliberately adds no such
+     * flag (root CMakeLists), so the default build is safe; a consumer that
+     * compiles this translation unit with fast-math gives up that guarantee.
+     * Consequence for 40.4: a JSON5-parsed Infinity/NaN is stored as an
+     * ordinary double and is rejected here as NonFiniteDouble — the
+     * documented round-trip break (Config::set_json5).
      */
     [[nodiscard]] static bool write_double(std::pmr::string &sink, double val, DumpState &st)
     {

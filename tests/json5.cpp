@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <ostream> // doctest stringification on MSVC needs a complete ostream
@@ -605,6 +606,137 @@ TEST_CASE("Json5: numbers in jsonl and RFC round-trip")
     // JSON5 number spellings normalize to RFC 8259 on dump.
     auto doc = parse_copy("{h:0x10, p:+2, l:.5, t:5.}");
     REQUIRE(sv(dump(doc)) == R"({"h":16,"p":2,"l":0.5,"t":5.0})");
+}
+
+TEST_CASE("Json5: Infinity and NaN literals")
+{
+    Json5ConfigGuard guard;
+    Config &cfg = Config::instance();
+
+    // Default RFC mode rejects every non-finite spelling (sign included).
+    cfg.set_json5(false);
+    CHECK_THROWS_AS((void)parse_copy("Infinity"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("+Infinity"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("-Infinity"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("NaN"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("[Infinity]"), ParseError);
+
+    cfg.set_json5(true);
+
+    // JSON5 1.0.0 §6: Infinity / NaN, each with an optional +/- sign.
+    auto inf = parse_copy("Infinity");
+    REQUIRE(inf.root().is_float());
+    REQUIRE(std::isinf(inf.root().as_float()));
+    REQUIRE(inf.root().as_float() > 0.0);
+
+    auto pinf = parse_copy("+Infinity");
+    REQUIRE(std::isinf(pinf.root().as_float()));
+    REQUIRE(pinf.root().as_float() > 0.0);
+
+    auto ninf = parse_copy("-Infinity");
+    REQUIRE(std::isinf(ninf.root().as_float()));
+    REQUIRE(ninf.root().as_float() < 0.0);
+
+    REQUIRE(std::isnan(parse_copy("NaN").root().as_float()));
+    REQUIRE(std::isnan(parse_copy("+NaN").root().as_float()));
+    REQUIRE(std::isnan(parse_copy("-NaN").root().as_float()));
+
+    // In containers, after JSON5 trivia, and mixed with finite numbers.
+    auto arr = parse_copy("[Infinity, -Infinity, NaN, 1.5]");
+    REQUIRE(arr.root().size() == 4);
+    REQUIRE(std::isinf(arr.root()[0].as_float()));
+    REQUIRE(arr.root()[1].as_float() < 0.0);
+    REQUIRE(std::isnan(arr.root()[2].as_float()));
+    REQUIRE(arr.root()[3].as_float() == 1.5);
+
+    auto obj = parse_copy("{a:Infinity, /*c*/ b:-NaN}");
+    REQUIRE(std::isinf(obj.root()["a"].as_float()));
+    REQUIRE(std::isnan(obj.root()["b"].as_float()));
+
+    REQUIRE(std::isinf(parse_copy("/*c*/ Infinity // tail").root().as_float()));
+
+    // The spelling is exact and case-sensitive; trailing bytes are not part
+    // of the literal and are rejected by the trailing/separator checks. The
+    // matcher is m_end-bounded (never padding-terminated).
+    CHECK_THROWS_AS((void)parse_copy("infinity"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("INFINITY"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("nan"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("NAN"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("Inf"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("Infinityx"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("Infinity0"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("NaNx"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("[Infinityx]"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("--Infinity"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("+-Infinity"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("++Infinity"), ParseError);
+
+    // In key position they are ordinary ASCII identifiers, not literals.
+    auto keys = parse_copy("{Infinity:1, NaN:2}");
+    REQUIRE(keys.root()["Infinity"].as_int() == (int64_t)1);
+    REQUIRE(keys.root()["NaN"].as_int() == (int64_t)2);
+}
+
+TEST_CASE("Json5: non-finite values in jsonl and line bounding")
+{
+    Json5ConfigGuard guard;
+    Config &cfg = Config::instance();
+
+    cfg.set_json5(false);
+    CHECK_THROWS_AS((void)parse_jsonl("Infinity\n"), ParseError);
+
+    cfg.set_json5(true);
+    auto jl = parse_jsonl("Infinity\n-Infinity\nNaN\n");
+    REQUIRE(jl.root().size() == 3);
+    REQUIRE(std::isinf(jl.root()[0].as_float()));
+    REQUIRE(jl.root()[1].as_float() < 0.0);
+    REQUIRE(std::isnan(jl.root()[2].as_float()));
+
+    // Trailing junk on one line must not swallow the next line (40.1 R1).
+    CHECK_THROWS_AS((void)parse_jsonl("Infinityx\n[1]\n"), ParseError);
+
+    // A non-finite value on its own line is fine, and the next line still
+    // parses independently.
+    auto jl2 = parse_jsonl("Infinity\n[1]\n");
+    REQUIRE(jl2.root().size() == 2);
+    REQUIRE(jl2.root()[1].size() == 1);
+}
+
+TEST_CASE("Json5: non-finite values cannot be dumped (RFC-only writer)")
+{
+    Json5ConfigGuard guard;
+    Config::instance().set_json5(true);
+
+    auto inf = parse_copy("Infinity");
+    auto nan = parse_copy("NaN");
+    REQUIRE(std::isinf(inf.root().as_float()));
+    REQUIRE(std::isnan(nan.root().as_float()));
+
+#ifndef __FAST_MATH__
+    // No RFC 8259 spelling exists for inf/nan, so the writer records
+    // NonFiniteDouble: the documented round-trip break. std::isfinite is
+    // folded to true under -ffast-math, so this assertion is compiled out
+    // there (the library itself never adds that flag).
+    CHECK_THROWS_AS((void)dump(inf), JsonError);
+    CHECK_THROWS_AS((void)dump(nan), JsonError);
+
+    try
+    {
+        (void)dump(inf);
+        REQUIRE(false);
+    }
+    catch (const JsonError &e)
+    {
+        REQUIRE(std::string(e.what()).find("non-finite") != std::string::npos);
+    }
+
+    auto r = dump_result(inf);
+    REQUIRE(r.is_err());
+    REQUIRE(r.unwrap_err().category() == Category::Json);
+#else
+    (void)inf;
+    (void)nan;
+#endif
 }
 
 TEST_CASE("Json5: borrowed keys survive in-situ and view shapes")
