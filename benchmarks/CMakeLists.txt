@@ -58,9 +58,48 @@ if(PJH_JSON_SANITIZER_FLAGS)
     target_link_options(pjh_json_benchmark PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
 endif()
 
-# Benchmark data directory (project root)
-target_compile_definitions(
-    pjh_json_benchmark
+# Benchmark 数据目录（roadmap 67）：生成物写进构建目录，不再污染仓库根。
+# 默认每棵构建树一份；想让多树共享 ~1.8 GiB 数据，可把 PJH_JSON_BENCH_DATA_DIR
+# 指到公共缓存。编译期把绝对路径（正斜杠）传给可执行程序。
+set(PJH_JSON_BENCH_DATA_DIR "${CMAKE_CURRENT_BINARY_DIR}/data" CACHE PATH
+    "生成的 benchmark *.json 数据目录（默认在构建树内）")
+
+if(IS_ABSOLUTE "${PJH_JSON_BENCH_DATA_DIR}")
+    set(_pjh_json_bench_data_dir "${PJH_JSON_BENCH_DATA_DIR}")
+else()
+    set(_pjh_json_bench_data_dir "${CMAKE_CURRENT_BINARY_DIR}/${PJH_JSON_BENCH_DATA_DIR}")
+endif()
+file(TO_CMAKE_PATH "${_pjh_json_bench_data_dir}" _pjh_json_bench_data_dir)
+file(MAKE_DIRECTORY "${_pjh_json_bench_data_dir}")
+
+# 生成器确定性种子（std::mt19937）：固定默认值 ⇒ 同一工具链下每次生成的数据
+# 逐字节一致（性能门需要稳定输入）。改种子即故意重排，需先清旧数据。
+set(PJH_JSON_BENCH_SEED "0xC0FFEE" CACHE STRING
+    "benchmark JSON 生成器的确定性种子（32 位无符号）")
+
+target_compile_definitions(pjh_json_benchmark
     PRIVATE
-    PJH_JSON_BENCH_DATA_DIR="${CMAKE_SOURCE_DIR}"
+    PJH_JSON_BENCH_DATA_DIR="${_pjh_json_bench_data_dir}"
+    PJH_JSON_BENCH_SEED=${PJH_JSON_BENCH_SEED}
+)
+
+# 清理（roadmap 67 的「清理」半边）：
+#   * ADDITIONAL_CLEAN_FILES 让 `cmake --build <build> --target clean`
+#     连同构建产物一起删掉数据目录；
+#   * 显式目标额外删掉 task 67 之前留在仓库根的 8 个旧文件（gitignored，
+#     但仍是工作树垃圾）。只在手动调用时执行，绝不隐式跑。
+set(_pjh_json_bench_legacy_root_files)
+foreach(_pjh_name IN ITEMS
+        1mb.json 10mb.json 30mb.json 50mb.json 100mb.json 200mb.json 500mb.json 1gb.json)
+    list(APPEND _pjh_json_bench_legacy_root_files "${CMAKE_SOURCE_DIR}/${_pjh_name}")
+endforeach()
+
+set_property(TARGET pjh_json_benchmark APPEND PROPERTY
+    ADDITIONAL_CLEAN_FILES "${_pjh_json_bench_data_dir}")
+
+add_custom_target(pjh_json_benchmark_clean_data
+    COMMENT "删除生成的 benchmark 数据（${_pjh_json_bench_data_dir}）与仓库根旧副本"
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${_pjh_json_bench_data_dir}"
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${_pjh_json_bench_legacy_root_files}
+    VERBATIM
 )

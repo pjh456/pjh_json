@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -18,7 +19,13 @@
 // 对比库 rapidjson
 #include <rapidjson/document.h>
 
-static std::mt19937 rng(std::random_device{}());
+// 确定性种子（roadmap 67）：固定默认值使生成的数据可复现；CMake 通过
+// -DPJH_JSON_BENCH_SEED=<32 位无符号> 覆盖。非 CMake 构建走下面的回退值。
+#ifndef PJH_JSON_BENCH_SEED
+#  define PJH_JSON_BENCH_SEED 0xC0FFEEu
+#endif
+static std::mt19937 rng(
+    static_cast<std::mt19937::result_type>(PJH_JSON_BENCH_SEED));
 
 std::string random_string(size_t length)
 {
@@ -26,12 +33,14 @@ std::string random_string(size_t length)
         "abcdefghijklmnopqrstuvwxyz"
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         "0123456789";
-    std::uniform_int_distribution<> dist(0, sizeof(charset) - 2);
+    // 显式取模代替标准库均匀分布：其引擎→取值映射是实现定义的，
+    // 只有取模才能让不同标准库生成逐字节相同的数据。
+    constexpr size_t charset_size = sizeof(charset) - 1;  // 去掉结尾 NUL
     std::string result;
     result.reserve(length);
     for (size_t i = 0; i < length; i++)
     {
-        result.push_back(charset[dist(rng)]);
+        result.push_back(charset[rng() % charset_size]);
     }
     return result;
 }
@@ -39,8 +48,9 @@ std::string random_string(size_t length)
 // 使用 nlohmann 协助生成测试用例（因为目前的 pjh::json 尚未实现 serialize）
 nlohmann::json random_json_gen(int depth = 0, int max_depth = 5)
 {
-    std::uniform_int_distribution<int> type_dist(0, 5);
-    int t = (depth >= max_depth) ? type_dist(rng) % 3 : type_dist(rng);
+    // 同 random_string()：去掉实现定义的分布，保证可复现。
+    int t = (depth >= max_depth) ? static_cast<int>(rng() % 3)
+                                 : static_cast<int>(rng() % 6);
 
     switch (t)
     {
@@ -78,7 +88,13 @@ nlohmann::json random_json_gen(int depth = 0, int max_depth = 5)
 
 void generate_json_file(const std::string &path, size_t target_size, int max_depth = 5)
 {
-    std::ofstream ofs(path, std::ios::binary);
+    std::ofstream ofs(path, std::ios::binary | std::ios::trunc);
+    if (!ofs)
+    {
+        std::cerr << "Error: cannot open " << path << " for writing\n";
+        std::exit(1);
+    }
+
     ofs << "[";
 
     size_t size = 1;
@@ -101,17 +117,24 @@ void generate_json_file(const std::string &path, size_t target_size, int max_dep
     }
 
     ofs << "]";
+
+    ofs.flush();
+    if (!ofs)
+    {
+        std::cerr << "Error: failed writing " << path << "\n";
+        std::exit(1);
+    }
 }
 
 inline std::string read_file(const std::string &path_str)
 {
     const std::filesystem::path path(path_str);
-    if (!std::filesystem::exists(path))
-    {
-        std::cerr << "Error: File not found at " << path << std::endl;
-        return "";
-    }
     std::ifstream ifs(path, std::ios::binary);
+    if (!ifs)
+    {
+        std::cerr << "Error: cannot read benchmark data file " << path << "\n";
+        std::exit(1);
+    }
     std::ostringstream oss;
     oss << ifs.rdbuf();
     return oss.str();
@@ -159,8 +182,21 @@ void RegisterBenchmarks()
 #ifdef PJH_JSON_BENCH_DATA_DIR
         PJH_JSON_BENCH_DATA_DIR;
 #else
-        ".";
+        std::filesystem::current_path();
 #endif
+
+    // 数据目录正常由 CMake 在配置期创建；这里防御性重建，保证直接运行二进制、
+    // 或 `clean` 删掉目录后仍可用。
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(base_dir, ec);
+        if (ec)
+        {
+            std::cerr << "Error: cannot create benchmark data dir " << base_dir
+                      << ": " << ec.message() << "\n";
+            std::exit(1);
+        }
+    }
 
     // 定义要测试的数据档位
     std::vector<std::pair<std::string, size_t>> sizes = {
