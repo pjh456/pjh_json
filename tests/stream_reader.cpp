@@ -600,8 +600,11 @@ TEST_CASE("Stream: eof mid token")
     expect_error("{\"a\":1", ErrorCode::UnexpectedEndOfObject, 6);
     expect_error("{\"a\":", ErrorCode::UnexpectedCharacter, 5);
     expect_error("[1,", ErrorCode::UnexpectedCharacter, 3);
-    expect_error("tru", ErrorCode::UnexpectedEndOfInput, 3);
-    expect_error("fals", ErrorCode::UnexpectedEndOfInput, 4);
+    // A truncated literal is a mismatch for Parser::parse_literal (its
+    // fixed-width read sees NUL padding), so the DOM parser reports
+    // InvalidLiteral at the literal start, never UnexpectedEndOfInput.
+    expect_error("tru", ErrorCode::InvalidLiteral, 0);
+    expect_error("fals", ErrorCode::InvalidLiteral, 0);
     expect_error("-", ErrorCode::NumberNoIntDigits, 1);
     expect_error("1e+", ErrorCode::NumberNoExpDigits, 3);
 }
@@ -666,4 +669,380 @@ TEST_CASE("Stream: borrowed view lifetime")
     auto err = bad_reader.next_result();
     REQUIRE(err.is_err());
     REQUIRE(err.unwrap_err().offset() == 3);
+}
+
+TEST_CASE("Stream: multi value jsonl sequence")
+{
+    // Whitespace/newline-separated values: the JSONL generalization. Blank
+    // and whitespace-only lines are ordinary whitespace, CRLF too.
+    const std::string input = "{\"a\":1}\n"
+                              "[1,2,3]\n"
+                              "\n"
+                              "  \r\n"
+                              "true\n"
+                              "3.5\r\n"
+                              "\"hi\"\n"
+                              "null\n";
+    const char *expected[] = {"{\"a\":1}", "[1,2,3]", "true", "3.5", "\"hi\"", "null"};
+
+    std::istringstream in(input);
+    StreamReader reader(in, StreamMode::MultiValue, 2); // tiny window
+    auto events = collect_events(reader);
+    REQUIRE(!reader.has_error());
+
+    std::pmr::memory_resource *res = Config::instance().resource();
+    size_t cursor = 0;
+    for (const char *want : expected)
+    {
+        CAPTURE(want);
+        Json rebuilt = rebuild_value(events, cursor, res);
+        auto reference = parse_copy(want);
+        REQUIRE(dump(rebuilt) == dump(reference.root()));
+    }
+    REQUIRE(cursor == events.size());
+
+    // Clean end is idempotent.
+    JsonEvent ev;
+    REQUIRE(reader.next(ev) == false);
+    REQUIRE(!reader.has_error());
+}
+
+TEST_CASE("Stream: multi value empty stream")
+{
+    // Zero values is a clean end in MultiValue mode (unlike SingleRoot, where
+    // empty input is UnexpectedEndOfInput).
+    for (const char *input : {"", " \t\r\n", "\n\n"})
+    {
+        CAPTURE(input);
+        std::istringstream in(input);
+        StreamReader reader(in, StreamMode::MultiValue);
+        JsonEvent ev;
+        REQUIRE(reader.next(ev) == false);
+        REQUIRE(!reader.has_error());
+        REQUIRE(reader.next(ev) == false);
+    }
+    {
+        std::istringstream in("");
+        StreamReader single(in); // default SingleRoot
+        JsonEvent ev;
+        REQUIRE(single.next(ev) == false);
+        REQUIRE(single.has_error());
+        REQUIRE(single.error().code == ErrorCode::UnexpectedEndOfInput);
+    }
+}
+
+TEST_CASE("Stream: multi value separators and result shell")
+{
+    // Whitespace separates top-level values.
+    std::istringstream in("1 true [2] {}");
+    StreamReader reader(in, StreamMode::MultiValue);
+    auto events = collect_events(reader);
+    REQUIRE(!reader.has_error());
+
+    std::pmr::memory_resource *res = Config::instance().resource();
+    const char *expected[] = {"1", "true", "[2]", "{}"};
+    size_t cursor = 0;
+    for (const char *want : expected)
+    {
+        CAPTURE(want);
+        REQUIRE(dump(rebuild_value(events, cursor, res)) == want);
+    }
+    REQUIRE(cursor == events.size());
+
+    // Values must be whitespace-separated: no separator is the same
+    // ExtraCharactersAfterValue SingleRoot reports, in either mode.
+    std::istringstream single_in("1true");
+    StreamReader single(single_in);
+    JsonEvent ev;
+    while (single.next(ev))
+    {
+    }
+    REQUIRE(single.has_error());
+    REQUIRE(single.error().code == ErrorCode::ExtraCharactersAfterValue);
+    REQUIRE(single.error().offset() == 1);
+
+    std::istringstream multi_in("1true");
+    StreamReader multi(multi_in, StreamMode::MultiValue);
+    REQUIRE(multi.next(ev));
+    REQUIRE(ev.integer == (int64_t)1);
+    REQUIRE(multi.next(ev) == false);
+    REQUIRE(multi.has_error());
+    REQUIRE(multi.error().code == ErrorCode::ExtraCharactersAfterValue);
+    REQUIRE(multi.error().offset() == 1);
+
+    // Result shell in MultiValue mode: Ok per event, final Ok(nullopt).
+    std::istringstream result_in("1 2");
+    StreamReader rr(result_in, StreamMode::MultiValue);
+    auto r1 = rr.next_result();
+    REQUIRE(r1.is_ok());
+    REQUIRE(r1.unwrap().has_value());
+    REQUIRE(r1.unwrap()->type == EventType::Integer);
+    REQUIRE(r1.unwrap()->integer == (int64_t)1);
+    auto r2 = rr.next_result();
+    REQUIRE(r2.is_ok());
+    REQUIRE(r2.unwrap().has_value());
+    REQUIRE(r2.unwrap()->integer == (int64_t)2);
+    auto r3 = rr.next_result();
+    REQUIRE(r3.is_ok());
+    REQUIRE(!r3.unwrap().has_value());
+}
+
+TEST_CASE("Stream: multi value absolute error offset")
+{
+    // MultiValue offsets stay absolute from the stream start (unlike
+    // JsonlReader / parse_jsonl, whose offsets are line-relative).
+    const std::string input = "1\n[2 x]\n";
+    std::istringstream in(input);
+    StreamReader reader(in, StreamMode::MultiValue, 3);
+    JsonEvent ev;
+    REQUIRE(reader.next(ev));
+    REQUIRE(ev.type == EventType::Integer);
+    REQUIRE(ev.integer == (int64_t)1);
+    while (reader.next(ev))
+    {
+    }
+    REQUIRE(reader.has_error());
+    REQUIRE(reader.error().code == ErrorCode::ExpectedCommaOrBracket);
+    REQUIRE(reader.error().offset() == 5); // index of 'x', absolute
+}
+
+TEST_CASE("Stream: strip bom")
+{
+    ConfigGuard guard;
+    Config::instance().set_strip_bom(true);
+    Config::instance().set_strict_utf8(false);
+
+    // SingleRoot: a byte-0 BOM is consumed.
+    {
+        std::istringstream in(bom() + "{}");
+        StreamReader reader(in);
+        auto events = collect_events(reader);
+        REQUIRE(!reader.has_error());
+        REQUIRE(events.size() == 2);
+        REQUIRE(events[0].type == EventType::BeginObject);
+    }
+    // MultiValue: the BOM is consumed once, at the stream start.
+    {
+        std::istringstream in(bom() + "1\n2\n");
+        StreamReader reader(in, StreamMode::MultiValue);
+        auto events = collect_events(reader);
+        REQUIRE(!reader.has_error());
+        REQUIRE(events.size() == 2);
+        REQUIRE(events[0].integer == (int64_t)1);
+        REQUIRE(events[1].integer == (int64_t)2);
+    }
+    // BOM-only input: SingleRoot errors at offset 3; MultiValue is empty.
+    {
+        std::istringstream in(bom());
+        StreamReader reader(in);
+        JsonEvent ev;
+        while (reader.next(ev))
+        {
+        }
+        REQUIRE(reader.has_error());
+        REQUIRE(reader.error().code == ErrorCode::UnexpectedEndOfInput);
+        REQUIRE(reader.error().offset() == 3);
+    }
+    {
+        std::istringstream in(bom());
+        StreamReader reader(in, StreamMode::MultiValue);
+        JsonEvent ev;
+        REQUIRE(reader.next(ev) == false);
+        REQUIRE(!reader.has_error());
+    }
+    // A BOM after leading whitespace is not at byte 0: rejected, matching
+    // parse_copy (which strips only at m_begin).
+    {
+        const std::string input = " " + bom() + "{}";
+        auto ref = parse_copy_result(input);
+        REQUIRE(ref.is_err());
+        ParseError ref_err = std::move(ref).unwrap_err();
+
+        std::istringstream in(input);
+        StreamReader reader(in);
+        JsonEvent ev;
+        while (reader.next(ev))
+        {
+        }
+        REQUIRE(reader.has_error());
+        REQUIRE(reader.error().code == ErrorCode::UnexpectedValueCharacter);
+        REQUIRE(reader.error().offset() == ref_err.offset());
+        REQUIRE(reader.error().format() == std::string(ref_err.what()));
+    }
+    // strip_bom off: a byte-0 BOM is an ordinary error at offset 0.
+    Config::instance().set_strip_bom(false);
+    {
+        std::istringstream in(bom() + "1");
+        StreamReader reader(in);
+        JsonEvent ev;
+        while (reader.next(ev))
+        {
+        }
+        REQUIRE(reader.has_error());
+        REQUIRE(reader.error().code == ErrorCode::UnexpectedValueCharacter);
+        REQUIRE(reader.error().offset() == 0);
+    }
+}
+
+TEST_CASE("Stream: strict utf8")
+{
+    ConfigGuard guard;
+    Config::instance().set_strict_utf8(true);
+
+    // Valid UTF-8 (e-acute = C3 A9) decodes and rebuilds identically.
+    {
+        const std::string input = "\"\xC3\xA9\"";
+        std::istringstream in(input);
+        StreamReader reader(in);
+        auto events = collect_events(reader);
+        REQUIRE(!reader.has_error());
+        REQUIRE(events.size() == 1);
+        REQUIRE(events[0].type == EventType::String);
+        REQUIRE(events[0].text == "\xC3\xA9");
+
+        auto reference = parse_copy(input);
+        Json rebuilt = Json::own(events[0].text, Config::instance().resource());
+        REQUIRE(dump(rebuilt) == dump(reference.root()));
+    }
+
+    // Ill-formed raw content: first failure code + offset + message match
+    // parse_copy exactly (format() is the static table plus offset).
+    const std::string raw_cases[] = {
+        "\"a\xC0\x80\"",
+        "\"a\xFF\"",
+        "\"a\xE1"
+        "A\"",
+        "\"a\xED\xA0\x80\"",
+        "\"a\xF4\x90\x80\x80\"",
+        "\"a\xE1\"",
+    };
+    for (const std::string &input : raw_cases)
+    {
+        CAPTURE(input);
+        auto ref = parse_copy_result(input);
+        REQUIRE(ref.is_err());
+        ParseError ref_err = std::move(ref).unwrap_err();
+
+        std::istringstream in(input);
+        StreamReader reader(in, 2);
+        JsonEvent ev;
+        while (reader.next(ev))
+        {
+        }
+        REQUIRE(reader.has_error());
+        REQUIRE(reader.error().offset() == ref_err.offset());
+        REQUIRE(reader.error().format() == std::string(ref_err.what()));
+    }
+
+    // Escape path: DOM phase 2 feeds the UTF-8 checker before handling the
+    // escape, so whichever violation comes first in stream order wins.
+    const std::string escape_cases[] = {
+        "\"\xE1\\u0041\"", // torn 3-byte lead immediately before the backslash
+        "\"\\q\xE1\"",     // invalid escape precedes the bad sequence
+        "\"\\n\xE1\"",     // valid escape, then a dangling sequence
+    };
+    for (const std::string &input : escape_cases)
+    {
+        CAPTURE(input);
+        auto ref = parse_copy_result(input);
+        REQUIRE(ref.is_err());
+        ParseError ref_err = std::move(ref).unwrap_err();
+
+        std::istringstream in(input);
+        StreamReader reader(in, 3);
+        JsonEvent ev;
+        while (reader.next(ev))
+        {
+        }
+        REQUIRE(reader.has_error());
+        REQUIRE(reader.error().offset() == ref_err.offset());
+        REQUIRE(reader.error().format() == std::string(ref_err.what()));
+    }
+
+    // Object keys go through the same UTF-8 gate as string values.
+    {
+        const std::string input = "{\"k\xFF\":1}";
+        auto ref = parse_copy_result(input);
+        REQUIRE(ref.is_err());
+        ParseError ref_err = std::move(ref).unwrap_err();
+
+        std::istringstream in(input);
+        StreamReader reader(in);
+        JsonEvent ev;
+        while (reader.next(ev))
+        {
+        }
+        REQUIRE(reader.has_error());
+        REQUIRE(reader.error().offset() == ref_err.offset());
+        REQUIRE(reader.error().format() == std::string(ref_err.what()));
+    }
+
+    // strict_utf8 off: the same bytes are a byte mirror (no error).
+    Config::instance().set_strict_utf8(false);
+    {
+        std::istringstream in("\"a\xFF\"");
+        StreamReader reader(in);
+        auto events = collect_events(reader);
+        REQUIRE(!reader.has_error());
+        REQUIRE(events.size() == 1);
+        REQUIRE(events[0].text == "a\xFF");
+    }
+}
+
+TEST_CASE("Stream: error classification parity")
+{
+    ConfigGuard guard;
+    Config::instance().set_strip_bom(false);
+    Config::instance().set_strict_utf8(false);
+    Config::instance().set_max_depth(Config::kDefaultMaxDepth);
+
+    // A mini golden set covering every parser error family (structure,
+    // numbers, strings, literals, BOM). For each, the event core must report
+    // the exact same offset and rendered message as parse_copy. The tiny
+    // window forces the token classifiers across refill boundaries.
+    const char *inputs[] = {
+        "1 2",
+        "x",
+        "[x]",
+        "",
+        "[1,",
+        "\xEF\xBB\xBF{}",
+        "{1:2}",
+        "{\"a\" 1}",
+        "{\"a\":1",
+        "{\"a\":1 \"b\":2}",
+        "[1 2]",
+        "-",
+        "01",
+        "1.",
+        "1e",
+        "1e999",
+        "\"abc",
+        ("\"a\x01"
+         "b\""),
+        "\"a\\x\"",
+        "\"\\uZZZZ\"",
+        "\"\\uD800\\u0041\"",
+        "\"\\uD800x\"",
+        "\"\\uDC00\"",
+        "tru",
+        "truex",
+    };
+    for (const char *input : inputs)
+    {
+        CAPTURE(input);
+        auto ref = parse_copy_result(input);
+        REQUIRE(ref.is_err());
+        ParseError ref_err = std::move(ref).unwrap_err();
+
+        std::istringstream in(input);
+        StreamReader reader(in, 2);
+        JsonEvent ev;
+        while (reader.next(ev))
+        {
+        }
+        REQUIRE(reader.has_error());
+        REQUIRE(reader.error().offset() == ref_err.offset());
+        REQUIRE(reader.error().format() == std::string(ref_err.what()));
+    }
 }

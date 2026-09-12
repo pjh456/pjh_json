@@ -145,36 +145,62 @@ namespace pjh::json
     };
 
     /**
-     * @brief Single-root incremental JSON event reader over an std::istream
+     * @brief How many top-level values a StreamReader consumes
+     */
+    enum class StreamMode : uint8_t
+    {
+        SingleRoot, ///< exactly one top-level value; trailing non-whitespace is an error
+        MultiValue, ///< zero or more top-level values in sequence (JSONL generalized)
+    };
+
+    /**
+     * @brief Incremental JSON event reader over an std::istream
      *
-     * Pulls one JSON event at a time from one top-level value without ever
-     * materialising the whole input or a DOM. An independent, byte-oriented
-     * state machine scans a sliding window of `chunk_size` bytes, growing the
-     * window (never truncating) so tokens, strings and numbers may straddle
-     * refill boundaries. Memory is bounded by O(nesting depth + longest single
-     * token + chunk_size): the stream size does not appear.
+     * Pulls one JSON event at a time from a stream of top-level values without
+     * ever materialising the whole input or a DOM. An independent,
+     * byte-oriented state machine scans a sliding window of `chunk_size`
+     * bytes, growing the window (never truncating) so tokens, strings and
+     * numbers may straddle refill boundaries. Memory is bounded by O(nesting
+     * depth + longest single token + chunk_size): the stream size does not
+     * appear.
+     *
+     * Two modes:
+     * - StreamMode::SingleRoot (the default) accepts exactly one top-level
+     *   value; after it completes, any further non-whitespace byte is
+     *   ExtraCharactersAfterValue.
+     * - StreamMode::MultiValue accepts a sequence of top-level values
+     *   separated by JSON whitespace or EOF. This is JSON Lines generalized:
+     *   newlines (and a single trailing '\r') are ordinary whitespace, blank
+     *   lines are skipped, and a value may itself span lines (use JsonlReader
+     *   or parse_jsonl for the strict one-value-per-line contract). A stream
+     *   with no value is a clean end.
      *
      * This is the explicit divergence from the DOM parser: the event core uses
      * no SIMD and requires NEITHER the kPaddingWidth trailing NUL bytes nor a
      * fully buffered input. Do not feed it through Parser.
      *
      * Shared with the DOM parser: the constexpr grammar (grammar.hpp), the
-     * buffered escape decoder (detail/utils.hpp) and the Error/ErrorCode
-     * kernel vocabulary (error.hpp) -- zero new error codes.
+     * buffered escape decoder (detail/utils.hpp), the strict UTF-8 checker
+     * (detail/utf8.hpp) and the Error/ErrorCode kernel vocabulary
+     * (error.hpp) -- zero new error codes.
      *
-     * @note Current scope is RFC 8259 single-root mode only. Config::strip_bom,
-     *       Config::strict_utf8 and Config::json5 are NOT consulted yet
-     *       (deferred); max_depth is captured once, in the constructor, with
-     *       the same "root container counts as level 1" semantics as Parser.
-     * @note Root completion is observed lazily: the trailing-content check
-     *       (ExtraCharactersAfterValue) runs on the first next() after the
-     *       event that completes the root, not before it.
+     * @note Config capture-at-construction, matching Parser: max_depth,
+     *       strip_bom and strict_utf8 are read once, in the constructor. The
+     *       BOM is stripped only at byte 0 of the stream (a later BOM is
+     *       rejected like any other unexpected byte), and strict_utf8 gates
+     *       the raw bytes inside quoted string content and object keys only.
+     *       Config::json5 is deliberately NOT consulted: the event core stays
+     *       RFC 8259-only (JSON5 is a separate roadmap item).
+     * @note Root completion is observed lazily: in SingleRoot mode the
+     *       trailing-content check (ExtraCharactersAfterValue) runs on the
+     *       first next() after the event that completes the root, not before
+     *       it.
      */
     class StreamReader
     {
     public:
         /**
-         * @brief Construct over an input stream
+         * @brief Construct over an input stream in SingleRoot mode
          * @param in         Input stream; consumed sequentially (no seek/tellg)
          * @param chunk_size Refill block size in bytes (default 64 KiB). It is
          *                   also the sliding-window target and is exposed for
@@ -183,6 +209,16 @@ namespace pjh::json
          * @param res        Scratch-buffer resource (default: global config)
          */
         explicit StreamReader(std::istream &in, size_t chunk_size = 64 * 1024,
+                              std::pmr::memory_resource *res = Config::instance().resource());
+
+        /**
+         * @brief Construct over an input stream with an explicit mode
+         * @param in         Input stream; consumed sequentially (no seek/tellg)
+         * @param mode       SingleRoot (one value) or MultiValue (a sequence)
+         * @param chunk_size Refill block size in bytes (default 64 KiB)
+         * @param res        Scratch-buffer resource (default: global config)
+         */
+        explicit StreamReader(std::istream &in, StreamMode mode, size_t chunk_size = 64 * 1024,
                               std::pmr::memory_resource *res = Config::instance().resource());
 
         /**
@@ -197,8 +233,8 @@ namespace pjh::json
         /**
          * @brief Zero-throw kernel: pull the next event
          * @param out Receives the event on success; untouched on failure
-         * @return true = @p out holds an event; false = clean end of the root
-         *         value (no error) or the first failure (check
+         * @return true = @p out holds an event; false = clean end of the
+         *         stream (no error) or the first failure (check
          *         has_error()/error())
          * @throws std::bad_alloc only (propagated unconverted)
          * @note After clean end or failure every later call returns false
@@ -285,6 +321,14 @@ namespace pjh::json
         [[nodiscard]] size_t abs() const noexcept { return m_abs_base + m_pos; }
         /// @brief Consume whitespace, filling until a non-blank byte or EOF
         void skip_ws();
+        /**
+         * @brief One-time leading-BOM strip at absolute offset 0
+         *
+         * Mirrors Parser::skip_leading_bom: only when Config::strip_bom was
+         * on at construction and only at the very start of the stream. A
+         * later BOM is left for the value dispatch to reject.
+         */
+        void skip_start_bom();
 
         // ---- token decoders ----
         /// @brief Parse the '"'-delimited string at the cursor into m_token
@@ -310,12 +354,16 @@ namespace pjh::json
         std::pmr::vector<char> m_buf;    ///< unconsumed window [m_pos, m_len)
         std::pmr::string m_token;        ///< raw/decoded string token scratch
         std::pmr::vector<Frame> m_stack; ///< open containers (depth)
+        StreamMode m_mode;
         size_t m_chunk_size;
         size_t m_max_depth;
+        bool m_strip_bom;       ///< Config::strip_bom captured at construction
+        bool m_strict_utf8;     ///< Config::strict_utf8 captured at construction
         size_t m_pos = 0;       ///< index of the next unconsumed byte
         size_t m_len = 0;       ///< one past the last valid byte in m_buf
         size_t m_abs_base = 0;  ///< absolute stream offset of m_buf[0]
         size_t m_token_len = 0; ///< decoded length of the current m_token
+        bool m_start_checked = false; ///< leading-BOM check has run
         bool m_eof = false;
         bool m_root_done = false;
         bool m_finished = false;

@@ -1,5 +1,6 @@
 #include "pjh_json/stream.hpp"
 #include "pjh_json/detail/utils.hpp"
+#include "pjh_json/detail/utf8.hpp"
 #include "pjh_json/grammar.hpp"
 #include "pjh_json/json.hpp"
 
@@ -191,12 +192,20 @@ namespace pjh::json
     // ======================================================================
 
     StreamReader::StreamReader(std::istream &in, size_t chunk_size, std::pmr::memory_resource *res)
+        : StreamReader(in, StreamMode::SingleRoot, chunk_size, res)
+    {
+    }
+
+    StreamReader::StreamReader(std::istream &in, StreamMode mode, size_t chunk_size, std::pmr::memory_resource *res)
         : m_in(in),
           m_buf(scratch_resource(res)),
           m_token(scratch_resource(res)),
           m_stack(scratch_resource(res)),
+          m_mode(mode),
           m_chunk_size(chunk_size == 0 ? 1 : chunk_size),
-          m_max_depth(Config::instance().max_depth())
+          m_max_depth(Config::instance().max_depth()),
+          m_strip_bom(Config::instance().strip_bom()),
+          m_strict_utf8(Config::instance().strict_utf8())
     {
         m_buf.reserve(m_chunk_size);
         m_stack.reserve(16);
@@ -266,6 +275,27 @@ namespace pjh::json
         }
     }
 
+    /*
+     * Strip the UTF-8 BOM once, at absolute offset 0, when strip_bom was on
+     * at construction. Runs before the first value's whitespace skip, so a
+     * BOM after leading whitespace is NOT stripped (Parser::skip_leading_bom
+     * requires m_curr == m_begin). Absent bytes at stream start leave m_pos
+     * untouched: a short stream simply has no BOM.
+     */
+    void StreamReader::skip_start_bom()
+    {
+        if (m_start_checked)
+            return;
+        m_start_checked = true;
+        if (!m_strip_bom || m_has_error)
+            return;
+        if (!ensure(3))
+            return; // EOF (or read failure) before three bytes: no BOM
+        if (static_cast<unsigned char>(m_buf[m_pos]) == 0xEF && static_cast<unsigned char>(m_buf[m_pos + 1]) == 0xBB &&
+            static_cast<unsigned char>(m_buf[m_pos + 2]) == 0xBF)
+            m_pos += 3;
+    }
+
     void StreamReader::fail(ErrorCode c, size_t offset) noexcept
     {
         if (m_has_error)
@@ -284,9 +314,17 @@ namespace pjh::json
 
     /*
      * Accumulate one raw '"'-delimited string body into m_token across refill
-     * boundaries, then decode escapes in place. Control bytes are rejected at
-     * their absolute stream offset; a token that crosses chunk boundaries is
-     * grown in m_token rather than truncated.
+     * boundaries, then decode escapes in place. A token that crosses chunk
+     * boundaries is grown in m_token rather than truncated.
+     *
+     * Error ordering mirrors Parser::parse_string exactly so the two report
+     * the same first failure:
+     * - No escape: the DOM fast path finds a raw control byte before it runs
+     *   the UTF-8 gate (UnescapedControl wins over an earlier ill-formed
+     *   sequence), then checks strict UTF-8 over the whole content.
+     * - With escapes: DOM phase 2 feeds bytes to the UTF-8 checker in stream
+     *   order before handling the escape/control at each byte; the checker
+     *   sees the backslash but not the escape's ASCII source bytes.
      */
     bool StreamReader::parse_string_token()
     {
@@ -295,6 +333,7 @@ namespace pjh::json
         m_token.clear();
         bool escaped = false;
         bool has_escape = false;
+        size_t first_control = SIZE_MAX; // raw index of the first raw control byte
 
         for (;;)
         {
@@ -327,32 +366,56 @@ namespace pjh::json
                 escaped = true;
                 has_escape = true;
             }
-            else if (static_cast<unsigned char>(c) < 0x20)
-            {
-                fail(ErrorCode::UnescapedControl, m_abs_base + m_pos - 1);
-                return false;
-            }
             else
             {
                 m_token.push_back(c);
+                if (static_cast<unsigned char>(c) < 0x20 && first_control == SIZE_MAX)
+                    first_control = m_token.size() - 1;
             }
         }
 
         const size_t raw_len = m_token.size();
         if (!has_escape)
         {
+            // DOM phase 1: a raw control byte is found before the UTF-8 gate.
+            if (first_control != SIZE_MAX)
+            {
+                fail(ErrorCode::UnescapedControl, content_base + first_control);
+                return false;
+            }
+            if (m_strict_utf8)
+            {
+                const char *ep = nullptr;
+                const ErrorCode ec = detail::check_utf8_strict(m_token.data(), raw_len, ep);
+                if (ec != ErrorCode::None)
+                {
+                    fail(ec, content_base + static_cast<size_t>(ep - m_token.data()));
+                    return false;
+                }
+            }
             m_token_len = raw_len;
             return true;
         }
 
-        // Decode in place (destination <= source, so writes never clobber
-        // unread input). The NUL lookahead bounds handle_escape's read-ahead.
+        // DOM phase 2: decode in place (destination <= source, so writes never
+        // clobber unread input) and interleave the UTF-8 feed. The NUL
+        // lookahead bounds handle_escape's read-ahead.
         m_token.append(kStringDecodePadding, '\0');
         char *dst = m_token.data();
         const char *src = m_token.data();
         const char *const src_end = src + raw_len;
+        detail::Utf8Checker ck;
         while (src < src_end)
         {
+            if (m_strict_utf8)
+            {
+                ck.feed(static_cast<uint8_t>(*src), src);
+                if (ck.failed())
+                {
+                    fail(ck.code, content_base + static_cast<size_t>(ck.err - m_token.data()));
+                    return false;
+                }
+            }
             if (*src == '\\')
             {
                 const char *ep = nullptr;
@@ -366,9 +429,23 @@ namespace pjh::json
                     return false;
                 }
             }
+            else if (static_cast<unsigned char>(*src) < 0x20)
+            {
+                fail(ErrorCode::UnescapedControl, content_base + static_cast<size_t>(src - m_token.data()));
+                return false;
+            }
             else
             {
                 *dst++ = *src++;
+            }
+        }
+        if (m_strict_utf8)
+        {
+            ck.end();
+            if (ck.failed())
+            {
+                fail(ck.code, content_base + static_cast<size_t>(ck.err - m_token.data()));
+                return false;
             }
         }
         m_token_len = static_cast<size_t>(dst - m_token.data());
@@ -376,10 +453,13 @@ namespace pjh::json
     }
 
     /*
-     * Match true/false/null. Truncation at stream end is reported as
-     * UnexpectedEndOfInput; a full-length mismatch as InvalidLiteral. The
-     * trailing byte gate mirrors Parser::parse_literal so `truex` fails here
-     * rather than at the next structural step.
+     * Match true/false/null. ANY mismatch or truncation is InvalidLiteral at
+     * the literal start, matching Parser::parse_literal exactly: the DOM
+     * parser reads a fixed 4/5-byte word against NUL padding, so a short
+     * `tru`/`fals` is a mismatch there, never UnexpectedEndOfInput (the
+     * zero-available case is reported by expect_value before this call).
+     * The trailing byte gate mirrors Parser::parse_literal so `truex` fails
+     * here rather than at the next structural step.
      */
     bool StreamReader::parse_literal(JsonEvent &out)
     {
@@ -391,13 +471,7 @@ namespace pjh::json
         {
             if (m_has_error)
                 return false;
-            const size_t available = m_len - m_pos;
-            if (std::string_view(m_buf.data() + m_pos, available) != lit.substr(0, available))
-            {
-                fail(ErrorCode::InvalidLiteral, start_abs);
-                return false;
-            }
-            fail(ErrorCode::UnexpectedEndOfInput, start_abs + available);
+            fail(ErrorCode::InvalidLiteral, start_abs);
             return false;
         }
 
@@ -590,11 +664,18 @@ namespace pjh::json
     /*
      * Pull one event. The state is (root-done | stack of open containers with
      * a phase each); every call advances exactly one event. Transitions that
-     * do not emit (colon, comma) loop internally. Clean end is reached only
-     * after the root value completes and trailing content is checked.
+     * do not emit (colon, comma) loop internally.
+     *
+     * SingleRoot: clean end is reached only after the root value completes and
+     * trailing content is checked (ExtraCharactersAfterValue otherwise).
+     * MultiValue: after each completed value the stream skips whitespace and
+     * either starts the next value or ends cleanly at EOF.
      */
     bool StreamReader::next(JsonEvent &out)
     {
+        if (!m_start_checked)
+            skip_start_bom();
+
         for (;;)
         {
             if (m_has_error || m_finished)
@@ -602,20 +683,63 @@ namespace pjh::json
 
             if (m_root_done)
             {
-                skip_ws();
-                if (m_has_error)
+                if (m_mode == StreamMode::SingleRoot)
+                {
+                    skip_ws();
+                    if (m_has_error)
+                        return false;
+                    if (m_len != m_pos)
+                    {
+                        fail(ErrorCode::ExtraCharactersAfterValue, abs());
+                        return false;
+                    }
+                    m_finished = true;
                     return false;
-                if (m_len != m_pos)
+                }
+                // MultiValue: top-level values must be separated by JSON
+                // whitespace (or EOF). A value that ends where the next byte
+                // is not whitespace is ExtraCharactersAfterValue, exactly as
+                // SingleRoot would report it.
+                if (!ensure(1))
+                {
+                    if (m_has_error)
+                        return false;
+                    m_finished = true; // EOF
+                    return false;
+                }
+                if (!grammar::is_whitespace(static_cast<unsigned char>(m_buf[m_pos])))
                 {
                     fail(ErrorCode::ExtraCharactersAfterValue, abs());
                     return false;
                 }
-                m_finished = true;
-                return false;
+                skip_ws();
+                if (m_has_error)
+                    return false;
+                if (m_len == m_pos)
+                {
+                    m_finished = true;
+                    return false;
+                }
+                m_root_done = false;
+                continue;
             }
 
             if (m_stack.empty())
+            {
+                // MultiValue: a stream with no value is a clean end.
+                if (m_mode == StreamMode::MultiValue)
+                {
+                    skip_ws();
+                    if (m_has_error)
+                        return false;
+                    if (m_len == m_pos)
+                    {
+                        m_finished = true;
+                        return false;
+                    }
+                }
                 return expect_value(out, true);
+            }
 
             Frame &f = m_stack.back();
             switch (f.phase)
