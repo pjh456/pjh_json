@@ -66,6 +66,26 @@ namespace
     {
         return std::string_view(s.data(), s.size());
     }
+
+    // Explicit UTF-8 byte constants for the Unicode identifier / white-space
+    // cases. Each multi-byte sequence is its own literal so a trailing digit
+    // can never be absorbed by a greedy `\x` escape.
+    const std::string kCafe = "caf\xC3\xA9";                         // café
+    const std::string kAcute = "\xC3\xA9";                           // é (U+00E9)
+    const std::string kOmega = "\xCE\xA9";                           // Ω (U+03A9)
+    const std::string kCjk = "\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E"; // 日本語
+    const std::string kCombining = "e\xCC\x81";                      // e + U+0301
+    const std::string kArabicOne = "\xD9\xA1";                       // ١ (U+0661)
+    const std::string kAstralA = "\xF0\x9D\x90\x80";                 // 𝐀 (U+1D400)
+    const std::string kNbsp = "\xC2\xA0";                            // U+00A0
+    const std::string kOgham = "\xE1\x9A\x80";                       // U+1680
+    const std::string kEmSpace = "\xE2\x80\x83";                     // U+2003
+    const std::string kLs = "\xE2\x80\xA8";                          // U+2028
+    const std::string kPs = "\xE2\x80\xA9";                          // U+2029
+    const std::string kNarrowNbsp = "\xE2\x80\xAF";                  // U+202F
+    const std::string kMathSpace = "\xE2\x81\x9F";                   // U+205F
+    const std::string kIdeoSpace = "\xE3\x80\x80";                   // U+3000
+    const std::string kFeff = "\xEF\xBB\xBF";                        // U+FEFF
 }
 
 TEST_CASE("Json5: knob default-off and toggles")
@@ -754,4 +774,198 @@ TEST_CASE("Json5: borrowed keys survive in-situ and view shapes")
     view_buf.resize(view_buf.size() + kPaddingWidth, '\0');
     auto view = parse_view(view_buf.data(), content_len);
     REQUIRE(view.root()["name"].as_string() == std::string_view("v"));
+}
+
+TEST_CASE("Json5: Unicode identifier keys")
+{
+    Json5ConfigGuard guard;
+    Config &cfg = Config::instance();
+    cfg.set_json5(true);
+
+    // Non-ASCII IdentifierStart: Latin-1, Greek, CJK, Cyrillic.
+    auto cafe = parse_copy("{" + kCafe + ":1}");
+    REQUIRE(cafe.root()[std::string_view(kCafe)].as_int() == (int64_t)1);
+    REQUIRE(parse_copy("{" + kOmega + ":2}").root()[std::string_view(kOmega)].as_int() == (int64_t)2);
+    REQUIRE(parse_copy("{" + kCjk + ":3}").root()[std::string_view(kCjk)].as_int() == (int64_t)3);
+    REQUIRE(parse_copy("{\xD0\x9F\xD1\x80\xD0\xB8:4}").root()["\xD0\x9F\xD1\x80\xD0\xB8"].as_int() == (int64_t)4);
+
+    // Non-ASCII IdentifierPart: combining mark (Mn) and decimal digit (Nd).
+    auto comb = parse_copy("{" + kCombining + ":5}");
+    REQUIRE(comb.root()[std::string_view(kCombining)].as_int() == (int64_t)5);
+    auto arab = parse_copy("{x" + kArabicOne + ":6}");
+    REQUIRE(arab.root()[std::string_view("x" + kArabicOne)].as_int() == (int64_t)6);
+
+    // Mixed ASCII prefix and Unicode continuation.
+    auto mixed = parse_copy("{a" + kAcute + ":7}");
+    REQUIRE(mixed.root()[std::string_view("a" + kAcute)].as_int() == (int64_t)7);
+
+    // Classification is by Unicode general category, not by script block:
+    // U+00AA (ª, Lo) and U+00B5 (µ, Ll) are letters, while U+00D7 (×, Sm)
+    // and U+00B2 (², No) are not.
+    REQUIRE(parse_copy("{\xC2\xAA:1}").root()["\xC2\xAA"].as_int() == (int64_t)1);
+    REQUIRE(parse_copy("{\xC2\xB5:2}").root()["\xC2\xB5"].as_int() == (int64_t)2);
+    CHECK_THROWS_AS((void)parse_copy("{\xC3\x97:1}"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("{\xC2\xB2:1}"), ParseError);
+
+    // \uXXXX escapes in any position, decoded in place.
+    REQUIRE(parse_copy("{\\u0061:1}").root()["a"].as_int() == (int64_t)1);
+    REQUIRE(parse_copy("{\\u65E5\\u672C\\u8A9E:2}").root()[std::string_view(kCjk)].as_int() == (int64_t)2);
+    REQUIRE(parse_copy("{caf\\u00E9:3}").root()[std::string_view(kCafe)].as_int() == (int64_t)3);
+    REQUIRE(parse_copy("{a\\u0062c:4}").root()["abc"].as_int() == (int64_t)4);
+    REQUIRE(parse_copy("{e\\u0301:5}").root()[std::string_view(kCombining)].as_int() == (int64_t)5);
+    // Surrogate pair combines into one astral UnicodeLetter (U+1D400, Lu).
+    REQUIRE(parse_copy("{\\uD835\\uDC00:6}").root()[std::string_view(kAstralA)].as_int() == (int64_t)6);
+    // ZWNJ (U+200C) is an explicit IdentifierPart character.
+    REQUIRE(parse_copy("{a\\u200Cb:7}")
+                .root()["a\xE2\x80\x8C"
+                        "b"]
+                .as_int() == (int64_t)7);
+
+    // An escaped key and its quoted twin are the same DOM.
+    REQUIRE(parse_copy("{\\u0061:1}").root() == parse_copy("{\"a\":1}").root());
+
+    // Rejections: an escape that is not a valid identifier character ends the
+    // name (maximal munch), and a non-letter non-ASCII code point is not a key.
+    CHECK_THROWS_AS((void)parse_copy("{\\u0030:1}"), ParseError);   // digit as start
+    CHECK_THROWS_AS((void)parse_copy("{a\\u0020b:1}"), ParseError); // space in continuation
+    CHECK_THROWS_AS((void)parse_copy("{\\u00:1}"), ParseError);     // truncated escape
+    CHECK_THROWS_AS((void)parse_copy("{\\uXXXX:1}"), ParseError);   // non-hex digits
+    CHECK_THROWS_AS((void)parse_copy("{\\uD83D:1}"), ParseError);   // lone high surrogate
+    CHECK_THROWS_AS((void)parse_copy("{\\uD83Dx:1}"), ParseError);  // high not followed by \u
+    CHECK_THROWS_AS((void)parse_copy("{\\uDE00:1}"), ParseError);   // lone low surrogate
+    CHECK_THROWS_AS((void)parse_copy("{\xC2\xA9:1}"), ParseError);  // © (So), not a letter
+    // Malformed UTF-8 is never an identifier character (independently of the
+    // raw-string-only strict_utf8 knob).
+    CHECK_THROWS_AS((void)parse_copy("{a\xFF:1}"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("{a\xE2\x80:1}"), ParseError);
+
+    // Default RFC mode rejects both raw and escaped Unicode keys.
+    cfg.set_json5(false);
+    CHECK_THROWS_AS((void)parse_copy("{" + kCafe + ":1}"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("{\\u0061:1}"), ParseError);
+}
+
+TEST_CASE("Json5: Unicode identifiers and strict duplicate keys")
+{
+    Json5ConfigGuard guard;
+    Config &cfg = Config::instance();
+    cfg.set_json5(true);
+
+    // Unicode and escaped spellings compare by decoded content.
+    cfg.set_strict_duplicate_keys(true);
+    CHECK_THROWS_AS((void)parse_copy("{" + kCafe + ":1,\"" + kCafe + "\":2}"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("{\\u0061:1,a:2}"), ParseError);
+    cfg.set_strict_duplicate_keys(false);
+    REQUIRE(parse_copy("{\\u0061:1,a:2}").root()["a"].as_int() == (int64_t)2);
+}
+
+TEST_CASE("Json5: escaped identifier keys decode in place")
+{
+    Json5ConfigGuard guard;
+    Config::instance().set_json5(true);
+
+    // The key borrows the input buffer; an escaped key is decoded in place
+    // (escaped spelling is longer than the decoded UTF-8), like strings.
+    std::pmr::string in_situ_buf("{caf\\u00E9:'v'}");
+    in_situ_buf.resize(in_situ_buf.size() + kPaddingWidth, '\0');
+    auto in_situ = parse_in_situ(std::move(in_situ_buf));
+    REQUIRE(in_situ.root()[std::string_view(kCafe)].as_string() == std::string_view("v"));
+
+    std::string view_buf("{caf\\u00E9:'v'}");
+    const size_t content_len = view_buf.size();
+    view_buf.resize(view_buf.size() + kPaddingWidth, '\0');
+    auto view = parse_view(view_buf.data(), content_len);
+    REQUIRE(view.root()[std::string_view(kCafe)].as_string() == std::string_view("v"));
+
+    REQUIRE(sv(dump(parse_copy("{caf\\u00E9:'x'}"))) == "{\"caf\xC3\xA9\":\"x\"}");
+}
+
+TEST_CASE("Json5: Unicode whitespace")
+{
+    Json5ConfigGuard guard;
+    Config &cfg = Config::instance();
+
+    const std::string all[] = {kNbsp, kOgham, kEmSpace, kLs, kPs, kNarrowNbsp, kMathSpace, kIdeoSpace, kFeff};
+
+    // Default RFC rejects every JSON5-only white space code point.
+    cfg.set_json5(false);
+    for (const std::string &ws : all)
+        CHECK_THROWS_AS((void)parse_copy(ws + "1"), ParseError);
+
+    cfg.set_json5(true);
+
+    // Leading / trailing trivia around a value.
+    for (const std::string &ws : all)
+    {
+        REQUIRE(parse_copy(ws + "1").root().as_int() == (int64_t)1);
+        REQUIRE(parse_copy("1" + ws).root().as_int() == (int64_t)1);
+    }
+
+    // Between every token of an object.
+    auto obj = parse_copy("{" + kNbsp + "\"a\"" + kEmSpace + ":" + kIdeoSpace + "1" + kFeff + "}");
+    REQUIRE(obj.root()["a"].as_int() == (int64_t)1);
+
+    // The JSON5 literal trailing-byte gate is relaxed, so Unicode white space
+    // (and comments) may follow `true`/`false`/`null`.
+    REQUIRE(parse_copy("true" + kNbsp).root().as_boolean() == true);
+    REQUIRE(parse_copy("[" + kFeff + "true" + kLs + ",1]").root().size() == 2);
+
+    // A line comment ends at U+2028 / U+2029 (JSON5 LineTerminator set).
+    REQUIRE(parse_copy("[1, //c" + kLs + "2]").root().size() == 2);
+    REQUIRE(parse_copy("[1, //c" + kPs + "2]").root().size() == 2);
+    REQUIRE(parse_copy("[1, //c" + kLs + "2]").root()[1].as_int() == (int64_t)2);
+
+    // A non-whitespace non-ASCII code point is not trivia; a malformed or
+    // truncated multi-byte sequence is never skipped as white space.
+    CHECK_THROWS_AS((void)parse_copy(kAcute + "1"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("\xC2\x85"
+                                     "1"),
+                    ParseError); // NEL (Cc), not Zs
+    CHECK_THROWS_AS((void)parse_copy(std::string("\xC2", 1) + "1"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy(kLs.substr(0, 2) + "1"), ParseError);
+}
+
+TEST_CASE("Json5: Unicode whitespace in jsonl and line bounding")
+{
+    Json5ConfigGuard guard;
+    Config &cfg = Config::instance();
+
+    cfg.set_json5(false);
+    CHECK_THROWS_AS((void)parse_jsonl(kNbsp + "\n[1]\n"), ParseError);
+
+    cfg.set_json5(true);
+
+    // A Unicode-whitespace-only line is blank and must be skipped, never
+    // handed to a per-line parser (R1: no line may be swallowed).
+    for (const std::string &ws : {kNbsp, kEmSpace, kOgham, kIdeoSpace, kFeff})
+    {
+        auto doc = parse_jsonl(ws + "\n[1]\n");
+        REQUIRE(doc.root().size() == 1);
+        REQUIRE(doc.root()[0].size() == 1);
+        REQUIRE(doc.root()[0][0].as_int() == (int64_t)1);
+    }
+
+    // A non-whitespace byte after the Unicode white space makes the line
+    // non-blank: the parser reports on that line instead of skipping it.
+    CHECK_THROWS_AS((void)parse_jsonl(kNbsp + "x\n[1]\n"), ParseError);
+
+    // U+2028 is not a jsonl line separator: it stays on the physical line and
+    // terminates the line comment there, so `[3]` still parses independently.
+    auto doc = parse_jsonl("[1, //c" + kLs + "2]\n[3]\n");
+    REQUIRE(doc.root().size() == 2);
+    REQUIRE(doc.root()[0].size() == 2);
+    REQUIRE(doc.root()[1][0].as_int() == (int64_t)3);
+}
+
+TEST_CASE("Json5: Unicode input dumps as RFC 8259")
+{
+    Json5ConfigGuard guard;
+    Config::instance().set_json5(true);
+
+    auto doc = parse_copy("{caf\\u00E9:'x', " + kOmega + ":1, \\u65E5\\u672C:2}");
+    REQUIRE(sv(dump(doc)) == "{\"caf\xC3\xA9\":\"x\",\""
+                             "\xCE\xA9"
+                             "\":1,\""
+                             "\xE6\x97\xA5\xE6\x9C\xAC"
+                             "\":2}");
 }

@@ -2,6 +2,7 @@
 #include "pjh_json/json.hpp"
 #include "pjh_json/detail/utils.hpp"
 #include "pjh_json/grammar.hpp"
+#include "unicode.hpp"
 #include <xsimd/xsimd.hpp>
 
 namespace pjh::json
@@ -86,7 +87,8 @@ namespace pjh::json
     }
 
     /*
-     * Skip JSON5 trivia (task 40.1): ASCII whitespace + comments.
+     * Skip JSON5 trivia (task 40.1, Unicode-extended by 40.5): white space +
+     * comments.
      *
      * Every loop condition is explicitly m_curr/m_end-bounded. This is
      * load-bearing: parse_jsonl builds a Parser over a LINE SUB-VIEW of
@@ -95,12 +97,17 @@ namespace pjh::json
      * JSON5 blank/comment line consume the following line — recreating
      * the task-04 `[[1],[1]]` silent-duplication bug.
      *
-     * Line comment: two slashes up to LF/CR or m_end (LF/CR themselves are
-     * then consumed by the whitespace step on the next iteration).
-     * Block comment: slash-star to the first star-slash; non-nesting per
-     * JSON5 1.0.0. An unterminated block comment records
-     * UnexpectedEndOfInput at m_end (reusing an existing ErrorCode: zero
-     * new codes).
+     * White space is the JSON5 1.0.0 §8 set: the four RFC bytes plus VT/FF
+     * (grammar::is_json5_whitespace_ascii), and the multi-byte NBSP/LS/PS/
+     * U+FEFF/Zs code points. The latter are decoded by the strict, bounded
+     * unicode::decode_utf8, so a malformed sequence is not skipped and can
+     * never be classified as trivia.
+     *
+     * Line comment: two slashes up to a LineTerminator (LF/CR, or the
+     * multi-byte U+2028/U+2029) or m_end. Block comment: slash-star to the
+     * first star-slash; non-nesting per JSON5 1.0.0. An unterminated block
+     * comment records UnexpectedEndOfInput at m_end (reusing an existing
+     * ErrorCode: zero new codes).
      */
     void Parser::skip_json5_trivia()
     {
@@ -109,11 +116,29 @@ namespace pjh::json
             while (m_curr < m_end && grammar::is_json5_whitespace_ascii(static_cast<unsigned char>(*m_curr)))
                 ++m_curr;
 
+            if (m_curr < m_end && static_cast<unsigned char>(*m_curr) >= 0x80)
+            {
+                uint32_t cp = 0;
+                std::size_t len = 0;
+                if (unicode::decode_utf8(m_curr, m_end, cp, len) && grammar::is_json5_whitespace(cp))
+                {
+                    m_curr += len;
+                    continue;
+                }
+            }
+
             if (m_curr + 1 < m_end && m_curr[0] == '/' && m_curr[1] == '/')
             {
                 m_curr += 2;
                 while (m_curr < m_end && *m_curr != '\n' && *m_curr != '\r')
+                {
+                    if (m_curr + 2 < m_end && static_cast<unsigned char>(m_curr[0]) == 0xE2 &&
+                        static_cast<unsigned char>(m_curr[1]) == 0x80 &&
+                        (static_cast<unsigned char>(m_curr[2]) == 0xA8 ||
+                         static_cast<unsigned char>(m_curr[2]) == 0xA9))
+                        break; // U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR
                     ++m_curr;
+                }
                 continue;
             }
 

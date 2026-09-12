@@ -2,6 +2,7 @@
 #include "pjh_json/json.hpp"
 #include "pjh_json/detail/utils.hpp"
 #include "pjh_json/grammar.hpp"
+#include "unicode.hpp"
 #include <functional>
 #include <optional>
 #include <string_view>
@@ -163,6 +164,156 @@ namespace pjh::json
     }
 
     /*
+     * Peek-decode one JSON5 identifier `\uXXXX` escape (optionally a
+     * surrogate pair) at @p p.
+     *
+     * Mirrors the string decoder's escape rules (surrogate pairs combined,
+     * lone/ill-formed surrogates rejected), but never consumes a partial
+     * escape: on any malformed form it returns false without touching
+     * `next`, so the identifier simply ends at the backslash (maximal
+     * munch) and the caller's structural check reports the token gap.
+     * Every read is bounded by @p e (m_end), never by NUL padding, so an
+     * escape at the end of a parse_jsonl line view cannot read the next
+     * line.
+     *
+     * @return true on a complete, valid escape; `cp` is the decoded code
+     *         point and `next` points just past it.
+     */
+    bool decode_identifier_escape(const char *p, const char *e, uint32_t &cp, const char *&next) noexcept
+    {
+        if (p >= e || *p != '\\' || p + 1 >= e || p[1] != 'u')
+            return false;
+        const char *q = p + 2;
+
+        auto read_hex4 = [e](const char *&r, uint32_t &v) noexcept
+        {
+            if (e - r < 4)
+                return false;
+            uint32_t out = 0;
+            for (int i = 0; i < 4; ++i)
+            {
+                const int h = grammar::hex_value(r[i]);
+                if (h < 0)
+                    return false;
+                out = (out << 4) | static_cast<uint32_t>(h);
+            }
+            r += 4;
+            v = out;
+            return true;
+        };
+
+        uint32_t cu = 0;
+        if (!read_hex4(q, cu))
+            return false;
+        if (grammar::is_high_surrogate(cu))
+        {
+            if (e - q < 6 || q[0] != '\\' || q[1] != 'u')
+                return false;
+            const char *r = q + 2;
+            uint32_t cl = 0;
+            if (!read_hex4(r, cl) || !grammar::is_low_surrogate(cl))
+                return false;
+            cp = 0x10000 + (((cu - 0xD800) << 10) | (cl - 0xDC00));
+            next = r;
+            return true;
+        }
+        if (grammar::is_low_surrogate(cu))
+            return false;
+        cp = cu;
+        next = q;
+        return true;
+    }
+
+    /*
+     * Parse an ES5.1 IdentifierName object key (JSON5 1.0.0 §3, task 40.5).
+     *
+     * The ASCII fast path delegates classification to grammar.hpp; non-ASCII
+     * sequences are decoded with the strict, m_end-bounded decoder in
+     * unicode.hpp and classified against the generated Unicode category
+     * tables. A malformed UTF-8 sequence is never an identifier character
+     * (so identifiers remain valid UTF-8 regardless of strict_utf8, which
+     * governs raw string content only). `\uXXXX` escapes (surrogate pairs
+     * combined) are accepted in any position and decoded in place: the
+     * escaped spelling is always longer than its UTF-8 expansion, so the
+     * key can overwrite its own source, exactly like parse_string_json5.
+     *
+     * An escape that does not decode to an IdentifierStart/Part code point
+     * ends the IdentifierName at the backslash (maximal munch); `first`
+     * tracks the start-vs-continue position.
+     */
+    bool Parser::parse_identifier_key(String &out)
+    {
+        const char *start = m_curr;
+        char *dst = nullptr; // non-null once an escape must be decoded in place
+        bool first = true;
+
+        while (m_curr < m_end)
+        {
+            const char *const unit_start = m_curr;
+            uint32_t cp = 0;
+            const char *next = nullptr;
+            const bool escaped = (*m_curr == '\\');
+            std::size_t raw_len = 0;
+
+            if (escaped)
+            {
+                if (!decode_identifier_escape(m_curr, m_end, cp, next))
+                    break; // not a complete/valid identifier escape
+            }
+            else
+            {
+                const auto b = static_cast<unsigned char>(*m_curr);
+                if (b <= 0x7F)
+                {
+                    cp = b;
+                    raw_len = 1;
+                }
+                else if (!unicode::decode_utf8(m_curr, m_end, cp, raw_len))
+                {
+                    break; // malformed UTF-8 is never an identifier char
+                }
+                next = m_curr + raw_len;
+            }
+
+            if (!(first ? unicode::is_identifier_start(cp) : unicode::is_identifier_continue(cp)))
+                break;
+
+            if (escaped)
+            {
+                if (!dst)
+                    dst = const_cast<char *>(unit_start);
+                char *w = dst;
+                if (!encode_utf8(cp, w))
+                {
+                    fail_context(ErrorCode::InvalidCodepoint);
+                    return false;
+                }
+                dst = w;
+            }
+            else if (dst)
+            {
+                // Copy the raw bytes down (never memcpy: the ranges may
+                // overlap once an escape has shortened the key).
+                for (std::size_t i = 0; i < raw_len; ++i)
+                    dst[i] = unit_start[i];
+                dst += raw_len;
+            }
+
+            m_curr = next;
+            first = false;
+        }
+
+        if (m_curr == start)
+        {
+            fail(ErrorCode::ExpectedStringKey, m_curr);
+            return false;
+        }
+        const char *const end = dst ? dst : m_curr;
+        out = String(std::string_view(start, static_cast<size_t>(end - start)));
+        return true;
+    }
+
+    /*
      * Parse JSON object in-place
      *
      * 1. Consume opening '{'.
@@ -171,8 +322,9 @@ namespace pjh::json
      *    initialized only when Config::strict_duplicate_keys() is set; the
      *    non-strict first-match index is likewise lazy (large objects only).
      * 4. Loop:
-     *    a. Parse a key: `"..."` by default; under JSON5 also `'...'` or
-     *       an ASCII unquoted identifier.
+     *    a. Parse a key: `"..."` by default; under JSON5 also `'...'` or an
+     *       ES5.1 IdentifierName (ASCII/Unicode letters, marks, digits and
+     *       `\uXXXX` escapes; see parse_identifier_key).
      *    b. Conditionally check for duplicate keys.
      *    c. Expect and consume ':' separator.
      *    d. Parse the value in-place; if the key already exists (strict
@@ -184,21 +336,6 @@ namespace pjh::json
      *    e. Check for ',' (continue) or '}' (done). Under JSON5 a single
      *       trailing comma before '}' is accepted.
      */
-    bool Parser::parse_identifier_key(String &out)
-    {
-        const char *start = m_curr;
-        if (m_curr >= m_end || !grammar::is_identifier_start(static_cast<unsigned char>(*m_curr)))
-        {
-            fail(ErrorCode::ExpectedStringKey, m_curr);
-            return false;
-        }
-        ++m_curr;
-        while (m_curr < m_end && grammar::is_identifier_continue(static_cast<unsigned char>(*m_curr)))
-            ++m_curr;
-        out = String(std::string_view(start, static_cast<size_t>(m_curr - start)));
-        return true;
-    }
-
     bool Parser::parse_object_inplace(Json &out)
     {
         if (m_max_depth != 0 && m_depth + 1 > m_max_depth)
@@ -247,9 +384,13 @@ namespace pjh::json
                 if (!parse_string_json5(key, '\''))
                     return false;
             }
-            else if (m_json5 && m_curr < m_end && *m_curr != '"' &&
-                     grammar::is_identifier_start(static_cast<unsigned char>(*m_curr)))
+            else if (m_json5 && m_curr < m_end && *m_curr != '"')
             {
+                // Any other non-quote byte is an identifier candidate; the
+                // scanner validates the ES5.1 IdentifierStart (ASCII or
+                // Unicode, `\uXXXX` included) and reports ExpectedStringKey
+                // when the first character is not one. Single quotes were
+                // already handled above.
                 if (!parse_identifier_key(key))
                     return false;
             }

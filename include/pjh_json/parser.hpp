@@ -170,13 +170,20 @@ namespace pjh::json
          */
         void skip_leading_bom();
         /**
-         * @brief Skip JSON5 trivia: ASCII whitespace + comments
+         * @brief Skip JSON5 trivia: white space + comments
          *
          * Called from skip_whitespace() only when the JSON5 mode was
          * captured. Every scan is explicitly bounded by m_end (never by
          * NUL padding), because parse_jsonl hands each line a sub-view
          * whose m_end is followed by the NEXT line, not by padding.
-         * An unterminated block comment records UnexpectedEndOfInput.
+         * Accepts the JSON5 1.0.0 §8 white space set: the RFC four bytes
+         * plus VT/FF (grammar::is_json5_whitespace_ascii) and the
+         * multi-byte NBSP/LS/PS/U+FEFF/Zs code points, decoded with a
+         * strict bounded UTF-8 decoder (src/parser/unicode.hpp) so a
+         * malformed sequence can never be skipped as trivia. A line
+         * comment ends at LF/CR/U+2028/U+2029 (or m_end); a block comment
+         * is non-nesting and its unterminated form records
+         * UnexpectedEndOfInput.
          */
         void skip_json5_trivia();
         /**
@@ -197,11 +204,23 @@ namespace pjh::json
          */
         [[nodiscard]] bool parse_string_json5(String &out, char quote);
         /**
-         * @brief Parse an ASCII unquoted JSON5 identifier key
-         * @param out Receives a borrowed view into the input buffer
+         * @brief Parse an ES5.1 IdentifierName key (JSON5 1.0.0 §3)
+         * @param out Receives a borrowed view into the input buffer; when
+         *        `\uXXXX` escapes are present the key is decoded in place
+         *        (the escaped spelling is always longer than the decoded
+         *        UTF-8, mirroring parse_string_json5)
          * @return false on failure (recorded in m_error)
-         * @note ASCII subset only ([A-Za-z_$][A-Za-z0-9_$]*); full ES5.1
-         *       IdentifierName (Unicode + \\uXXXX) is deferred to 40.5.
+         * @note Full ES5.1 IdentifierName: an ASCII or Unicode
+         *       IdentifierStart, then IdentifierContinue characters
+         *       (Unicode letters/marks/digits/connectors, ZWNJ/ZWJ), with
+         *       `\uXXXX` escapes (surrogate pairs combined) allowed in any
+         *       position. Decoding and classification use the strict,
+         *       m_end-bounded helpers in src/parser/unicode.hpp, so a
+         *       malformed UTF-8 sequence can never be read as a letter and
+         *       can never reach past a parse_jsonl line view. An escape
+         *       that does not yield an identifier character ends the
+         *       IdentifierName (maximal munch), leaving the backslash for
+         *       the caller's structural check.
          */
         [[nodiscard]] bool parse_identifier_key(String &out);
         /**

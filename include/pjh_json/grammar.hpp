@@ -196,10 +196,36 @@ namespace pjh::json
             return is_whitespace(c) || c == 0x0B || c == 0x0C;
         }
 
+        /// @brief JSON5 1.0.0 §8 non-ASCII white space: NBSP (U+00A0), the
+        ///        Unicode Zs category (U+1680, U+2000..U+200A, U+202F,
+        ///        U+205F, U+3000), the line/paragraph separators U+2028 and
+        ///        U+2029, and U+FEFF (BOM used as white space).
+        /// @param cp A decoded code point; ASCII (cp <= 0x7F) is not this
+        ///        function's job (see is_json5_whitespace).
+        /// @note The set is small and fixed, so it stays a table-free
+        ///       constexpr predicate. The default RFC path can never reach it.
+        constexpr bool is_json5_whitespace_unicode(std::uint32_t cp) noexcept
+        {
+            return cp == 0x00A0 || cp == 0x1680 || (cp >= 0x2000 && cp <= 0x200A) || cp == 0x2028 || cp == 0x2029 ||
+                   cp == 0x202F || cp == 0x205F || cp == 0x3000 || cp == 0xFEFF;
+        }
+
+        /// @brief JSON5 1.0.0 §8 white space for any decoded code point:
+        ///        the ASCII set plus the non-ASCII set above.
+        constexpr bool is_json5_whitespace(std::uint32_t cp) noexcept
+        {
+            return cp <= 0x7F ? is_json5_whitespace_ascii(static_cast<unsigned char>(cp))
+                              : is_json5_whitespace_unicode(cp);
+        }
+
         /// @brief JSON5 1.0.0 §3 IdentifierName, ASCII subset: a key may
         ///        start with an ASCII letter, '_' or '$'.
         /// @note The Unicode IdentifierName closure (and `\uXXXX` escapes)
-        ///       is deferred to task 40.5; do not treat this as complete.
+        ///       landed in task 40.5 as the runtime-only `unicode::`
+        ///       helpers in src/parser/unicode.hpp (they need generated
+        ///       Unicode category tables and are never used at compile
+        ///       time); this ASCII predicate stays the shared source for
+        ///       the common case.
         constexpr bool is_identifier_start(unsigned char c) noexcept
         {
             return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || c == '$';

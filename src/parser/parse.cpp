@@ -2,6 +2,7 @@
 #include "pjh_json/document.hpp"
 #include "pjh_json/detail/utils.hpp"
 #include "pjh_json/grammar.hpp"
+#include "unicode.hpp"
 #include <fstream>
 #include <istream>
 #include <cstring>
@@ -360,20 +361,49 @@ namespace pjh::json
             // Skip blank/whitespace-only lines. RFC mode delegates to
             // grammar::is_whitespace (space, tab, CR, LF; LF cannot occur
             // inside a line, so including it is a no-op here). JSON5 mode
-            // also accepts VT/FF (grammar::is_json5_whitespace_ascii).
-            // A non-blank line therefore always contains a byte the parser
-            // rejects in-line, so the JSON5 trivia scan can never hop past
-            // this line into the next one (it is additionally m_end-bounded).
+            // also accepts VT/FF and the multi-byte JSON5 white space
+            // (NBSP/LS/PS/U+FEFF/Zs), decoded strictly and line-bounded so a
+            // malformed sequence leaves the line non-blank. A non-blank line
+            // therefore always contains a byte the parser rejects in-line, so
+            // the JSON5 trivia scan can never hop past this line into the
+            // next one (it is additionally m_end-bounded).
             bool blank = true;
-            for (size_t k = 0; k < len; ++k)
+            if (json5)
             {
-                char c = base[i + k];
-                const bool ws = json5 ? grammar::is_json5_whitespace_ascii(static_cast<unsigned char>(c))
-                                      : grammar::is_whitespace(static_cast<unsigned char>(c));
-                if (!ws)
+                size_t k = 0;
+                while (k < len)
                 {
-                    blank = false;
-                    break;
+                    const auto c = static_cast<unsigned char>(base[i + k]);
+                    if (c < 0x80)
+                    {
+                        if (!grammar::is_json5_whitespace_ascii(c))
+                        {
+                            blank = false;
+                            break;
+                        }
+                        ++k;
+                        continue;
+                    }
+                    uint32_t cp = 0;
+                    size_t unit = 0;
+                    if (!unicode::decode_utf8(base + i + k, base + i + len, cp, unit) ||
+                        !grammar::is_json5_whitespace(cp))
+                    {
+                        blank = false;
+                        break;
+                    }
+                    k += unit;
+                }
+            }
+            else
+            {
+                for (size_t k = 0; k < len; ++k)
+                {
+                    if (!grammar::is_whitespace(static_cast<unsigned char>(base[i + k])))
+                    {
+                        blank = false;
+                        break;
+                    }
                 }
             }
 
