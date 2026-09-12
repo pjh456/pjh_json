@@ -19,6 +19,28 @@ static std::string_view sv(const std::pmr::string &s)
     return std::string_view(s.data(), s.size());
 }
 
+namespace
+{
+    // doctest has no per-case teardown: a case that mutates the global
+    // Config singleton must restore it itself. RAII (not a manual
+    // end-of-case restore) so the restore still runs when a REQUIRE fails
+    // and unwinds the case.
+    struct MaxDepthGuard
+    {
+        size_t m_max_depth;
+
+        MaxDepthGuard()
+            : m_max_depth(Config::instance().max_depth())
+        {
+        }
+
+        ~MaxDepthGuard()
+        {
+            Config::instance().set_max_depth(m_max_depth);
+        }
+    };
+}
+
 TEST_CASE("Writer: dump compact") {
     auto doc = parse_copy(R"({"name":"pjh","n":42,"ok":true,"nil":null,"arr":[1,2,3]})");
     auto out = dump(doc.root());
@@ -209,14 +231,26 @@ TEST_CASE("Writer: dump ostream failure") {
 }
 
 TEST_CASE("Writer: max depth") {
-    Config::instance().set_max_depth(0); // defensive: clear prior case state
+    MaxDepthGuard guard; // RAII: restores entering max_depth, even on throw
 
     auto deep = [](size_t n, char o, char c)
     {
         return std::string(n, o) + std::string(n, c);
     };
 
-    // Default: unlimited (regression pin, round-trip)
+    // Default: finite DoS guard. A tree of exactly kDefaultMaxDepth dumps
+    // under the default bound; one level more must be parsed with the limit
+    // lifted and then rejected by the default dump bound.
+    REQUIRE(Config::instance().max_depth() == Config::kDefaultMaxDepth);
+    auto doc_default = parse_copy(deep(Config::kDefaultMaxDepth, '[', ']'));
+    REQUIRE(sv(dump(doc_default.root())) == deep(Config::kDefaultMaxDepth, '[', ']'));
+
+    Config::instance().set_max_depth(Config::kUnlimitedDepth);
+    auto doc_over = parse_copy(deep(Config::kDefaultMaxDepth + 1, '[', ']'));
+    Config::instance().set_max_depth(Config::kDefaultMaxDepth);
+    REQUIRE_THROWS_AS((void)dump(doc_over.root()), JsonError);
+
+    // Well under the default (regression pin, round-trip)
     auto doc100 = parse_copy(deep(100, '[', ']'));
     REQUIRE(sv(dump(doc100.root())) == deep(100, '[', ']'));
 
@@ -247,8 +281,6 @@ TEST_CASE("Writer: max depth") {
         CHECK(dynamic_cast<const ParseError *>(&e) == nullptr);
     }
     REQUIRE(caught);
-
-    Config::instance().set_max_depth(0); // restore
 }
 
 TEST_CASE("Writer: result entry") {
@@ -276,7 +308,8 @@ TEST_CASE("Writer: result entry") {
 }
 
 TEST_CASE("Writer: document result entry") {
-    Config::instance().set_max_depth(0); // defensive: clear prior case state
+    MaxDepthGuard guard; // RAII: restores entering max_depth, even on throw
+    Config::instance().set_max_depth(Config::kDefaultMaxDepth); // defensive
 
     // Success: the Document overload serializes the root value (payload pin)
     auto d = parse_copy("[[]]");
@@ -296,8 +329,6 @@ TEST_CASE("Writer: document result entry") {
     REQUIRE(dynamic_cast<const ParseError *>(&e) == nullptr);
     REQUIRE(std::string(e.what()) ==
             "Maximum nesting depth exceeded during dump");
-
-    Config::instance().set_max_depth(0); // restore
 }
 
 TEST_CASE("Writer: jsonl result entry") {

@@ -267,15 +267,15 @@ TEST_CASE("Config: resource re-resolved after release") {
 }
 
 TEST_CASE("Config: max depth") {
-    // Default: unlimited
-    REQUIRE(Config::instance().max_depth() == 0);
+    // Default: finite DoS guard (secure by default)
+    REQUIRE(Config::instance().max_depth() == Config::kDefaultMaxDepth);
 
-    Config::instance().set_max_depth(256);
-    REQUIRE(Config::instance().max_depth() == 256);
+    Config::instance().set_max_depth(42);
+    REQUIRE(Config::instance().max_depth() == 42);
 
     Config::instance().set_max_depth(7);
     Config::instance().reset();
-    REQUIRE(Config::instance().max_depth() == 0);
+    REQUIRE(Config::instance().max_depth() == Config::kDefaultMaxDepth);
 }
 
 TEST_CASE("Config: reset restores defaults") {
@@ -292,7 +292,7 @@ TEST_CASE("Config: reset restores defaults") {
 
     REQUIRE(cfg.strict_duplicate_keys() == false);
     REQUIRE(cfg.arena_block_size() == 0);
-    REQUIRE(cfg.max_depth() == 0);
+    REQUIRE(cfg.max_depth() == Config::kDefaultMaxDepth);
     REQUIRE(cfg.strip_bom() == false);
     REQUIRE(cfg.strict_utf8() == false);
     REQUIRE(cfg.storage() == Storage::Pooled);

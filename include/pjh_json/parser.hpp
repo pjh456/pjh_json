@@ -35,7 +35,7 @@ namespace pjh::json
         bool m_strip_bom;           // Strip a leading UTF-8 BOM at parse() start (per-Parser, ctor-captured)
         bool m_strict_utf8;         // Strict UTF-8 validation of string content (per-Parser, ctor-captured)
         size_t m_depth = 0;         // Current nesting depth (open containers)
-        size_t m_max_depth;         // Captured depth limit (0 = unlimited)
+        size_t m_max_depth;         // Captured depth limit (0 = unlimited, default from Config)
 
     public:
         /**

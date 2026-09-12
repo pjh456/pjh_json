@@ -117,13 +117,32 @@ namespace pjh::json
         [[nodiscard]] size_t arena_block_size() const noexcept { return m_arena_block_size.load(std::memory_order_relaxed); }
 
         /**
+         * @brief Default nesting bound when set_max_depth() is never called
+         * @note Root container counts as level 1; see set_max_depth().
+         */
+        static constexpr size_t kDefaultMaxDepth = 512;
+
+        /**
+         * @brief Sentinel for set_max_depth(): unlimited nesting (explicit opt-out)
+         * @warning Unbounded recursion: only for fully trusted input. A deeply
+         *          nested value can overflow the call stack (uncatchable crash).
+         */
+        static constexpr size_t kUnlimitedDepth = 0;
+
+        /**
          * @brief Set maximum nesting depth for parse and dump
          * @param depth Maximum number of nested containers (objects/arrays);
-         *        0 (default) means unlimited.
+         *        kUnlimitedDepth (0) means unlimited (explicit opt-out).
+         *        Defaults to kDefaultMaxDepth (512); the root container
+         *        counts as level 1.
          * @note Captured at parse start / dump start; a later call does not
          *       affect in-flight operations.
          * @note Lock-free: relaxed atomic store/load, safe to call
          *       concurrently with parse/dump.
+         * @note A finite default is the DoS guard: a deeply nested input would
+         *       otherwise overflow the call stack (an uncatchable crash). Keep
+         *       the default when parsing untrusted input; pass kUnlimitedDepth
+         *       explicitly and accept the stack risk only for trusted input.
          */
         void set_max_depth(size_t depth) noexcept { m_max_depth.store(depth, std::memory_order_relaxed); }
         [[nodiscard]] size_t max_depth() const noexcept { return m_max_depth.load(std::memory_order_relaxed); }
@@ -201,8 +220,8 @@ namespace pjh::json
          * @brief Reset config to defaults and release global document
          * @note Equivalent to configure(Pooled, 4096),
          *       strict_duplicate_keys = false, arena_block_size = 0 (auto),
-         *       max depth = 0 (unlimited), strip_bom = false,
-         *       strict_utf8 = false, then release().
+         *       max depth = kDefaultMaxDepth (512, see set_max_depth()),
+         *       strip_bom = false, strict_utf8 = false, then release().
          * @note Knob restoration uses atomic stores, still performed under
          *       the lock, in service of release_locked().
          * @warning Exclusive global teardown: destroys and replaces the global
@@ -232,7 +251,7 @@ namespace pjh::json
 
         std::atomic<bool> m_strict_duplicate_keys{false};
         std::atomic<size_t> m_arena_block_size{0};
-        std::atomic<size_t> m_max_depth{0};
+        std::atomic<size_t> m_max_depth{kDefaultMaxDepth};
         std::atomic<bool> m_strip_bom{false};
         std::atomic<bool> m_strict_utf8{false};
         std::atomic<Storage> m_storage{Storage::Pooled};

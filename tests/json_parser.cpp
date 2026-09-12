@@ -343,7 +343,7 @@ TEST_CASE("Parser: jsonl control byte line rejected") {
 }
 
 TEST_CASE("Parser: max depth") {
-    Config::instance().set_max_depth(0); // defensive: clear prior case state
+    ConfigGuard guard; // RAII: restores entering Config state, even on throw
 
     auto deep = [](size_t n, char o, char c)
     {
@@ -365,10 +365,21 @@ TEST_CASE("Parser: max depth") {
         return d;
     };
 
-    // Default: unlimited (regression pin)
-    REQUIRE(Config::instance().max_depth() == 0);
-    auto doc100 = parse_copy(deep(100, '[', ']'));
-    REQUIRE(depth_of(doc100.root()) == 100);
+    // Default: finite DoS guard. Exactly kDefaultMaxDepth passes, one more
+    // throws a located ParseError (secure by default).
+    REQUIRE(Config::instance().max_depth() == Config::kDefaultMaxDepth);
+    auto doc_default = parse_copy(deep(Config::kDefaultMaxDepth, '[', ']'));
+    REQUIRE(depth_of(doc_default.root()) == Config::kDefaultMaxDepth);
+    CHECK_THROWS_AS((void)parse_copy(deep(Config::kDefaultMaxDepth + 1, '[', ']')),
+                    ParseError);
+    CHECK_THROWS_WITH((void)parse_copy(deep(Config::kDefaultMaxDepth + 1, '[', ']')),
+                      "Maximum nesting depth exceeded at offset 512");
+
+    // Explicit opt-out: 0 = unlimited, now requiring an explicit setter call.
+    // The input exceeds the default bound, proving the limit is lifted.
+    Config::instance().set_max_depth(Config::kUnlimitedDepth);
+    auto doc_unlimited = parse_copy(deep(Config::kDefaultMaxDepth + 100, '[', ']'));
+    REQUIRE(depth_of(doc_unlimited.root()) == Config::kDefaultMaxDepth + 100);
 
     // Exactly N passes, N+1 throws
     Config::instance().set_max_depth(10);
@@ -398,8 +409,6 @@ TEST_CASE("Parser: max depth") {
     REQUIRE(jl.root().is_array());
     REQUIRE(jl.root().size() == 2);
     CHECK_THROWS_AS((void)parse_jsonl("[[[1]]]\n"), ParseError);
-
-    Config::instance().set_max_depth(0); // restore
 }
 
 TEST_CASE("Parser: 19-digit integer boundary") {
