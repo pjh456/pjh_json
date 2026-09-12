@@ -1,12 +1,14 @@
 #include <doctest/doctest.h>
 #include <pjh_json/json.hpp>
 #include <pjh_json/document.hpp>
+#include <pjh_json/parser.hpp>
 #include <pjh_json/path.hpp>
 #include <pjh_json/writer.hpp>
 #include <limits>
 #include <memory_resource>
 #include <functional>
 #include <variant>
+#include <cstring>
 
 using namespace pjh::json;
 
@@ -1941,4 +1943,43 @@ TEST_CASE("Json: as_* debug check throws") {
 #else
     // release: fast path unchecked by contract (as_* @note) — no pins
 #endif
+}
+
+TEST_CASE("Parser: initial reserve bounded by input") {
+    TestCountingResource cr;
+
+    // One array element whose value dwarfs the container: the grammatical
+    // bound (remaining / 2) would allow ~100000 entries, i.e. ~2.4 MB of
+    // reserve. The 256 KiB byte budget must cap the single reserve
+    // allocation. The string is a borrowed view, so the reserve of the
+    // entry vector is the only allocation routed through `cr`.
+    std::string content = "[\"" + std::string(200000, 'a') + "\"]";
+    std::string buf(content.size() + kPaddingWidth, '\0');
+    std::memcpy(buf.data(), content.data(), content.size());
+
+    {
+        Parser p(std::string_view(buf.data(), content.size()), &cr, true);
+        Json root = p.parse();
+        REQUIRE(root.as_array().size() == 1);
+        REQUIRE(cr.last_bytes() > 0);
+        REQUIRE(cr.last_bytes() <= 256 * 1024);
+    }
+    REQUIRE(cr.outstanding() == 0);
+}
+
+TEST_CASE("Parser: initial reserve nested keeps fixed hint") {
+    TestCountingResource cr;
+
+    // The nested [1] sees the parent's ~100 KB tail in m_end - m_curr.
+    // Without the depth gate it would estimate thousands of entries from
+    // those bytes; the fixed hint must keep it at 4.
+    std::string content = "[[1],\"" + std::string(100000, 'b') + "\"]";
+    std::string buf(content.size() + kPaddingWidth, '\0');
+    std::memcpy(buf.data(), content.data(), content.size());
+
+    Parser p(std::string_view(buf.data(), content.size()), &cr, true);
+    Json root = p.parse();
+    REQUIRE(root.is_array());
+    REQUIRE(root.as_array()[0].is_array());
+    REQUIRE(root.as_array()[0].as_array().data().capacity() == 4);
 }

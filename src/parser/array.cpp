@@ -31,8 +31,9 @@ namespace pjh::json
             return;
         }
 
-        // Pre-allocate to reduce reallocations
-        arr.data().reserve(4);
+        // Pre-allocate: the outermost container bounds its element count
+        // from the remaining input; nested containers keep the fixed hint.
+        arr.data().reserve(initial_reserve(2, sizeof(Json)));
 
         while (true)
         {

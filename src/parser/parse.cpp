@@ -8,8 +8,17 @@ namespace pjh::json
     namespace
     {
         constexpr size_t kBlock = 4096;
-        constexpr size_t kMinArenaBlock = 4096;
-        constexpr size_t kMaxArenaBlock = size_t(1) << 34; // 16 GB cap
+        // Largest auto-scaled block: 16 GB on 64-bit size_t, 1 GB on 32-bit
+        // where `size_t(1) << 34` would shift by the full type width (UB).
+#if SIZE_MAX > 0xFFFFFFFFu
+        constexpr size_t kMaxArenaBlock = size_t(1) << 34;
+#else
+        constexpr size_t kMaxArenaBlock = size_t(1) << 30;
+#endif
+        // The saturation test below divides the cap by 3: keep it small
+        // enough that `input_len * 3` can never wrap size_t.
+        static_assert(kMaxArenaBlock <= SIZE_MAX / 3,
+                      "arena cap must leave the *3 estimate safe");
 
         /*
          * Determine arena initial block size for a given input length.
@@ -18,7 +27,9 @@ namespace pjh::json
          *    Config::set_arena_block_size(), use it directly.
          * 2. Otherwise auto-scale: use kBlock (4096) for small inputs,
          *    input_size * 3 for larger inputs (estimated DOM overhead),
-         *    clamped to [kMinArenaBlock, kMaxArenaBlock].
+         *    capped at kMaxArenaBlock. The cap is applied by saturating
+         *    before the multiply, so the estimate cannot wrap size_t for
+         *    pathological (especially 32-bit) input lengths.
          *
          * Auto-scaling avoids excessive intermediate buffer allocations
          * in monotonic_buffer_resource during vector growth.
@@ -30,12 +41,14 @@ namespace pjh::json
                 return cfg;
             if (input_len <= kBlock)
                 return kBlock;
-            size_t est = input_len * 3;
-            if (est < kMinArenaBlock)
-                return kMinArenaBlock;
-            if (est > kMaxArenaBlock)
+            // Saturate before multiplying: above kMaxArenaBlock / 3 the
+            // product is always over the cap, so return the cap directly.
+            // A post-multiply clamp alone would let a wrapped product
+            // re-enter the valid range and be returned as a "legitimate"
+            // (but bogus) block size.
+            if (input_len > kMaxArenaBlock / 3)
                 return kMaxArenaBlock;
-            return est;
+            return input_len * 3;
         }
         std::pmr::memory_resource *arena_res(
             const std::unique_ptr<std::pmr::memory_resource> &arena) noexcept

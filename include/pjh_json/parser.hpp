@@ -162,6 +162,40 @@ namespace pjh::json
         Json parse_literal();
 
         /**
+         * @brief Byte budget for the initial reserve of an outermost
+         *        container's entry vector.
+         *
+         * The grammatical minimum entry size is only a loose lower bound
+         * on the entry count, so a byte budget caps over-reservation for
+         * inputs dominated by one huge element (e.g. ["<1 MB string>"]).
+         */
+        static constexpr size_t kReserveHintBytes = 256 * 1024;
+
+        /**
+         * @brief Initial capacity hint for a container's entry vector.
+         * @param min_entry_bytes Grammatical minimum bytes per entry
+         *        (array "0," = 2; object "\"\":0," = 5).
+         * @param entry_bytes Stored element size (sizeof of the entry).
+         * @return 4 for nested containers, otherwise the smaller of the
+         *         input-derived bound and the byte budget, floored at 4.
+         * @note Only the outermost container (m_depth == 1) can bound its
+         *       element count from the remaining input. A nested
+         *       container's remaining bytes include its parent's tail, so
+         *       estimating from them would over-reserve by orders of
+         *       magnitude on deep nesting or a long parent tail.
+         */
+        size_t initial_reserve(size_t min_entry_bytes, size_t entry_bytes) const noexcept
+        {
+            if (m_depth != 1)
+                return 4;
+            size_t remaining = static_cast<size_t>(m_end - m_curr);
+            size_t by_input = remaining / min_entry_bytes;
+            size_t by_budget = kReserveHintBytes / entry_bytes;
+            size_t hint = by_input < by_budget ? by_input : by_budget;
+            return hint < 4 ? 4 : hint;
+        }
+
+        /**
          * @brief RAII nesting-depth frame
          *
          * Increments m_depth on construction and decrements on destruction,

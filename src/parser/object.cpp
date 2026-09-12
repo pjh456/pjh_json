@@ -196,8 +196,9 @@ namespace pjh::json
             return;
         }
 
-        // Pre-allocate to reduce reallocations
-        obj.data().reserve(4);
+        // Pre-allocate: the outermost container bounds its entry count
+        // from the remaining input; nested containers keep the fixed hint.
+        obj.data().reserve(initial_reserve(5, sizeof(Object::Entry)));
         std::optional<std::pmr::unordered_set<std::string_view>> seen;
         if (Config::instance().strict_duplicate_keys())
         {

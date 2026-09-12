@@ -87,7 +87,9 @@ namespace pjh::json
         /**
          * @brief Set arena initial block size for per-parse allocation (0 = auto)
          * @param bytes Arena buffer size in bytes. 0 (default) means
-         *        auto-scale based on input size (input_size * 3, capped at 16 GB).
+         *        auto-scale based on input size (input_size * 3, capped at
+         *        16 GB; the cap is a saturating truncation applied before
+         *        the multiply, so the estimate cannot overflow size_t).
          *        Non-zero uses the given fixed size for every parse.
          * @note Only meaningful with Storage::Arena.
          * @note Lock-free: relaxed atomic store/load, safe to call
