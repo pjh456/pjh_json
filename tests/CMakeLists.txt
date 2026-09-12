@@ -24,11 +24,25 @@ set(PJH_JSON_TEST_SOURCES
     umbrella_isolation.cpp
 )
 
+# Sources of the independent header-isolation executable. Kept as a named
+# variable (not a bare filename in add_executable) so the roadmap-66 guard can
+# recognize it: a top-level tests/*.cpp may be registered either here or in
+# PJH_JSON_TEST_SOURCES, and nowhere else.
+set(PJH_JSON_HEADER_ISOLATION_SOURCES
+    header_isolation.cpp)
+
+# roadmap 66: configure-time guard. Every top-level tests/*.cpp must be
+# registered; tests/compile_fail/ and generated TUs are out of scope.
+include(${PROJECT_SOURCE_DIR}/cmake/check_test_sources.cmake)
+pjh_json_check_test_sources(
+    DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    REGISTERED ${PJH_JSON_TEST_SOURCES} ${PJH_JSON_HEADER_ISOLATION_SOURCES})
+
 add_executable(pjh_json_tests ${PJH_JSON_TEST_SOURCES})
 target_link_libraries(pjh_json_tests PRIVATE pjh_json doctest)
 
-include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
-doctest_discover_tests(pjh_json_tests)
+include(${PROJECT_SOURCE_DIR}/cmake/pjh_json_doctest_discover_tests.cmake)
+pjh_json_doctest_discover_tests(pjh_json_tests)
 
 # header_isolation.cpp must NOT be linked into pjh_json_tests: sibling TUs
 # (json_writer.cpp, json_types.cpp) instantiate the same Array::of /
@@ -36,10 +50,10 @@ doctest_discover_tests(pjh_json_tests)
 # satisfy this TU's undefined references, masking the json.hpp-only link
 # regression. Its own executable guarantees the linker must resolve `of`
 # from pjh_json alone.
-add_executable(pjh_json_header_isolation header_isolation.cpp)
+add_executable(pjh_json_header_isolation ${PJH_JSON_HEADER_ISOLATION_SOURCES})
 target_link_libraries(pjh_json_header_isolation PRIVATE pjh_json doctest)
 
-doctest_discover_tests(pjh_json_header_isolation)
+pjh_json_doctest_discover_tests(pjh_json_header_isolation)
 
 # ---------------------------------------------------------------------------
 # Header self-containment (roadmap 64): every INSTALLED public header must
