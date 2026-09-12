@@ -478,6 +478,116 @@ TEST_CASE("Parser: 19-digit integer boundary") {
     REQUIRE(jl.root()[1].is_float());
 }
 
+TEST_CASE("Parser: out-of-double-range numbers") {
+    // RFC 8259 §6 lets implementations bound the accepted range; this
+    // library's bound is a finite double. A grammar-legal token whose value
+    // is not representable as a finite double is a RANGE error positioned at
+    // the token start (including the optional '-'), not a format error.
+    auto expect_range = [](std::string_view input, size_t off) {
+        try {
+            (void)parse_copy(input);
+            REQUIRE(false);
+        } catch (const ParseError &e) {
+            REQUIRE(e.category() == Category::Parse);
+            REQUIRE(e.offset() == off);
+            REQUIRE(std::string(e.what()).find("Number out of double range")
+                    != std::string::npos);
+            REQUIRE(std::string(e.what()).find("Invalid number")
+                    == std::string::npos);
+        }
+    };
+
+    // Overflow to infinity
+    expect_range("1e400", 0);
+    expect_range("1E400", 0);
+    expect_range("1e+400", 0);
+    expect_range("-1e400", 0);
+    expect_range("1e309", 0);
+    expect_range("1.8e308", 0);
+
+    // Underflow to zero
+    expect_range("1e-400", 0);
+    expect_range("-1e-400", 0);
+
+    // 10^400: '1' followed by 400 zeros (pure integer, no float indicator)
+    {
+        std::string huge(1, '1');
+        huge.append(400, '0');
+        expect_range(huge, 0);
+    }
+
+    // The anchor is the token start, not the container or the token end
+    expect_range("[1e400]", 1);
+    expect_range("{\"a\":1e400}", 5);
+
+    // *_result shells inherit the positioned range error (task 16 channel)
+    auto r = parse_copy_result("1e400");
+    REQUIRE(r.is_err());
+    ParseError e = r.unwrap_err();
+    REQUIRE(e.offset() == 0);
+    REQUIRE(e.category() == Category::Parse);
+    REQUIRE(dynamic_cast<const ParseError *>(&e) != nullptr);
+    REQUIRE(std::string(e.what()).find("out of double range")
+            != std::string::npos);
+
+    // parse_jsonl: offsets are line-relative (m_begin = line base)
+    {
+        auto jr = parse_jsonl_result("1e308\n1e400\n");
+        REQUIRE(jr.is_err());
+        ParseError je = jr.unwrap_err();
+        REQUIRE(je.offset() == 0); // second line starts at line offset 0
+        REQUIRE(je.category() == Category::Parse);
+    }
+    {
+        auto jr = parse_jsonl_result("1e400\n");
+        REQUIRE(jr.is_err());
+        REQUIRE(jr.unwrap_err().offset() == 0);
+    }
+
+    // Finite regression: none of these may be misclassified as out of range.
+    auto f1 = parse_copy("1e308");
+    REQUIRE(f1.root().is_float());
+    REQUIRE(f1.root().as_float() == 1e308);
+
+    auto f2 = parse_copy("1.7976931348623157e308"); // DBL_MAX
+    REQUIRE(f2.root().is_float());
+    REQUIRE(f2.root().as_float() == std::numeric_limits<double>::max());
+
+    auto f3 = parse_copy("18446744073709551615"); // UINT64_MAX -> 2^64.0
+    REQUIRE(f3.root().is_float());
+    REQUIRE(f3.root().as_float() == 18446744073709551616.0);
+
+    auto f4 = parse_copy("9999999999999999999"); // rounds to 1e19
+    REQUIRE(f4.root().is_float());
+    REQUIRE(f4.root().as_float() == 1e19);
+
+    auto f5 = parse_copy("9223372036854775808"); // 2^63.0
+    REQUIRE(f5.root().is_float());
+    REQUIRE(f5.root().as_float() == 9223372036854775808.0);
+
+    auto f6 = parse_copy("1e-320"); // subnormal
+    REQUIRE(f6.root().is_float());
+    REQUIRE(f6.root().as_float() == 1e-320);
+
+    auto f7 = parse_copy("5e-324"); // smallest subnormal
+    REQUIRE(f7.root().is_float());
+    REQUIRE(f7.root().as_float() == 5e-324);
+
+    auto f8 = parse_copy("0e400"); // zero value, huge exponent
+    REQUIRE(f8.root().is_float());
+    REQUIRE(f8.root().as_float() == 0.0);
+
+    auto f9 = parse_copy("-0e400"); // negative zero is representable
+    REQUIRE(f9.root().is_float());
+    REQUIRE(f9.root().as_float() == 0.0);
+
+    // Boundary pairs: finite vs rejected (no ambiguous +/-0.5 ulp cases)
+    REQUIRE(parse_copy("1e308").root().is_float());
+    expect_range("1e309", 0);
+    REQUIRE(parse_copy("0e400").root().as_float() == 0.0);
+    expect_range("1e-400", 0);
+}
+
 TEST_CASE("Parser: duplicate keys last-wins") {
     // strict off (default): last-wins, matching Object::insert
     auto d1 = parse_copy(R"({"a":1,"a":2})");

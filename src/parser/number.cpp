@@ -51,7 +51,12 @@ namespace pjh::json
      *      value (e.g. UINT64_MAX -> 2^64.0). That rounding is a property
      *      of double, not a parse error.
      * 5. Float indicators, or a 19+-digit integer out of int64 range:
-     *    parse the whole token as double via std::from_chars.
+     *    parse the whole token as double via std::from_chars. When its
+     *    error code reports out-of-range, the token is grammar-legal but
+     *    its magnitude is outside the finite-double range (the documented
+     *    RFC 8259 §6 limit): that is a range error, not a format error.
+     *    The output value is unspecified on out-of-range across standard
+     *    libraries, so only the error code may be inspected.
      */
     Json Parser::parse_number()
     {
@@ -135,9 +140,20 @@ namespace pjh::json
             }
         }
 
-        // Float indicators, or integer out of int64 range: parse as double
+        // Float indicators, or integer out of int64 range: parse as double.
+        // RFC 8259 §6 permits implementations to bound the accepted number
+        // range; this library's bound is a finite IEEE-754 double. A token
+        // that matches the grammar but is not representable as a finite
+        // double (overflow to infinity, or underflow to zero) is a RANGE
+        // error, not a format error — report it distinctly and do not read
+        // the output value: when the result is out-of-range its value is
+        // unspecified across implementations (libstdc++ leaves it
+        // unmodified; libc++/MSVC write +/-inf or +/-0), and the error code
+        // does not tell overflow from underflow (LWG 3081).
         double val = 0.0;
         auto [end, ec] = std::from_chars(start, m_curr, val);
+        if (ec == std::errc::result_out_of_range)
+            throw_parse_error("Number out of double range", start, m_begin);
         if (ec != std::errc{} || end != m_curr)
             throw_parse_error("Invalid number format", m_curr, m_begin);
         return Json(val);

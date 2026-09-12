@@ -152,6 +152,13 @@ namespace pjh::json
         /**
          * @brief Parse JSON number (int64 or double)
          * @return Json holding int64 or double
+         * @throws ParseError if the token is malformed, or if its value is
+         *         syntactically valid but out of double range (not
+         *         representable as a finite double; RFC 8259 §6 permits this
+         *         documented range limit)
+         * @note The range gate is `std::from_chars`'s errc result; only the
+         *       error code is inspected (the output value is unspecified on
+         *       out-of-range across standard libraries).
          */
         Json parse_number();
         /**

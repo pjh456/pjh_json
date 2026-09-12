@@ -107,6 +107,23 @@ TEST_CASE("Writer: dump numbers") {
 #ifndef __FAST_MATH__
     REQUIRE(threw);
 #endif
+
+    // Range policy (task 61): the parser rejects out-of-double-range numbers,
+    // so parse_copy never yields a non-finite double — the hand-built `inf`
+    // above is now the only source of a non-finite dump. Finite-but-large
+    // values still round-trip at value level (to_chars shortest form is
+    // lib-dependent, so no exact-text assertion).
+    auto big = dump(parse_copy("1e308").root());
+    REQUIRE(sv(big).find_first_of(".e") != std::string_view::npos);
+    auto re_big = parse_copy(sv(big));
+    REQUIRE(re_big.root().is_float());
+    REQUIRE(re_big.root().as_float() == 1e308);
+
+    auto tiny = dump(parse_copy("1e-320").root());
+    REQUIRE(sv(tiny).find_first_of(".e") != std::string_view::npos);
+    auto re_tiny = parse_copy(sv(tiny));
+    REQUIRE(re_tiny.root().is_float());
+    REQUIRE(re_tiny.root().as_float() == 1e-320);
 }
 
 TEST_CASE("Writer: 19-digit round trip") {

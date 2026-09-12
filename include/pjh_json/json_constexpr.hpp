@@ -373,6 +373,11 @@ namespace pjh::json
 
             /// @brief Parse the validated source into a Document at runtime.
             /// @return A Document containing the parsed JSON tree.
+            /// @throws ParseError if the source is grammatically valid but its
+            ///         runtime parse still fails: a number out of double range
+            ///         (magnitude outside the finite-double range; RFC 8259 §6
+            ///         range limit, task 61), or a runtime Config knob
+            ///         (strip_bom / strict_utf8) not modelled at compile time.
             Document to_document() const { return parse_copy(source); }
 
         private:
@@ -383,8 +388,13 @@ namespace pjh::json
         /// @brief Validate a JSON string at compile time.
         ///
         /// Checks whether the input is syntactically valid JSON.  The result
-        /// can be used to optionally construct a Document at runtime without
-        /// risk of parse errors.
+        /// can be used to optionally construct a Document at runtime.
+        /// @note `valid` is a GRAMMAR verdict only: the compile-time validator
+        ///       does not model the runtime double range limit (a huge
+        ///       magnitude such as 1e400 is `valid` but `to_document()`
+        ///       throws ParseError), nor the strip_bom / strict_utf8 knobs
+        ///       (std::atomic is not constexpr). All three divergences are
+        ///       by design and pinned in tests/literal_test.cpp.
         ///
         /// @note The compile-time validator is grammar-strict: a leading
         /// UTF-8 BOM (EF BB BF) is not whitespace (validate.hpp skip_whitespace)

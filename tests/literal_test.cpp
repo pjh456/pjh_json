@@ -236,4 +236,18 @@ TEST_CASE("ConstJson: parse strictness") {
     // cannot reach consteval (std::atomic is not constexpr).
     static_assert(ConstJson::parse(std::string_view("\"a\xFF" "b\"", 5)).valid);  // 0xFF passes (>= 0x20)
     static_assert(ConstJson::parse(std::string_view("\"a\xC0" "b\"", 5)).valid);  // overlong lead passes raw
+
+    // Range divergence (task 61): `valid` is a GRAMMAR verdict only. The
+    // constexpr validator has no double-magnitude concept, so out-of-range
+    // magnitudes pass it, while to_document() applies the runtime range gate
+    // and throws a positioned ParseError (same documented-divergence family
+    // as the strip_bom / strict_utf8 knobs above).
+    static_assert(ConstJson::parse("1e400").valid);
+    static_assert(ConstJson::parse("1e-400").valid);
+    static_assert(ConstJson::parse("1e309").valid);
+    static_assert(ConstJson::parse("0e400").valid);
+    CHECK_THROWS_AS(ConstJson::parse("1e400").to_document(), ParseError);
+    CHECK_THROWS_AS(ConstJson::parse("1e-400").to_document(), ParseError);
+    // Control: a finite in-range magnitude materializes without throwing.
+    REQUIRE(ConstJson::parse("1e308").to_document().root().is_float());
 }

@@ -51,6 +51,15 @@ Numeric slots are `Integer` (`int64_t`) and `Floating` (`double`); there is no
 `try_get<int64_t>()` (same signature, same accepted slot). `try_as_float()` is
 the `Floating`-slot probe; `try_get<double>()` additionally widens `Integer`.
 
+Numbers are stored in an `int64_t` or `double` slot. Per RFC 8259 §6, this
+library bounds the accepted numeric range to a **finite `double`**: a
+syntactically valid number whose value overflows to infinity or underflows to
+zero (e.g. `1e400`, `1e-400`) is rejected with a positioned `ParseError`
+(`"Number out of double range"`), not stored as `inf`/`0`. Integers that fit
+`double` but not `int64_t` still parse as `double` (rounded to nearest). The
+compile-time `ConstJson::parse()` validator is grammar-only and accepts such
+magnitudes (`valid == true`); `to_document()` applies the runtime range gate.
+
 Strings have no node-level `get<T>`: use `as_string()` / `as_string_strict()` /
 `try_as_string()`. `get_path<std::string_view>` is the path-based string
 channel. To resolve a path, `at_path()` throws, `find_path()` returns
