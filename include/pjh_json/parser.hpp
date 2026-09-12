@@ -90,8 +90,8 @@ namespace pjh::json
          * @brief First recorded kernel failure
          * @return The slot; code==None (has_error()==false) when no failure
          * @note `detail` inside the returned Error is a borrowed view, valid
-         *       only while the input buffer is alive; the throwing
-         *       compatibility shell materialises what() in the same frame.
+         *       only while the input buffer is alive; the public entries
+         *       materialise what() (via ParseError) in the same frame.
          */
         [[nodiscard]] const Error &error() const noexcept { return m_error; }
 

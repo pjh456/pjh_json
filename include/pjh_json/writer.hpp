@@ -65,7 +65,9 @@ namespace pjh::json
      *         JsonError (copied by value) on failure
      * @throws Only non-JsonError exceptions (e.g. std::bad_alloc) escape;
      *         all writer failures are JsonError by construction
-     * @note Same contract as dump; thin catch-and-wrap shell.
+     * @note Same contract as dump. The Result form is the primitive: this
+     *       forwards straight to the zero-throw writer kernel with no catch;
+     *       dump is the throwing compatibility shell.
      */
     [[nodiscard]] pjh::result::Result<std::pmr::string, JsonError> dump_result(
         const Json &value,
@@ -81,7 +83,9 @@ namespace pjh::json
      *         JsonError (copied by value) on failure
      * @throws Only non-JsonError exceptions (e.g. std::bad_alloc) escape;
      *         all writer failures are JsonError by construction
-     * @note Same contract as dump(Document); thin catch-and-wrap shell.
+     * @note Same contract as dump(Document). The Result form is the primitive:
+     *       this forwards straight to the zero-throw writer kernel with no
+     *       catch; dump(Document) is the throwing compatibility shell.
      */
     [[nodiscard]] pjh::result::Result<std::pmr::string, JsonError> dump_result(
         const Document &doc,
@@ -141,7 +145,9 @@ namespace pjh::json
      *         success, or the JsonError (copied by value) on failure
      * @throws Only non-JsonError exceptions (e.g. std::bad_alloc) escape;
      *         all writer failures are JsonError by construction
-     * @note Same contract as dump_file; thin catch-and-wrap shell. On success
+     * @note Same contract as dump_file. The Result form is the primitive:
+     *       this forwards straight to the zero-throw writer kernel with no
+     *       catch; dump_file is the throwing compatibility shell. On success
      *       the payload IS the content written to the file.
      */
     [[nodiscard]] pjh::result::Result<std::pmr::string, JsonError> dump_file_result(
@@ -169,7 +175,9 @@ namespace pjh::json
      *         (copied by value) on failure
      * @throws Only non-JsonError exceptions (e.g. std::bad_alloc) escape;
      *         all writer failures are JsonError by construction
-     * @note Same contract as dump_jsonl; thin catch-and-wrap shell.
+     * @note Same contract as dump_jsonl. The Result form is the primitive:
+     *       this forwards straight to the zero-throw writer kernel with no
+     *       catch; dump_jsonl is the throwing compatibility shell.
      */
     [[nodiscard]] pjh::result::Result<std::pmr::string, JsonError> dump_jsonl_result(
         const Array &arr,
@@ -198,7 +206,9 @@ namespace pjh::json
      *         success, or the JsonError (copied by value) on failure
      * @throws Only non-JsonError exceptions (e.g. std::bad_alloc) escape;
      *         all writer failures are JsonError by construction
-     * @note Same contract as dump_jsonl_file; thin catch-and-wrap shell. On
+     * @note The Result form is the primitive: this forwards straight to the
+     *       zero-throw writer kernel with no catch. Same contract as
+     *       dump_jsonl_file, which is the throwing compatibility shell. On
      *       success the payload IS the content written to the file.
      */
     [[nodiscard]] pjh::result::Result<std::pmr::string, JsonError> dump_jsonl_file_result(

@@ -324,12 +324,12 @@ namespace pjh::json
      * @param storage Allocation strategy (default: global config)
      * @return Result holding the Document on success, or the ParseError
      *         (copied by value, offset preserved) on failure
-     * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
-     *         escaping the parse core (unreachable in the current core) is
-     *         rethrown
+     * @throws Only non-ParseError exceptions (e.g. std::bad_alloc) escape;
+     *         all parse failures are returned as ParseError
      * @note Same contract as parse_in_situ (buffer consumed, NUL tail
-     *       runtime-checked); the throwing entry remains the core, this is a
-     *       thin catch-and-wrap shell.
+     *       runtime-checked). The Result form is the primitive: this forwards
+     *       straight to the zero-throw kernel with no catch; parse_in_situ is
+     *       the throwing compatibility shell.
      */
     [[nodiscard]] pjh::result::Result<Document, ParseError> parse_in_situ_result(
         std::pmr::string &&buffer,
@@ -341,10 +341,11 @@ namespace pjh::json
      * @param storage Allocation strategy (default: global config)
      * @return Result holding the Document on success, or the ParseError
      *         (copied by value, offset preserved) on failure
-     * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
-     *         escaping the parse core (unreachable in the current core) is
-     *         rethrown
-     * @note Same contract as parse_copy; thin catch-and-wrap shell.
+     * @throws Only non-ParseError exceptions (e.g. std::bad_alloc) escape;
+     *         all parse failures are returned as ParseError
+     * @note Same contract as parse_copy. The Result form is the primitive:
+     *       this forwards straight to the zero-throw kernel with no catch;
+     *       parse_copy is the throwing compatibility shell.
      */
     [[nodiscard]] pjh::result::Result<Document, ParseError> parse_copy_result(
         std::string_view json,
@@ -358,11 +359,11 @@ namespace pjh::json
      * @param storage Allocation strategy (default: global config)
      * @return Result holding the Document on success, or the ParseError
      *         (copied by value, offset preserved) on failure
-     * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
-     *         escaping the parse core (unreachable in the current core) is
-     *         rethrown
-     * @note Same caller-padding contract as parse_view; thin catch-and-wrap
-     *       shell.
+     * @throws Only non-ParseError exceptions (e.g. std::bad_alloc) escape;
+     *         all parse failures are returned as ParseError
+     * @note The Result form is the primitive: this forwards straight to the
+     *       zero-throw kernel with no catch. Same caller-padding contract as
+     *       parse_view, which is the throwing compatibility shell.
      */
     [[nodiscard]] pjh::result::Result<Document, ParseError> parse_view_result(
         const char *data, size_t content_len,
@@ -375,9 +376,11 @@ namespace pjh::json
      * @return Result holding the Document (root = Array of per-line values)
      *         on success, or the first failing line's ParseError (copied by
      *         value) on failure
-     * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
-     *         escaping the parse core (unreachable in the current core) is
-     *         rethrown
+     * @throws Only non-ParseError exceptions (e.g. std::bad_alloc) escape;
+     *         all parse failures are returned as ParseError
+     * @note The Result form is the primitive: this forwards straight to the
+     *       zero-throw kernel with no catch; parse_jsonl is the throwing
+     *       compatibility shell.
      * @note Error offsets are relative to the failing line, not the whole
      *       input (same as the throwing parse_jsonl). First error wins: the
      *       document is discarded when any line fails.
@@ -393,10 +396,11 @@ namespace pjh::json
      * @return Result holding the Document on success, or the ParseError
      *         (copied by value; file I/O failures are context-free, offset 0)
      *         on failure
-     * @throws std::bad_alloc propagates unconverted; a non-contract JsonError
-     *         escaping the parse core (unreachable in the current core) is
-     *         rethrown
-     * @note Same contract as parse_file; thin catch-and-wrap shell.
+     * @throws Only non-ParseError exceptions (e.g. std::bad_alloc) escape;
+     *         all parse failures are returned as ParseError
+     * @note Same contract as parse_file. The Result form is the primitive:
+     *       this forwards straight to the zero-throw kernel with no catch;
+     *       parse_file is the throwing compatibility shell.
      */
     [[nodiscard]] pjh::result::Result<Document, ParseError> parse_file_result(
         std::string_view filepath,
@@ -408,10 +412,11 @@ namespace pjh::json
      * @param storage Allocation strategy (default: global config)
      * @return Result holding the Document on success, or the ParseError
      *         (copied by value, offset preserved) on failure
-     * @throws std::bad_alloc propagates unconverted; a non-contract
-     *         JsonError escaping the parse core (unreachable in the current
-     *         core) is rethrown
-     * @note Same contract as parse_from_istream; thin catch-and-wrap shell.
+     * @throws Only non-ParseError exceptions (e.g. std::bad_alloc) escape;
+     *         all parse failures are returned as ParseError
+     * @note The Result form is the primitive: this forwards straight to the
+     *       zero-throw kernel with no catch. Same contract as
+     *       parse_from_istream, which is the throwing compatibility shell.
      *       Stream read failures are context-free (offset 0).
      */
     [[nodiscard]] pjh::result::Result<Document, ParseError>
