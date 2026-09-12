@@ -76,6 +76,7 @@ jobs:
       matrix:
         include:
           - name: Linux (Clang, ASan+UBSan)
+            cache_key: Linux-Clang-ASan-UBSan
             cc: clang
             cxx: clang++
             sanitizers: address,undefined
@@ -83,6 +84,7 @@ jobs:
             ubsan_options: halt_on_error=1:print_stacktrace=1
             tsan_options: ""
           - name: Linux (Clang, TSan)
+            cache_key: Linux-Clang-TSan
             cc: clang
             cxx: clang++
             sanitizers: thread
@@ -99,7 +101,7 @@ jobs:
       - name: Compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ${{ matrix.name }}
+          key: ${{ matrix.cache_key }}
           variant: ccache
 
       - name: Configure CMake

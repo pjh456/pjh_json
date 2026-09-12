@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <functional>
 #include <memory_resource>
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <type_traits>
