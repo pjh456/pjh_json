@@ -8,6 +8,7 @@ FetchContent_MakeAvailable(doctest)
 
 set(PJH_JSON_TEST_SOURCES
     test_main.cpp
+    access_result.cpp
     config_document.cpp
     constexpr_json_test.cpp
     json_parser.cpp

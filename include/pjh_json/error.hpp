@@ -2,8 +2,12 @@
 #define INCLUDE_PJH_JSON_ERROR_HPP
 
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
 
 namespace pjh::json
 {
@@ -25,6 +29,81 @@ namespace pjh::json
     enum class Category { Parse, Type, Json };
 
     /**
+     * @brief Machine tag for a path-typed access failure
+     */
+    enum class AccessErrorKind
+    {
+        Missing,       // object key / index not present
+        OutOfRange,    // array index >= size
+        TypeMismatch,  // node is not the expected JSON kind
+        InvalidIndex,  // array hop whose key step is not a valid index
+        MalformedPath  // path DSL failed to parse
+    };
+
+    /**
+     * @brief Field-path-carrying access failure (a value, never thrown)
+     *
+     * Satisfies pjh::result::Diagnostic structurally (message()/kind()), so a
+     * Result carrying it can be rendered by pjh::result::render().
+     *
+     * @note path is a canonical rendering of the failing prefix ('.' joins a
+     *       key, "[n]" an index) for diagnostics only; it is not guaranteed to
+     *       round-trip through parse_path when a key contains '.', '[' or ']'.
+     * @note hop is the 0-based failing hop, SIZE_MAX when not applicable
+     *       (MalformedPath, typed extraction).
+     * @note expected/actual are static JSON kind names ("null" / "boolean" /
+     *       "integer" / "number" / "string" / "array" / "object"); actual is
+     *       empty for Missing/OutOfRange/InvalidIndex.
+     * @note No source offset: access runs on a parsed tree whose Json nodes
+     *       carry no byte position; ParseError::offset() is the position
+     *       channel for parse failures.
+     */
+    struct AccessError
+    {
+        AccessErrorKind code;
+        std::string path;
+        std::string_view expected;
+        std::string_view actual;
+        size_t hop = SIZE_MAX;
+        std::string text;
+
+        AccessError(AccessErrorKind c, std::string p,
+                    std::string_view exp = {}, std::string_view act = {},
+                    size_t h = SIZE_MAX);
+
+        [[nodiscard]] AccessErrorKind kind() const noexcept { return code; }
+        [[nodiscard]] std::string_view message() const noexcept { return text; }
+    };
+
+    inline AccessError::AccessError(AccessErrorKind c, std::string p,
+                                    std::string_view exp, std::string_view act,
+                                    size_t h)
+        : code(c), path(std::move(p)), expected(exp), actual(act), hop(h)
+    {
+        switch (code)
+        {
+        case AccessErrorKind::Missing:
+            text = "missing key: " + path;
+            break;
+        case AccessErrorKind::OutOfRange:
+            text = "index out of range: " + path;
+            break;
+        case AccessErrorKind::TypeMismatch:
+            text = "type mismatch at " + path + ": expected " +
+                   std::string(expected) + ", got " + std::string(actual);
+            break;
+        case AccessErrorKind::InvalidIndex:
+            text = "invalid array index: " + path;
+            break;
+        case AccessErrorKind::MalformedPath:
+            text = "malformed path: " + path;
+            break;
+        }
+    }
+
+    static_assert(std::is_nothrow_move_constructible_v<AccessError>);
+
+    /**
      * @brief Base exception for all JSON errors
      */
     class JsonError : public std::runtime_error
@@ -40,6 +119,22 @@ namespace pjh::json
         {
             return Category::Json;
         }
+
+        /**
+         * @brief Human-readable message (pjh::result::Diagnostic protocol)
+         * @return View of what(); stable for this object's lifetime
+         */
+        [[nodiscard]] std::string_view message() const noexcept
+        {
+            return std::string_view(what());
+        }
+
+        /**
+         * @brief Stable machine tag (pjh::result::Diagnostic protocol)
+         * @return category(): Parse for ParseError, Type for TypeError,
+         *         Json for the base class
+         */
+        [[nodiscard]] Category kind() const noexcept { return category(); }
     };
 
     /**

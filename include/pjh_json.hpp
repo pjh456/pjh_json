@@ -6,6 +6,7 @@
 /// @details Includes the `Json` value type, `Document`, `Parser`, `Writer`,
 ///          `Validator`, and `Literal` modules.
 
+#include "pjh_json/access.hpp"
 #include "pjh_json/array.hpp"
 #include "pjh_json/config.hpp"
 #include "pjh_json/document.hpp"
