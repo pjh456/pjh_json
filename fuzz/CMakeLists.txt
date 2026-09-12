@@ -2,11 +2,18 @@
 # (root CMakeLists gates: Clang-only, sanitizers required, library built with
 # -fsanitize=fuzzer-no-link coverage). The fuzzer runtime and main are linked
 # here, never into the static library or its export surface.
-include(FetchContent)
-
-# Reuse the benchmark's exact declaration so enabling both in one tree does not
-# fetch nlohmann twice (same name + same pin + same FORCE => no-op second time).
+# nlohmann_json: system package first when PJH_JSON_DEP_MODE != FETCH. Reuse the
+# benchmark's declaration when both are enabled: the NOT-TARGET guard below
+# makes the second provider a no-op (same name + same pin + same FORCE).
+if(NOT PJH_JSON_DEP_MODE STREQUAL "FETCH")
+    find_package(nlohmann_json QUIET)
+endif()
 if(NOT TARGET nlohmann_json::nlohmann_json)
+    if(PJH_JSON_DEP_MODE STREQUAL "SYSTEM")
+        pjh_json_dep_missing(nlohmann_json
+            "Debian/Ubuntu: nlohmann-json3-dev; macOS: brew install nlohmann-json; vcpkg: nlohmann-json")
+    endif()
+    include(FetchContent)
     FetchContent_Declare(
         nlohmann_json
         GIT_REPOSITORY https://github.com/nlohmann/json.git

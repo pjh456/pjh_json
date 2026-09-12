@@ -75,6 +75,31 @@ option(PJH_JSON_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(PJH_JSON_BUILD_FUZZERS "Build libFuzzer differential fuzz targets (Clang + sanitizers)" OFF)
 set(PJH_JSON_PGO OFF CACHE STRING "PGO mode: OFF, GENERATE, or USE")
 
+# Dependency acquisition policy for the in-repo test/benchmark/fuzz deps
+# (doctest, google-benchmark, nlohmann_json, RapidJSON). The library itself has
+# no configure-time external dependency beyond the xsimd/pjh_result submodules,
+# so consumers are unaffected.
+#   FETCH  (default) - always FetchContent; unchanged historical behavior.
+#   SYSTEM           - find_package() only; offline; missing dep = FATAL_ERROR.
+#   AUTO             - find_package() first, FetchContent fallback.
+# CMake >= 3.24 has FetchContent_Declare(... FIND_PACKAGE_ARGS ...); this
+# project's floor is 3.20, so the equivalent is spelled with explicit
+# find_package + `if(NOT TARGET)` guards (cmake/pjh_json_deps.cmake).
+set(PJH_JSON_DEP_MODE "FETCH" CACHE STRING
+    "Source for doctest/benchmark/nlohmann_json/RapidJSON: FETCH, SYSTEM, or AUTO")
+set_property(CACHE PJH_JSON_DEP_MODE PROPERTY STRINGS FETCH SYSTEM AUTO)
+if(NOT PJH_JSON_DEP_MODE MATCHES "^(FETCH|SYSTEM|AUTO)$")
+    message(FATAL_ERROR
+        "PJH_JSON_DEP_MODE must be FETCH, SYSTEM, or AUTO "
+        "(got '${PJH_JSON_DEP_MODE}')")
+endif()
+# SYSTEM must not silently fall back to the network even if a guard is missed.
+if(PJH_JSON_DEP_MODE STREQUAL "SYSTEM")
+    set(FETCHCONTENT_FULLY_DISCONNECTED ON CACHE BOOL
+        "PJH_JSON_DEP_MODE=SYSTEM: never fetch" FORCE)
+endif()
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/pjh_json_deps.cmake")
+
 # -------------------------
 # dependency
 # -------------------------
@@ -233,11 +258,17 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     # -static is incompatible with the ASan/TSan runtimes (fully-static
     # sanitizer executables are unsupported); keep the default fully-static
     # link only in uninstrumented builds.
+    # A fully-static link also requires every dependency to ship a static
+    # archive. SYSTEM/AUTO may select shared distro packages (e.g. Debian's
+    # libbenchmark.so has no libbenchmark.a), so -static is restricted to the
+    # default FETCH mode, where all deps are built from source.
     if(NOT PJH_JSON_SANITIZER_FLAGS)
         add_link_options(
             -static-libgcc
-            -static-libstdc++
-            -static)
+            -static-libstdc++)
+        if(PJH_JSON_DEP_MODE STREQUAL "FETCH")
+            add_link_options(-static)
+        endif()
     endif()
 endif()
 

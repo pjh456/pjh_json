@@ -49,8 +49,26 @@ function(pjh_json_doctest_discover_tests TARGET)
     endif()
 
     # The pinned doctest's parser, invoked in script mode at ctest time.
-    set(_discover_script
-        "${doctest_SOURCE_DIR}/scripts/cmake/doctestAddTests.cmake")
+    # Resolve it for both acquisition paths:
+    #   * FetchContent  -> ${doctest_SOURCE_DIR}/scripts/cmake/doctestAddTests.cmake
+    #   * installed pkg -> ${doctest_DIR}/doctestAddTests.cmake (installed beside
+    #     doctestConfig.cmake; doctest_DIR is set by find_package in tests/).
+    if(NOT _pjh_doctest_discover_script)
+        if(DEFINED doctest_SOURCE_DIR
+           AND EXISTS "${doctest_SOURCE_DIR}/scripts/cmake/doctestAddTests.cmake")
+            set(_pjh_doctest_discover_script
+                "${doctest_SOURCE_DIR}/scripts/cmake/doctestAddTests.cmake")
+        elseif(DEFINED doctest_DIR
+               AND EXISTS "${doctest_DIR}/doctestAddTests.cmake")
+            set(_pjh_doctest_discover_script
+                "${doctest_DIR}/doctestAddTests.cmake")
+        else()
+            # Last resort: upstream's own helper sets _DOCTEST_DISCOVER_TESTS_SCRIPT.
+            include(doctest)
+            set(_pjh_doctest_discover_script "${_DOCTEST_DISCOVER_TESTS_SCRIPT}")
+        endif()
+    endif()
+    set(_discover_script "${_pjh_doctest_discover_script}")
 
     string(CONCAT _include_content
         "if(EXISTS \"$<TARGET_FILE:${TARGET}>\")" "\n"

@@ -1,41 +1,93 @@
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
-include(FetchContent)
+# 1. Google Benchmark: system package first when PJH_JSON_DEP_MODE != FETCH.
+if(NOT PJH_JSON_DEP_MODE STREQUAL "FETCH")
+    find_package(benchmark QUIET)
+endif()
+if(NOT TARGET benchmark::benchmark)
+    if(PJH_JSON_DEP_MODE STREQUAL "SYSTEM")
+        pjh_json_dep_missing(benchmark
+            "Debian/Ubuntu: libbenchmark-dev; macOS: brew install google-benchmark; vcpkg: benchmark")
+    endif()
+    include(FetchContent)
+    FetchContent_Declare(
+        benchmark
+        GIT_REPOSITORY https://github.com/google/benchmark.git
+        GIT_TAG v1.8.3
+    )
+    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(benchmark)
+endif()
 
-# 1. 引入 Google Benchmark
-FetchContent_Declare(
-    benchmark
-    GIT_REPOSITORY https://github.com/google/benchmark.git
-    GIT_TAG v1.8.3
-)
-set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
-set(BENCHMARK_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(benchmark)
+# 2. nlohmann_json: system package first when PJH_JSON_DEP_MODE != FETCH.
+if(NOT PJH_JSON_DEP_MODE STREQUAL "FETCH")
+    find_package(nlohmann_json QUIET)
+endif()
+if(NOT TARGET nlohmann_json::nlohmann_json)
+    if(PJH_JSON_DEP_MODE STREQUAL "SYSTEM")
+        pjh_json_dep_missing(nlohmann_json
+            "Debian/Ubuntu: nlohmann-json3-dev; macOS: brew install nlohmann-json; vcpkg: nlohmann-json")
+    endif()
+    include(FetchContent)
+    FetchContent_Declare(
+        nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG v3.11.3
+    )
+    set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
 
-# 2. 引入 nlohmann_json 用于对比
-FetchContent_Declare(
-    nlohmann_json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3
-)
-set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(nlohmann_json)
+# 3. RapidJSON: header-only, no reliable imported target; needs the GCC 15
+# shadow patch. System package first when PJH_JSON_DEP_MODE != FETCH.
+if(NOT PJH_JSON_DEP_MODE STREQUAL "FETCH")
+    find_package(RapidJSON QUIET)
+    if(NOT RAPIDJSON_INCLUDE_DIRS)
+        find_path(PJH_JSON_RAPIDJSON_SYSTEM_INCLUDE rapidjson/rapidjson.h)
+    endif()
+    if(RAPIDJSON_INCLUDE_DIRS)
+        set(_pjh_json_rapidjson_include "${RAPIDJSON_INCLUDE_DIRS}")
+    elseif(PJH_JSON_RAPIDJSON_SYSTEM_INCLUDE)
+        set(_pjh_json_rapidjson_include "${PJH_JSON_RAPIDJSON_SYSTEM_INCLUDE}")
+    endif()
+endif()
 
-# 3. 引入 rapidjson 用于对比
-FetchContent_Declare(
-    rapidjson
-    GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
-    GIT_TAG v1.1.0
-    PATCH_COMMAND ${CMAKE_COMMAND}
-        -Dsrc=${CMAKE_BINARY_DIR}/_deps/rapidjson-src/include/rapidjson/document.h
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/rapidjson_patch.cmake
-)
-set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
-set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(RAPIDJSON_BUILD_THIRDPARTY_GTEST OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(rapidjson)
+if(_pjh_json_rapidjson_include)
+    # Never write into the system prefix: shadow-copy the headers into the
+    # build dir and reuse the same GCC 15 patch as the FetchContent path (the
+    # patch is an idempotent no-op on an already-patched tree).
+    set(_pjh_json_rapidjson_shadow
+        "${CMAKE_CURRENT_BINARY_DIR}/rapidjson-system")
+    if(NOT EXISTS "${_pjh_json_rapidjson_shadow}/rapidjson/rapidjson.h")
+        file(COPY "${_pjh_json_rapidjson_include}/rapidjson"
+             DESTINATION "${_pjh_json_rapidjson_shadow}")
+        execute_process(COMMAND "${CMAKE_COMMAND}"
+            "-Dsrc=${_pjh_json_rapidjson_shadow}/rapidjson/document.h"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/rapidjson_patch.cmake")
+    endif()
+    set(PJH_JSON_RAPIDJSON_INCLUDE_DIR "${_pjh_json_rapidjson_shadow}")
+elseif(PJH_JSON_DEP_MODE STREQUAL "SYSTEM")
+    pjh_json_dep_missing(RapidJSON
+        "Debian/Ubuntu: rapidjson-dev; macOS: brew install rapidjson; vcpkg: rapidjson")
+else()
+    include(FetchContent)
+    FetchContent_Declare(
+        rapidjson
+        GIT_REPOSITORY https://github.com/Tencent/rapidjson.git
+        GIT_TAG v1.1.0
+        PATCH_COMMAND ${CMAKE_COMMAND}
+            -Dsrc=${CMAKE_BINARY_DIR}/_deps/rapidjson-src/include/rapidjson/document.h
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/rapidjson_patch.cmake
+    )
+    set(RAPIDJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
+    set(RAPIDJSON_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(RAPIDJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(RAPIDJSON_BUILD_THIRDPARTY_GTEST OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(rapidjson)
+    set(PJH_JSON_RAPIDJSON_INCLUDE_DIR "${rapidjson_SOURCE_DIR}/include")
+endif()
 
 # 创建可执行程序
 add_executable(pjh_json_benchmark benchmark_test.cpp)
@@ -49,9 +101,10 @@ target_link_libraries(pjh_json_benchmark
     nlohmann_json::nlohmann_json
 )
 
-# rapidjson 没有现代的 cmake target，通过源码目录引入；SYSTEM 使 -Wall -Wextra
-# 不审第三方头（裁决 D，禁止 -Wno-*）。
-target_include_directories(pjh_json_benchmark SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
+# rapidjson 没有可靠的 cmake target，通过目录引入（Fetch 为源码目录，SYSTEM 为
+# 构建目录内的 shadow 副本）；SYSTEM 使 -Wall -Wextra 不审第三方头（裁决 D，
+# 禁止 -Wno-*）。
+target_include_directories(pjh_json_benchmark SYSTEM PRIVATE ${PJH_JSON_RAPIDJSON_INCLUDE_DIR})
 
 # Same sanitizer re-apply as tests/CMakeLists.txt (root list). Keep in lockstep.
 if(PJH_JSON_SANITIZER_FLAGS)

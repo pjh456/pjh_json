@@ -68,6 +68,52 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  deps-system:
+    name: Linux (GCC, system deps, offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Install distro packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libbenchmark-dev nlohmann-json3-dev rapidjson-dev
+
+      # The runner's doctest-dev (2.4.11) is below the test suite's floor:
+      # doctest < 2.5.0 cannot stringify std::pmr::basic_string. Install the
+      # pinned 2.5.0 into a local prefix so find_package() succeeds; the
+      # pjh_json configure itself stays fully disconnected.
+      - name: Install doctest 2.5.0
+        run: |
+          git clone --depth 1 --branch v2.5.0 \
+            https://github.com/doctest/doctest.git /tmp/doctest-src
+          cmake -S /tmp/doctest-src -B /tmp/doctest-build -G Ninja \
+            -DCMAKE_INSTALL_PREFIX="$HOME/.local" \
+            -DDOCTEST_WITH_TESTS=OFF -DDOCTEST_NO_INSTALL=OFF
+          cmake --build /tmp/doctest-build --target install
+
+      - name: Configure (system deps only)
+        env:
+          CC: gcc
+          CXX: g++
+        run: >
+          cmake -B build -G Ninja
+          -DPJH_JSON_DEP_MODE=SYSTEM
+          -DPJH_JSON_BUILD_TESTS=ON
+          -DPJH_JSON_BUILD_BENCHMARKS=ON
+          -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+          -DCMAKE_PREFIX_PATH="$HOME/.local"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
   sanitize:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest

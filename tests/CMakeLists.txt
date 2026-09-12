@@ -1,16 +1,34 @@
-include(FetchContent)
-FetchContent_Declare(doctest
-    GIT_REPOSITORY https://github.com/doctest/doctest.git
-    GIT_TAG v2.5.0)
+# doctest: system package first when PJH_JSON_DEP_MODE != FETCH.
+# Version floor 2.5.0: the suite compares std::pmr::basic_string values, which
+# doctest only stringifies from 2.5.0 (templated String ctor + is_std_string);
+# older system packages otherwise fail to compile the tests with a cryptic
+# error deep in doctest.h.
+# NOTE: the installed package provides only the imported target
+# doctest::doctest (the bare `doctest` target exists only in the FetchContent
+# add_subdirectory path), so both executables link doctest::doctest below.
+if(NOT PJH_JSON_DEP_MODE STREQUAL "FETCH")
+    find_package(doctest 2.5.0 QUIET)
+endif()
 
-# doctest is a test-only dependency: suppress its own install rules so
-# `cmake --install` does not leak include/doctest, lib/cmake/doctest and
-# lib/pkgconfig/doctest.pc into the consumer prefix. Same pattern as
-# XSIMD_SKIP_INSTALL (root CMakeLists). Must precede MakeAvailable, which
-# add_subdirectory()s doctest and registers its install() commands.
-set(DOCTEST_NO_INSTALL ON CACHE BOOL "Skip doctest install rules" FORCE)
-set(DOCTEST_WITH_MAIN_IN_STATIC_LIB OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(doctest)
+if(NOT TARGET doctest::doctest)
+    if(PJH_JSON_DEP_MODE STREQUAL "SYSTEM")
+        pjh_json_dep_missing(doctest
+            "doctest >= 2.5.0 (Debian/Ubuntu: doctest-dev; macOS: brew install doctest; vcpkg: doctest)")
+    endif()
+    include(FetchContent)
+    FetchContent_Declare(doctest
+        GIT_REPOSITORY https://github.com/doctest/doctest.git
+        GIT_TAG v2.5.0)
+
+    # doctest is a test-only dependency: suppress its own install rules so
+    # `cmake --install` does not leak include/doctest, lib/cmake/doctest and
+    # lib/pkgconfig/doctest.pc into the consumer prefix. Same pattern as
+    # XSIMD_SKIP_INSTALL (root CMakeLists). Must precede MakeAvailable, which
+    # add_subdirectory()s doctest and registers its install() commands.
+    set(DOCTEST_NO_INSTALL ON CACHE BOOL "Skip doctest install rules" FORCE)
+    set(DOCTEST_WITH_MAIN_IN_STATIC_LIB OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(doctest)
+endif()
 
 set(PJH_JSON_TEST_SOURCES
     test_main.cpp
@@ -48,7 +66,7 @@ pjh_json_check_test_sources(
     REGISTERED ${PJH_JSON_TEST_SOURCES} ${PJH_JSON_HEADER_ISOLATION_SOURCES})
 
 add_executable(pjh_json_tests ${PJH_JSON_TEST_SOURCES})
-target_link_libraries(pjh_json_tests PRIVATE pjh_json doctest)
+target_link_libraries(pjh_json_tests PRIVATE pjh_json doctest::doctest)
 
 include(${PROJECT_SOURCE_DIR}/cmake/pjh_json_doctest_discover_tests.cmake)
 pjh_json_doctest_discover_tests(pjh_json_tests)
@@ -60,7 +78,7 @@ pjh_json_doctest_discover_tests(pjh_json_tests)
 # regression. Its own executable guarantees the linker must resolve `of`
 # from pjh_json alone.
 add_executable(pjh_json_header_isolation ${PJH_JSON_HEADER_ISOLATION_SOURCES})
-target_link_libraries(pjh_json_header_isolation PRIVATE pjh_json doctest)
+target_link_libraries(pjh_json_header_isolation PRIVATE pjh_json doctest::doctest)
 
 pjh_json_doctest_discover_tests(pjh_json_header_isolation)
 

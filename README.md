@@ -152,6 +152,13 @@ auto port = doc.root()["port"].as_int();  // 8080
 * Run `git submodule update --init` before the first configure —
   `thirdparty/xsimd` and `thirdparty/pjh_result` are git submodules, not
   FetchContent dependencies.
+* Test/benchmark/fuzz dependencies (doctest, Google Benchmark, nlohmann/json,
+  RapidJSON) are fetched at configure time by default (`PJH_JSON_DEP_MODE=FETCH`,
+  needs network). For offline builds against distro packages use
+  `-DPJH_JSON_DEP_MODE=SYSTEM` (Debian/Ubuntu: `libbenchmark-dev
+  nlohmann-json3-dev rapidjson-dev`, plus doctest >= 2.5.0 — the distro
+  `doctest-dev` may be older than the suite's floor); `AUTO` tries the system
+  packages first and falls back to FetchContent.
 
 ## Build
 
@@ -181,6 +188,7 @@ cmake --build build
 | `PJH_JSON_BUILD_TESTS` | `OFF` | Build unit tests |
 | `PJH_JSON_BUILD_EXAMPLES` | `OFF` | Build example programs |
 | `PJH_JSON_BUILD_BENCHMARKS` | `OFF` | Build Google Benchmark suite |
+| `PJH_JSON_DEP_MODE` | `FETCH` | Source for test/benchmark deps: `FETCH` (network), `SYSTEM` (`find_package` only, offline), or `AUTO` (`find_package` first, fetch fallback) |
 | `PJH_JSON_PGO` | `OFF` | PGO mode: `GENERATE` or `USE` (requires separate build directories); flags are library-only and tagged PRIVATE, so they are never exported to consumers |
 | `PJH_JSON_BUILD_FUZZERS` | `OFF` | Build the libFuzzer differential fuzz targets (Clang only; requires `PJH_JSON_SANITIZERS` to be set) |
 | `PJH_JSON_SANITIZERS` | `OFF` | Comma-separated GCC/Clang sanitizer list, e.g. `address,undefined`, or `thread` alone; PRIVATE instrumentation, never exported |
