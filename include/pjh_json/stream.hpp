@@ -17,8 +17,7 @@ namespace pjh::json
      * Pulls one complete Document per non-blank line from an input stream and
      * keeps only the current line in memory: the footprint is bounded by the
      * longest line plus that line's parsed DOM, independent of the stream
-     * size. This is the record-level entry of the incremental-parsing roadmap
-     * (roadmap 35); it reuses parse_copy for each line, so every Config parse
+     * size. It reuses parse_copy for each line, so every Config parse
      * knob (max_depth, strict_duplicate_keys, strip_bom, strict_utf8) applies
      * with the same semantics as parse_jsonl.
      *

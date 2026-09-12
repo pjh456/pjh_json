@@ -1346,7 +1346,7 @@ namespace pjh::json
          *         vector)
          * @throws TypeError if *this is not an Object (both build modes)
          * @note A duplicate-key overwrite keeps the first occurrence's
-         *       position (last-wins semantics, task 10).
+         *       position (last-wins semantics).
          * @note size() on a scalar is 1 (cardinality); keys() does not
          *       follow that contract: a scalar has no children, it throws.
          */

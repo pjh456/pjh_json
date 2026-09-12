@@ -46,15 +46,15 @@ namespace pjh::json
      * the message table only.
      *
      * @note Kernel vocabulary, NOT a stable machine contract: the public
-     *       exception classes keep their class-level Category contract
-     *       (task 16/53). This enum does not change ParseError::category();
+     *       exception classes keep their class-level Category contract.
+     *       This enum does not change ParseError::category();
      *       it is deliberately site-level while Category stays class-level.
      * @note Not part of any public Result channel today. The public
-     *       *_result entries keep their ParseError / JsonError E types
-     *       (plan 79 §3.3/§3.7 Variant A); Error is materialised into an
-     *       exception before it leaves the implementation.
+     *       *_result entries keep their ParseError / JsonError E types;
+     *       Error is materialised into an exception before it leaves the
+     *       implementation.
      * @note OOM is not in this vocabulary: std::bad_alloc remains an
-     *       environment failure and propagates unconverted (plan 79 §3.2).
+     *       environment failure and propagates unconverted.
      */
     enum class ErrorCode : uint16_t
     {
@@ -90,7 +90,7 @@ namespace pjh::json
 
         // ---- malformed UTF-8 string content ----------------------------
         // Shared by the parser and the ascii-dump writer: the message is
-        // identical, the producing side sets Error::category (plan 79 §3.3).
+        // identical, the producing side sets Error::category.
         Utf8Overlong,
         Utf8InvalidLead,
         Utf8InvalidContinuation,
@@ -125,11 +125,10 @@ namespace pjh::json
     /**
      * @brief Static message table for ErrorCode (single source of truth)
      *
-     * Reproduces the pre-79.1 exception text byte for byte. Context-free
-     * detail-carrying codes carry a `{}` placeholder (recorded by the
-     * golden capture, `.w1mer/results/79_golden_errors.md`); Error::format()
-     * substitutes the borrowed detail. The parser/writer are not wired to
-     * this table yet (stages 79.2/79.3).
+     * Reproduces the exception text byte for byte. Context-free
+     * detail-carrying codes carry a `{}` placeholder; Error::format()
+     * substitutes the borrowed detail. The parser and writer share exactly
+     * this table through Error::format().
      *
      * @param c Kernel error key
      * @return Static message for @p c; empty for ErrorCode::None
@@ -259,8 +258,7 @@ namespace pjh::json
      *       into a caller/local buffer. It is valid only until the kernel
      *       result is materialised into ParseError/JsonError (done in the
      *       same call frame by the public entries) and MUST NOT outlive
-     *       that. Error is not part of any public Result channel today
-     *       (plan 79 §3.7 Variant A/B).
+     *       that. Error is not part of any public Result channel today.
      * @note Structurally satisfies pjh::result::Diagnostic (message() +
      *       kind()); error.hpp deliberately does not include pjh_result,
      *       so the concept is asserted in the test TU instead.
@@ -448,7 +446,7 @@ namespace pjh::json
          * @brief Materialize a kernel failure as a JSON error
          * @param e Fixed-size kernel Error; its format() becomes what()
          * @note Compatibility materialisation point for the zero-allocation
-         *       kernel (task 79). The public exception contract
+         *       kernel. The public exception contract
          *       (type / category / what()) is unchanged; detail is copied
          *       into the owned what() string, so @p e may be transient.
          */
@@ -506,7 +504,7 @@ namespace pjh::json
          * @brief Materialize a positioned kernel failure
          * @param e Fixed-size kernel Error; e.offset() becomes offset()
          * @note Compatibility materialisation point for the zero-allocation
-         *       kernel (task 79). Category stays Category::Parse and the
+         *       kernel. Category stays Category::Parse and the
          *       what() text is built from the same static message table.
          */
         explicit ParseError(const Error &e)
@@ -695,23 +693,23 @@ namespace pjh::json
     /**
      * @brief Machine tag for a lightweight-schema validation failure
      *
-     * The structural core (task 38.1) produces TypeMismatch, MissingRequired
-     * and InvalidSchema. The remaining values are reserved for the value
-     * constraints of task 38.2 (enum / const / length / numeric /
+     * The structural core produces TypeMismatch, MissingRequired
+     * and InvalidSchema. The remaining values cover the value
+     * constraints (enum / const / length / numeric /
      * additionalProperties); they are declared here with the rest of the
-     * vocabulary so the enum does not change shape between the two subtasks.
+     * vocabulary so the enum does not change shape.
      */
     enum class SchemaErrorKind
     {
         TypeMismatch,       // "type": instance kind differs from the declared name
         MissingRequired,    // "required": a listed key is absent
-        UnexpectedProperty, // "additionalProperties": false (38.2)
-        TooShort,           // minLength / minItems (38.2)
-        TooLong,            // maxLength / maxItems (38.2)
-        BelowMinimum,       // minimum / exclusiveMinimum (38.2)
-        AboveMaximum,       // maximum / exclusiveMaximum (38.2)
-        EnumMismatch,       // enum (38.2)
-        ConstMismatch,      // const (38.2)
+        UnexpectedProperty, // "additionalProperties": false
+        TooShort,           // minLength / minItems
+        TooLong,            // maxLength / maxItems
+        BelowMinimum,       // minimum / exclusiveMinimum
+        AboveMaximum,       // maximum / exclusiveMaximum
+        EnumMismatch,       // enum
+        ConstMismatch,      // const
         InvalidSchema       // keyword parameter shape/value is malformed
     };
 

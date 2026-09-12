@@ -279,7 +279,7 @@ namespace pjh::json
      *         to the stream start)
      * @note Whole-stream buffering: memory = input size + kPaddingWidth
      *       NUL bytes + the DOM. This is NOT incremental parsing
-     *       (roadmap 35) — the parser runs only on the complete in-memory
+     *       — the parser runs only on the complete in-memory
      *       buffer. The stream itself may be any source (stringstream,
      *       file, socket, pipe, filtering stream): no seek/tellg is used.
      * @note All Config parse knobs (max_depth, strict_duplicate_keys,

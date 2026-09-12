@@ -13,11 +13,11 @@ namespace pjh::json
     /// Everything here is `constexpr` (NOT `consteval`) and allocation-free,
     /// so a consteval caller and a runtime caller can share the exact same
     /// rule and can no longer drift apart. Header-only and dependency-free
-    /// (no xsimd, no pjh_json/detail) so it stays self-contained (task 64).
+    /// (no xsimd, no pjh_json/detail) so it stays self-contained.
     ///
-    /// Scope: GRAMMAR only. Runtime-only policy -- BOM stripping (task 23),
-    /// strict raw UTF-8 (task 24), the finite-double number range (task 61),
-    /// the nesting-depth limit (task 05.1) and strict duplicate keys -- is
+    /// Scope: GRAMMAR only. Runtime-only policy -- BOM stripping,
+    /// strict raw UTF-8, the finite-double number range,
+    /// the nesting-depth limit and strict duplicate keys -- is
     /// driven by Config atomics (not constexpr) and std::from_chars, so it
     /// cannot live here. Those remain documented divergences and are pinned
     /// executable by tests/differential_validation.cpp.
@@ -113,7 +113,7 @@ namespace pjh::json
 
         /// @brief Structural scan result. GRAMMAR ONLY: the token is accepted
         ///        regardless of magnitude; finite-double range is a
-        ///        runtime-only gate (task 61).
+        ///        runtime-only gate.
         struct number_scan
         {
             const char *int_start = nullptr; ///< first integer digit
@@ -125,7 +125,7 @@ namespace pjh::json
         /// @brief Why scan_number() failed, for the runtime's positioned
         ///        ParseError messages. The cursor p at failure reproduces the
         ///        exact offsets src/parser/number.cpp reported before the
-        ///        dedup (see plan 71 §4.5).
+        ///        dedup.
         enum class number_error
         {
             ok,
@@ -182,7 +182,7 @@ namespace pjh::json
             return number_error::ok;
         }
 
-        // ---- JSON5 1.0.0 grammar additions (task 40.1) --------------------
+        // ---- JSON5 1.0.0 grammar additions --------------------
         // Pure additions: the RFC 8259 rules above are byte-for-byte
         // unchanged. Consumed only when Config::json5() is true, so the
         // default runtime path cannot drift.
@@ -190,7 +190,7 @@ namespace pjh::json
         /// @brief JSON5 1.0.0 §8 ASCII white space: the RFC four bytes plus
         ///        VT (0x0B) and FF (0x0C).
         /// @note The default RFC path keeps rejecting VT/FF
-        ///       (task 04 strictness); this predicate is opt-in only.
+        ///       (RFC strictness); this predicate is opt-in only.
         constexpr bool is_json5_whitespace_ascii(unsigned char c) noexcept
         {
             return is_whitespace(c) || c == 0x0B || c == 0x0C;
@@ -221,7 +221,7 @@ namespace pjh::json
         /// @brief JSON5 1.0.0 §3 IdentifierName, ASCII subset: a key may
         ///        start with an ASCII letter, '_' or '$'.
         /// @note The Unicode IdentifierName closure (and `\uXXXX` escapes)
-        ///       landed in task 40.5 as the runtime-only `unicode::`
+        ///       live in the runtime-only `unicode::`
         ///       helpers in src/parser/unicode.hpp (they need generated
         ///       Unicode category tables and are never used at compile
         ///       time); this ASCII predicate stays the shared source for
@@ -238,7 +238,7 @@ namespace pjh::json
             return is_identifier_start(c) || (c >= '0' && c <= '9');
         }
 
-        // ---- JSON5 1.0.0 §6 number grammar (task 40.2) --------------------
+        // ---- JSON5 1.0.0 §6 number grammar --------------------
         // A JSON5-specific scanner alongside the RFC scan_number above; the
         // RFC function is byte-for-byte untouched and stays the only rule
         // consumed on the default path. This one adds the JSON5 spellings:
@@ -247,7 +247,7 @@ namespace pjh::json
         // fraction part (`5.`, `5.e3`). It reuses the same `number_error`
         // vocabulary (no new ErrorCode) and `has_leading_zero` so the two
         // scanners cannot disagree on the shared leading-zero rule.
-        // `Infinity`/`NaN` are NOT handled here (deferred to task 40.4).
+        // `Infinity`/`NaN` are NOT handled here.
         struct number_scan_json5
         {
             const char *int_start = nullptr; ///< first digit (decimal or hex)
@@ -334,7 +334,7 @@ namespace pjh::json
             return number_error::ok;
         }
 
-        // ---- JSON5 1.0.0 §6 non-finite literals (task 40.4) ---------------
+        // ---- JSON5 1.0.0 §6 non-finite literals ---------------
         // `Infinity` and `NaN` are NumericLiterals in JSON5 1.0.0, each
         // optionally preceded by `+` or `-` (the sign is consumed by the
         // runtime caller, which owns the value mapping). The RFC scanner
@@ -371,7 +371,7 @@ namespace pjh::json
             return false;
         }
 
-        // ---- JSON5 1.0.0 §5.2 string escapes (task 40.3) ------------------
+        // ---- JSON5 1.0.0 §5.2 string escapes ------------------
         // Pure additions alongside short_escape_value: the RFC helper is
         // byte-for-byte unchanged. JSON5 adds the `\'` and `\v` single
         // escapes. `\0` (NUL) deliberately has no entry here: a char return

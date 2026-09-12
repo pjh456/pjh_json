@@ -93,7 +93,7 @@ namespace pjh::json
      * @note Explicit OWNED semantics: every string (value and key) is copied
      *       into res, so the source can die at the end of the call. This is
      *       the sanctioned path for bringing std::string / std containers
-     *       INTO the library; the task-54 rvalue-borrow poison still forbids
+     *       INTO the library; the rvalue-borrow poison still forbids
      *       the implicit borrow entries (Json(std::string&&) etc.).
      * @note The std counterpart of clone(): clone() deep-copies Json->Json in
      *       an arena; from_std() materialises a std value INTO an arena.

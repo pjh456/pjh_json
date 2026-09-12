@@ -28,11 +28,11 @@
 ///
 /// @note This header is deliberately NOT part of the umbrella
 ///       `include/pjh_json.hpp`: including it pulls in `json_constexpr.hpp`
-///       (and thus `validate.hpp`), which the umbrella keeps opt-in (task 59).
+///       (and thus `validate.hpp`), which the umbrella keeps opt-in.
 /// @note This is a JSON-Schema-*inspired* keyword subset, not a conformant
-///       draft 2020-12 implementation. The structural core (38.1) implements
+///       draft 2020-12 implementation. The structural core implements
 ///       `type`, `required`, `properties` and `items`; the value constraints
-///       (38.2) add `enum`, `const`, `minLength`/`maxLength`,
+///       add `enum`, `const`, `minLength`/`maxLength`,
 ///       `minItems`/`maxItems`, `minimum`/`maximum` and
 ///       `additionalProperties: false`. Unknown keywords are ignored for
 ///       forward compatibility.
@@ -113,7 +113,7 @@ namespace pjh::json::schema
             void rewind(std::size_t mark) { s.resize(mark); }
         };
 
-        // ---- local ConstJson traits (no dependency on task 37.1 helpers) ----
+        // ---- local ConstJson traits (no external helper dependency) ----
 
         /// @brief Trait: true when T (decayed) is a ConstJsonObject.
         template <typename T> struct is_const_json_object : std::false_type

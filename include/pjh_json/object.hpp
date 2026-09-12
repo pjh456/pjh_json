@@ -76,7 +76,7 @@ namespace pjh::json
          */
         struct EntryRef
         {
-            const String &first; ///< read-only key (was mutable pre-21.1)
+            const String &first;  ///< read-only key
             Json &second;         ///< the value, in place
         };
 
@@ -110,8 +110,8 @@ namespace pjh::json
          * iterator.
          * @warning Do not hold the address of a loop variable (&e)
          * across ++: the yield is a per-step proxy, not the stored
-         * entry (the pre-21.1 raw pair& yield made that aliasing
-         * sound; the writer's sort path uses data() instead).
+         * entry, so that aliasing is unsound; the writer's sort path
+         * uses data() instead.
          */
         class iterator
         {
@@ -317,7 +317,7 @@ namespace pjh::json
          * @brief Iterator to first entry
          * @return Iterator over (String, Json) entries — the key side
          *         is read-only (a mutable key would silently re-key the
-         *         entry or dangle its source; task 21.1), the value
+         *         entry or dangle its source), the value
          *         side stays patchable
          * @note Range-for-only (see class iterator): no iterator_traits,
          *       no standard algorithm support; use data() or the const
@@ -419,7 +419,7 @@ namespace pjh::json
          * @note Read-only keys: the key is lookup identity and has no
          *       mutation path; for mutable values use values().
          * @note A duplicate-key overwrite keeps the first occurrence's
-         *       position (last-wins semantics, task 10).
+         *       position (last-wins semantics).
          * @note KeysView is range-for-only: its nested iterator has no
          *       iterator_traits, so no standard algorithm accepts it.
          *       For algorithms use the const Object iterators/data().
@@ -503,7 +503,7 @@ namespace pjh::json
          *       kind (array, scalar, string, null) REPLACES the
          *       destination's value wholesale, cloned into *this's
          *       resource. null is a value here: it overwrites
-         *       (delete-on-null is the roadmap-36 patch format's ruling,
+         *       (delete-on-null is the patch format's rule,
          *       not this primitive's).
          * @note Entry order: existing keys keep their position
          *       (last-wins position rule, same as insert); new keys

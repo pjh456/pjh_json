@@ -177,7 +177,7 @@ namespace pjh::json
         /// @note Grammar only: the token is accepted regardless of magnitude
         ///       (RFC 8259 §6 lets implementations bound the range). The
         ///       runtime parser is stricter — numbers out of double range are
-        ///       a positioned ParseError (task 61).
+        ///       a positioned ParseError.
         /// @return true if a valid JSON number was consumed.
         consteval bool validate_number(const char *&p, const char *e)
         {

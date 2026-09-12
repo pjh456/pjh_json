@@ -86,7 +86,7 @@ namespace pjh::json
          *        failure (callers discard it)
          * @return true on success; false when the first failure was recorded
          *         in error()
-         * @throws std::bad_alloc only (non-recoverable; plan 79 §3.2)
+         * @throws std::bad_alloc only (non-recoverable)
          * @note Input must be padded (m_assume_padded must be true).
          */
         [[nodiscard]] bool parse(Json &out);
@@ -277,7 +277,7 @@ namespace pjh::json
          *       (`Infinityx`, `NaNx`) is left for the structural/trailing
          *       checks and rejected there.
          * @note Hex magnitudes beyond int64 fall to double, matching the
-         *       RFC decimal policy (task 06/61); a hex magnitude outside the
+         *       RFC decimal policy; a hex magnitude outside the
          *       finite-double range is NumberOutOfRange.
          */
         [[nodiscard]] bool parse_number_json5(Json &out);

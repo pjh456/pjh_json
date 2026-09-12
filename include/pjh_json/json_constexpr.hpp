@@ -429,7 +429,7 @@ namespace pjh::json
             /// @throws ParseError if the source is grammatically valid but its
             ///         runtime parse still fails: a number out of double range
             ///         (magnitude outside the finite-double range; RFC 8259 §6
-            ///         range limit, task 61), or a runtime Config knob
+            ///         range limit), or a runtime Config knob
             ///         (strip_bom / strict_utf8) not modelled at compile time.
             Document to_document() const { return parse_copy(source); }
 
@@ -455,7 +455,7 @@ namespace pjh::json
         /// cannot reach consteval (std::atomic is not constexpr); this path
         /// stays BOM-strict by construction.
         /// @note The compile-time validator is escape-strict (surrogate
-        /// pairs, task 07) but raw-byte-lenient: bytes >= 0x20 inside
+        /// pairs) but raw-byte-lenient: bytes >= 0x20 inside
         /// strings pass. The runtime strict_utf8 knob cannot reach
         ///       consteval (std::atomic is not constexpr); this divergence is
         ///       by design and pinned in tests/literal_test.cpp.

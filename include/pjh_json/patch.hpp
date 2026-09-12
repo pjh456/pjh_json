@@ -49,7 +49,7 @@ namespace pjh::json
      *         stays untouched because the patch runs on a shadow copy)
      * @note Atomic: on any failure (including bad_alloc) target is unchanged.
      *       Implemented by cloning target into res, applying to the clone,
-     *       then noexcept move-assigning back (see plan 36 §2.4).
+     *       then noexcept move-assigning back.
      * @note Cost is O(size(target)) for the atomically safe shadow copy.
      * @note Pass doc.resource() when target is inside a Document so the new
      *       nodes stay in the document arena.
