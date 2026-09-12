@@ -163,6 +163,11 @@ The library injects no optimization or ISA flags of its own — pick the level w
 standard `-DCMAKE_BUILD_TYPE=Release` (or `Debug`). `-march=native` is deliberately not
 used (non-portable artifacts); pass your own `CMAKE_CXX_FLAGS` if you want it locally.
 
+> Only public headers are installed: `<prefix>/include/pjh_json.hpp` and
+> `<prefix>/include/pjh_json/**`, minus the internal `pjh_json/detail/`.
+> `kPaddingWidth` lives in `pjh_json/document.hpp`; the former `literal.hpp` /
+> `utils.hpp` are implementation details and are not part of the package.
+
 ## Benchmark
 
 Google Benchmark, 2026-07-10, Windows x64, MinGW GCC 15.2, `-O3 -march=native -ffast-math -flto`. Time in nanoseconds, lower is better.

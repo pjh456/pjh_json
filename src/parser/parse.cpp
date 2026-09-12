@@ -1,5 +1,6 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/document.hpp"
+#include "pjh_json/detail/utils.hpp"
 #include <fstream>
 #include <istream>
 #include <cstring>

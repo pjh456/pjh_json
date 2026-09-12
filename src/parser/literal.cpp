@@ -1,5 +1,7 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
+#include "pjh_json/detail/literal.hpp"
+#include "pjh_json/detail/utils.hpp"
 #include <cstring>
 
 namespace pjh::json

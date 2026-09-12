@@ -121,7 +121,13 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     install(EXPORT pjh_jsonTargets
         FILE pjh_jsonTargets.cmake
         DESTINATION ${pjh_json_INSTALL_CMAKEDIR})
-    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    # Public headers only: pjh_json/detail/ holds internal headers reachable in
+    # the build tree (src/ and tests/ include them) but NOT installed. Keep new
+    # internal headers under include/pjh_json/detail/ - the exclude below is the
+    # single enforcement point.
+    install(DIRECTORY include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        PATTERN "detail" EXCLUDE)
     install(DIRECTORY thirdparty/xsimd/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
     install(DIRECTORY thirdparty/pjh_result/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 

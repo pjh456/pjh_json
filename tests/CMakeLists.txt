@@ -17,6 +17,7 @@ set(PJH_JSON_TEST_SOURCES
     json_types.cpp
     json_writer.cpp
     literal_test.cpp
+    public_header_boundary.cpp
     read_file.cpp
     std_interop.cpp
     umbrella_isolation.cpp

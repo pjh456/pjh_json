@@ -4,7 +4,8 @@
 #include "pjh_json/json_constexpr.hpp"
 #include "pjh_json/document.hpp"
 #include "pjh_json/writer.hpp"
-#include "pjh_json/utils.hpp"
+#include "pjh_json/detail/literal.hpp"
+#include "pjh_json/detail/utils.hpp"
 
 #include <cstring>
 #include <stdexcept>

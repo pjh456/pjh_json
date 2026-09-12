@@ -18,11 +18,75 @@
 #include "array.hpp"
 #include "object.hpp"
 #include "config.hpp"
+#include "error.hpp"
 #include "string.hpp"
-#include "utils.hpp"
 
 namespace pjh::json
 {
+
+#ifdef NDEBUG
+#define PJH_JSON_NOEXCEPT noexcept
+
+    template <typename T>
+    constexpr void debug_check_type(T, T, const char *) noexcept
+    {
+    }
+
+    template <typename T>
+    constexpr void debug_check_type2(T, T, T, const char *) noexcept
+    {
+    }
+
+#else
+#define PJH_JSON_NOEXCEPT
+
+    template <typename T>
+    inline void debug_check_type(T actual, T expected, const char *name)
+    {
+        if (actual != expected)
+            throw TypeError(
+                std::string("type mismatch in as_") + name + "()");
+    }
+
+    template <typename T>
+    inline void debug_check_type2(T actual, T a, T b, const char *name)
+    {
+        if (actual != a && actual != b)
+            throw TypeError(
+                std::string("type mismatch in as_") + name + "()");
+    }
+
+#endif
+
+    /**
+     * @brief Both-modes type guard for the as_*_strict family
+     *
+     * Gateless twin of debug_check_type: throws TypeError in debug AND
+     * release (as_*'s check compiles away under NDEBUG — a mismatched
+     * call there reads an inactive union member, the UB class the
+     * _strict family closes). Message keeps the house format
+     * "type mismatch in as_<name>()"; the name argument carries the
+     * "_strict" suffix so the message names the calling function.
+     */
+    template <typename T>
+    inline void check_type_strict(T actual, T expected, const char *name)
+    {
+        if (actual != expected)
+            throw TypeError(
+                std::string("type mismatch in as_") + name + "()");
+    }
+
+    /**
+     * @brief Both-modes two-tag variant (the string twins accept
+     *        StringView and StringOwned)
+     */
+    template <typename T>
+    inline void check_type_strict2(T actual, T a, T b, const char *name)
+    {
+        if (actual != a && actual != b)
+            throw TypeError(
+                std::string("type mismatch in as_") + name + "()");
+    }
 
     // Forward declarations for the range-for iterator types. Defined after
     // class Json (their variant alternatives need the complete Json type).

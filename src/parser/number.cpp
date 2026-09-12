@@ -1,5 +1,6 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
+#include "pjh_json/detail/utils.hpp"
 #include <charconv>
 #include <limits>
 

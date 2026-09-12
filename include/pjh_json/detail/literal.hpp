@@ -1,5 +1,5 @@
-#ifndef INCLUDE_PJH_JSON_LITERAL_HPP
-#define INCLUDE_PJH_JSON_LITERAL_HPP
+#ifndef INCLUDE_PJH_JSON_DETAIL_LITERAL_HPP
+#define INCLUDE_PJH_JSON_DETAIL_LITERAL_HPP
 
 #include <array>
 #include <bit>
@@ -20,4 +20,4 @@ namespace pjh::json
 
 } // namespace pjh::json
 
-#endif
+#endif // INCLUDE_PJH_JSON_DETAIL_LITERAL_HPP

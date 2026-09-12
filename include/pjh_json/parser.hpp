@@ -93,10 +93,7 @@ namespace pjh::json
          * @throws ParseError on non-hex digit
          * @note Called from unicode escape handling during string parsing.
          */
-        [[nodiscard]] uint32_t parse_hex4()
-        {
-            return pjh::json::parse_hex4(m_curr, m_begin);
-        }
+        [[nodiscard]] uint32_t parse_hex4();
 
     private:
         /**

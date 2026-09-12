@@ -1,5 +1,6 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
+#include "pjh_json/detail/utils.hpp"
 #include <xsimd/xsimd.hpp>
 
 namespace pjh::json
@@ -58,6 +59,11 @@ namespace pjh::json
             }
             m_curr += batch_size;
         }
+    }
+
+    uint32_t Parser::parse_hex4()
+    {
+        return pjh::json::parse_hex4(m_curr, m_begin);
     }
 
     /*
