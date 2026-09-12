@@ -217,6 +217,40 @@ TEST_CASE("Parser: empty input null data") {
     REQUIRE(d.root().size() == 0);
 }
 
+TEST_CASE("Parser: unicode escape error offset") {
+    auto expect_hex = [](std::string_view input, size_t off) {
+        try {
+            (void)parse_copy(input);
+            REQUIRE(false);
+        } catch (const ParseError &e) {
+            REQUIRE(e.offset() == off);
+            REQUIRE(std::string(e.what()).find("Invalid hex digit in unicode escape")
+                    != std::string::npos);
+            REQUIRE(std::string(e.what()).find(" at offset " + std::to_string(off))
+                    != std::string::npos);
+        }
+    };
+
+    // Offending digit index (0 = opening quote):
+    expect_hex(R"("\uZZZZ")",       3); // first hex digit bad
+    expect_hex(R"("\uD8ZZ")",       5); // third hex digit bad
+    expect_hex(R"("\u12")",         5); // closing quote reached early
+    expect_hex(R"("\uD800\uZZZZ")", 9); // second unit's first digit bad
+
+    // Valid pair / valid escapes still parse (cursor semantics unchanged).
+    REQUIRE(parse_copy(R"("\uD83D\uDE00")").root().as_string()
+            == std::string_view("\xF0\x9F\x98\x80"));
+
+    // Surrogate semantic errors keep their established offsets (control,
+    // already pinned in "Parser: strict utf-8 rejects malformed bytes" == 7).
+    try {
+        (void)parse_copy(R"("\uD800")");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 7);
+    }
+}
+
 TEST_CASE("Parser: strict strings and escapes") {
     // Reference-side pins, dual to the consteval static_asserts in
     // tests/literal_test.cpp "ConstJson: parse strictness"

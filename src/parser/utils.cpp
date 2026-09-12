@@ -77,7 +77,9 @@ namespace pjh::json
             else if (c >= 'A' && c <= 'F')
                 code |= (c - 'A' + 10);
             else
-                throw_parse_error("Invalid hex digit in unicode escape", curr, begin);
+                // `curr` was advanced by *curr++ above; the offending digit is
+                // the previous byte. Report that position, not the one past it.
+                throw_parse_error("Invalid hex digit in unicode escape", curr - 1, begin);
         }
         return code;
     }
