@@ -1,6 +1,7 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
 #include "pjh_json/detail/utils.hpp"
+#include "pjh_json/grammar.hpp"
 #include <xsimd/xsimd.hpp>
 
 namespace pjh::json
@@ -22,6 +23,20 @@ namespace pjh::json
      */
     void Parser::skip_whitespace()
     {
+        // The SIMD loop below broadcasts the four RFC 8259 §2 whitespace
+        // bytes by hand; these pins keep the wide-mask set identical to the
+        // shared grammar rule (single source of truth).
+        static_assert(grammar::is_whitespace(0x20) &&
+                      grammar::is_whitespace(0x09) &&
+                      grammar::is_whitespace(0x0A) &&
+                      grammar::is_whitespace(0x0D),
+                      "SIMD whitespace set must match grammar::is_whitespace");
+        static_assert(!grammar::is_whitespace(0x00) &&
+                      !grammar::is_whitespace(0x0B) &&
+                      !grammar::is_whitespace(0x0C) &&
+                      !grammar::is_whitespace(0x1F),
+                      "non-whitespace controls must stay rejected");
+
         if (static_cast<uint8_t>(*m_curr) > 0x20)
             return;
 
@@ -75,17 +90,12 @@ namespace pjh::json
         for (int i = 0; i < 4; ++i)
         {
             char c = *curr++;
-            code <<= 4;
-            if (c >= '0' && c <= '9')
-                code |= (c - '0');
-            else if (c >= 'a' && c <= 'f')
-                code |= (c - 'a' + 10);
-            else if (c >= 'A' && c <= 'F')
-                code |= (c - 'A' + 10);
-            else
+            int v = grammar::hex_value(c);
+            if (v < 0)
                 // `curr` was advanced by *curr++ above; the offending digit is
                 // the previous byte. Report that position, not the one past it.
                 throw_parse_error("Invalid hex digit in unicode escape", curr - 1, begin);
+            code = (code << 4) | static_cast<uint32_t>(v);
         }
         return code;
     }
@@ -139,61 +149,37 @@ namespace pjh::json
     void handle_escape(char *&dst, const char *&m_curr, const char *m_begin)
     {
         ++m_curr;
-        switch (*m_curr)
+        char decoded = grammar::short_escape_value(*m_curr);
+        if (decoded != '\0')
         {
-        case '"':
-            *dst++ = '"';
-            break;
-        case '\\':
-            *dst++ = '\\';
-            break;
-        case '/':
-            *dst++ = '/';
-            break;
-        case 'b':
-            *dst++ = '\b';
-            break;
-        case 'f':
-            *dst++ = '\f';
-            break;
-        case 'n':
-            *dst++ = '\n';
-            break;
-        case 'r':
-            *dst++ = '\r';
-            break;
-        case 't':
-            *dst++ = '\t';
-            break;
-        case 'u':
-        {
+            *dst++ = decoded;
             ++m_curr;
-            uint32_t cp = parse_hex4(m_curr, m_begin);
-
-            // High surrogate (U+D800-U+DBFF): expect a low surrogate pair
-            if (cp >= 0xD800 && cp <= 0xDBFF)
-            {
-                if (m_curr[0] == '\\' && m_curr[1] == 'u')
-                {
-                    m_curr += 2;
-                    uint32_t cp2 = parse_hex4(m_curr, m_begin);
-                    if (cp2 >= 0xDC00 && cp2 <= 0xDFFF)
-                        cp = 0x10000 + (((cp - 0xD800) << 10) | (cp2 - 0xDC00));
-                    else
-                        throw_parse_error("Invalid surrogate pair", m_curr, m_begin);
-                }
-                else
-                    throw_parse_error("Expected low surrogate", m_curr, m_begin);
-            }
-            // Lone low surrogate (U+DC00-U+DFFF) not allowed by RFC 8259 §7
-            else if (cp >= 0xDC00 && cp <= 0xDFFF)
-                throw_parse_error("Lone low surrogate, expected high surrogate first", m_curr, m_begin);
-            encode_utf8(cp, dst);
             return;
         }
-        default:
+        if (*m_curr != 'u')
             throw_parse_error("Invalid escape character", m_curr, m_begin);
-        }
+
         ++m_curr;
+        uint32_t cp = parse_hex4(m_curr, m_begin);
+
+        // High surrogate (U+D800-U+DBFF): expect a low surrogate pair
+        if (grammar::is_high_surrogate(cp))
+        {
+            if (m_curr[0] == '\\' && m_curr[1] == 'u')
+            {
+                m_curr += 2;
+                uint32_t cp2 = parse_hex4(m_curr, m_begin);
+                if (grammar::is_low_surrogate(cp2))
+                    cp = 0x10000 + (((cp - 0xD800) << 10) | (cp2 - 0xDC00));
+                else
+                    throw_parse_error("Invalid surrogate pair", m_curr, m_begin);
+            }
+            else
+                throw_parse_error("Expected low surrogate", m_curr, m_begin);
+        }
+        // Lone low surrogate (U+DC00-U+DFFF) not allowed by RFC 8259 §7
+        else if (grammar::is_low_surrogate(cp))
+            throw_parse_error("Lone low surrogate, expected high surrogate first", m_curr, m_begin);
+        encode_utf8(cp, dst);
     }
 }

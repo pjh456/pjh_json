@@ -404,8 +404,12 @@ namespace pjh::json
         /// @note The compile-time validator is escape-strict (surrogate
         /// pairs, task 07) but raw-byte-lenient: bytes >= 0x20 inside
         /// strings pass. The runtime strict_utf8 knob cannot reach
-        /// consteval (std::atomic is not constexpr); this divergence is
-        /// by design and pinned in tests/literal_test.cpp.
+        ///       consteval (std::atomic is not constexpr); this divergence is
+        ///       by design and pinned in tests/literal_test.cpp.
+        /// @note The compile-time verdict and the runtime parse are held to a
+        ///       strict equivalence (modulo the documented divergences above)
+        ///       by tests/differential_validation.cpp, which feeds one corpus
+        ///       table to both paths.
         /// @param json The JSON string to validate.
         /// @return A ParseResult containing the source and validity flag.
         static consteval ParseResult parse(std::string_view json)

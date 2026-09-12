@@ -1,6 +1,7 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/document.hpp"
 #include "pjh_json/detail/utils.hpp"
+#include "pjh_json/grammar.hpp"
 #include <fstream>
 #include <istream>
 #include <cstring>
@@ -256,16 +257,17 @@ namespace pjh::json
             if (len > 0 && base[i + len - 1] == '\r')
                 --len;
 
-            // Skip blank/whitespace-only lines. The set must match
-            // Parser::skip_whitespace (RFC 8259: space, tab, CR, LF;
-            // LF cannot occur inside a line). A non-blank line therefore
-            // always contains a byte the parser rejects in-line, so the
-            // SIMD skip can never hop past this line into the next one.
+            // Skip blank/whitespace-only lines. The set delegates to
+            // grammar::is_whitespace (RFC 8259: space, tab, CR, LF; LF
+            // cannot occur inside a line, so including it is a no-op here).
+            // A non-blank line therefore always contains a byte the parser
+            // rejects in-line, so the SIMD skip can never hop past this line
+            // into the next one.
             bool blank = true;
             for (size_t k = 0; k < len; ++k)
             {
                 char c = base[i + k];
-                if (c != ' ' && c != '\t' && c != '\r')
+                if (!grammar::is_whitespace(static_cast<unsigned char>(c)))
                 {
                     blank = false;
                     break;

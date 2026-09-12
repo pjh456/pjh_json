@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include "grammar.hpp"
+
 namespace pjh::json
 {
 
@@ -27,7 +29,7 @@ namespace pjh::json
         /// @param e Pointer to the end of the input buffer.
         consteval void skip_whitespace(const char *&p, const char *e)
         {
-            while (p < e && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
+            while (p < e && grammar::is_whitespace(static_cast<unsigned char>(*p)))
                 ++p;
         }
 
@@ -42,13 +44,7 @@ namespace pjh::json
             const char *&p, const char *e,
             const char *lit, size_t len)
         {
-            if (static_cast<size_t>(e - p) < len)
-                return false;
-            for (size_t i = 0; i < len; ++i)
-                if (p[i] != lit[i])
-                    return false;
-            p += len;
-            return true;
+            return grammar::match_literal(p, e, std::string_view(lit, len));
         }
 
         /// @brief Skip a consecutive run of ASCII decimal digits ('0'–'9').
@@ -65,30 +61,18 @@ namespace pjh::json
         ///        (src/parser/utils.cpp).
         consteval bool is_short_escape(char c)
         {
-            return c == '"' || c == '\\' || c == '/' || c == 'b' ||
-                   c == 'f' || c == 'n' || c == 'r' || c == 't';
+            return grammar::is_short_escape(c);
         }
 
         /// @brief Decode one hex digit (0-9, a-f, A-F) into v.
         /// @return true if c is a hex digit; v unchanged otherwise.
         consteval bool hex_digit(char c, uint32_t &v)
         {
-            if (c >= '0' && c <= '9')
-            {
-                v = static_cast<uint32_t>(c - '0');
-                return true;
-            }
-            if (c >= 'a' && c <= 'f')
-            {
-                v = static_cast<uint32_t>(c - 'a' + 10);
-                return true;
-            }
-            if (c >= 'A' && c <= 'F')
-            {
-                v = static_cast<uint32_t>(c - 'A' + 10);
-                return true;
-            }
-            return false;
+            int d = grammar::hex_value(c);
+            if (d < 0)
+                return false;
+            v = static_cast<uint32_t>(d);
+            return true;
         }
 
         /// @brief Scan exactly 4 hex digits at p into cp.
@@ -150,7 +134,7 @@ namespace pjh::json
                         uint32_t cp = 0;
                         if (!scan_hex4(q, e, cp))
                             return false;
-                        if (cp >= 0xD800 && cp <= 0xDBFF)
+                        if (grammar::is_high_surrogate(cp))
                         {
                             // high surrogate: must be followed by \uLLLL
                             // (q now points just past the high surrogate's
@@ -161,10 +145,10 @@ namespace pjh::json
                             uint32_t cp2 = 0;
                             if (!scan_hex4(q, e, cp2))
                                 return false;
-                            if (cp2 < 0xDC00 || cp2 > 0xDFFF)
+                            if (!grammar::is_low_surrogate(cp2))
                                 return false;
                         }
-                        else if (cp >= 0xDC00 && cp <= 0xDFFF)
+                        else if (grammar::is_low_surrogate(cp))
                             return false; // lone low surrogate (RFC 8259 §7)
                         p = q;
                     }
@@ -197,35 +181,8 @@ namespace pjh::json
         /// @return true if a valid JSON number was consumed.
         consteval bool validate_number(const char *&p, const char *e)
         {
-            if (p < e && *p == '-')
-                ++p; // optional minus
-            if (p >= e || *p < '0' || *p > '9')
-                return false;
-            const char *int_start = p;
-            skip_digits(p, e); // integer part
-            if (p - int_start > 1 && *int_start == '0')
-                return false; // leading zeros (RFC 8259 §8.4; mirrors src/parser/number.cpp)
-
-            // fractional part: .digits
-            if (p < e && *p == '.')
-            {
-                ++p;
-                if (p >= e || *p < '0' || *p > '9')
-                    return false;
-                skip_digits(p, e);
-            }
-
-            // exponent part: e[+/-]digits
-            if (p < e && (*p == 'e' || *p == 'E'))
-            {
-                ++p;
-                if (p < e && (*p == '-' || *p == '+'))
-                    ++p; // optional sign
-                if (p >= e || *p < '0' || *p > '9')
-                    return false;
-                skip_digits(p, e);
-            }
-            return true;
+            grammar::number_scan scan;
+            return grammar::scan_number(p, e, scan) == grammar::number_error::ok;
         }
 
         /// @brief Validate any JSON value.

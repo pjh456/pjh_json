@@ -11,6 +11,7 @@ set(PJH_JSON_TEST_SOURCES
     access_result.cpp
     config_document.cpp
     constexpr_json_test.cpp
+    differential_validation.cpp
     doc_examples.cpp
     json_constexpr_isolation.cpp
     json_fwd_isolation.cpp

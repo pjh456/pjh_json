@@ -1,6 +1,7 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
 #include "pjh_json/detail/utils.hpp"
+#include "pjh_json/grammar.hpp"
 #include <charconv>
 #include <limits>
 
@@ -61,61 +62,32 @@ namespace pjh::json
     Json Parser::parse_number()
     {
         const char *start = m_curr;
-        bool is_negative = false;
 
-        // Optional sign
-        if (*m_curr == '-')
+        // Grammar scan (shared with the compile-time validator, grammar.hpp).
+        // The error anchors reproduce the pre-dedup cursors byte for byte.
+        grammar::number_scan scan;
+        switch (grammar::scan_number(m_curr, m_end, scan))
         {
-            is_negative = true;
-            ++m_curr;
-        }
-
-        // Integer part
-        const char *int_start = m_curr;
-        uint32_t digits = 0;
-
-        while (*m_curr >= '0' && *m_curr <= '9')
-        {
-            ++m_curr;
-            ++digits;
-        }
-
-        if (digits == 0)
+        case grammar::number_error::ok:
+            break;
+        case grammar::number_error::no_int_digits:
+            // cursor at the first non-digit (== after '-' when signed)
             throw_parse_error("Invalid number: no digits after '-'", m_curr, m_begin);
-        if (digits > 1 && *int_start == '0')
+        case grammar::number_error::leading_zero:
+            // cursor past the integer run, exactly as before
             throw_parse_error("Invalid number: leading zeros are not allowed", m_curr, m_begin);
+        case grammar::number_error::no_frac_digits:
+            // cursor right after '.', exactly as before
+            throw_parse_error("Invalid number: no digits after decimal point", m_curr, m_begin);
+        case grammar::number_error::no_exp_digits:
+            // cursor right after the optional exponent sign, exactly as before
+            throw_parse_error("Invalid number: no digits in exponent", m_curr, m_begin);
+        }
 
-        // Fractional part
-        bool is_float = false;
-        if (*m_curr == '.')
-        {
-            is_float = true;
-            ++m_curr;
-            uint32_t frac = 0;
-            while (*m_curr >= '0' && *m_curr <= '9')
-            {
-                ++m_curr;
-                ++frac;
-            }
-            if (frac == 0)
-                throw_parse_error("Invalid number: no digits after decimal point", m_curr, m_begin);
-        }
-        // Exponent part
-        if (*m_curr == 'e' || *m_curr == 'E')
-        {
-            is_float = true;
-            ++m_curr;
-            if (*m_curr == '+' || *m_curr == '-')
-                ++m_curr;
-            uint32_t exp = 0;
-            while (*m_curr >= '0' && *m_curr <= '9')
-            {
-                ++m_curr;
-                ++exp;
-            }
-            if (exp == 0)
-                throw_parse_error("Invalid number: no digits in exponent", m_curr, m_begin);
-        }
+        const bool is_negative = scan.negative;
+        const char *const int_start = scan.int_start;
+        const uint32_t digits = static_cast<uint32_t>(scan.int_digits);
+        const bool is_float = scan.is_float;
 
         // Pure integer token: int64 when the magnitude fits, else double
         if (!is_float)
