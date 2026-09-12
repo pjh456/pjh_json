@@ -76,14 +76,14 @@ namespace pjh::json
                 }
                 if (b == 0xE0)
                 {
-                    need = 1; c1lo = 0xA0; c1hi = 0xBF;
+                    need = 2; c1lo = 0xA0; c1hi = 0xBF; // 3-byte lead: two continuation slots
                     m_fail = "Overlong UTF-8 sequence in string";
                     lead = pos;
                     return;
                 }
                 if (b == 0xED)
                 {
-                    need = 1; c1lo = 0x80; c1hi = 0x9F;
+                    need = 2; c1lo = 0x80; c1hi = 0x9F; // 3-byte lead: two continuation slots
                     m_fail = "UTF-8 surrogate codepoint in string";
                     lead = pos;
                     return;

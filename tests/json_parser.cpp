@@ -832,10 +832,40 @@ TEST_CASE("Parser: strict utf-8 rejects malformed bytes") {
     expect_off("\"a\xE0\"", 2, "Truncated UTF-8 sequence in string");
     expect_off("\"a\xE0\xC0\"", 3, "Invalid UTF-8 continuation byte in string"); // lead in a slot
 
+    // 24.1: the two constrained 3-byte leads 0xE0/0xED are lead + TWO
+    // continuations. The old need=1 cleared the state after the first
+    // slot, so a sequence cut one byte short was accepted as complete;
+    // the corrected need=2 leaves it dangling and end() reports
+    // truncation at the sequence lead (offset 2, same as "a\xE0" above).
+    expect_off("\"a\xE0\xA0\"", 2, "Truncated UTF-8 sequence in string");
+    expect_off("\"a\xED\x80\"", 2, "Truncated UTF-8 sequence in string");
+
     // Legal multibyte control group (strict ON must pass): the
     // signed-char trap's executable counter-evidence
     auto vd = parse_copy("\"" + valid_utf8() + "\"");
     REQUIRE(vd.root().as_string() == std::string_view(valid_utf8()));
+
+    // 24.1: completed 3-byte sequences for the constrained leads must
+    // pass with the corrected count — valid U+0800–U+0FFF (E0) and
+    // U+D000–U+D7FF (ED), both edges. E1/EE are mid-range controls for
+    // the already-correct unconstrained 3-byte branch.
+    auto cp_0800 = parse_copy("\"\xE0\xA0\x80\""); // U+0800 (E0 lower edge)
+    REQUIRE(cp_0800.root().as_string() == std::string_view("\xE0\xA0\x80", 3));
+    auto cp_0fff = parse_copy("\"\xE0\xBF\xBF\""); // U+0FFF (E0 upper edge)
+    REQUIRE(cp_0fff.root().as_string() == std::string_view("\xE0\xBF\xBF", 3));
+    auto cp_d000 = parse_copy("\"\xED\x80\x80\""); // U+D000 (ED lower edge)
+    REQUIRE(cp_d000.root().as_string() == std::string_view("\xED\x80\x80", 3));
+    auto cp_d7ff = parse_copy("\"\xED\x9F\xBF\""); // U+D7FF (ED upper edge)
+    REQUIRE(cp_d7ff.root().as_string() == std::string_view("\xED\x9F\xBF", 3));
+    auto cp_1000 = parse_copy("\"\xE1\x80\x80\""); // U+1000 (E1 mid-range control)
+    REQUIRE(cp_1000.root().as_string() == std::string_view("\xE1\x80\x80", 3));
+    auto cp_e000 = parse_copy("\"\xEE\x80\x80\""); // U+E000 (EE mid-range control)
+    REQUIRE(cp_e000.root().as_string() == std::string_view("\xEE\x80\x80", 3));
+
+    // Same rule core on the Phase-2 stream path (the escape forces the
+    // in-situ decode): valid E0 3-byte + \n must pass.
+    auto p2 = parse_copy("\"\xE0\xA0\x80\\n\"");
+    REQUIRE(p2.root().as_string() == std::string_view("\xE0\xA0\x80\n", 4));
 
     // Escape face: already strict before this task; the knob neither
     // adds nor removes anything there (only type + offset pinned)
