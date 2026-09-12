@@ -98,13 +98,16 @@ dump_file("out.json", doc.root());
 
 `Config::instance().set_json5(true)` (default `false`) lets the runtime parser
 accept a JSON5 1.0.0 subset: `//` and `/* */` comments, one trailing comma per
-array/object, single-quoted strings, ASCII unquoted identifier keys, and the
-JSON5 ASCII whitespace bytes VT/FF. This first cut does **not** cover JSON5
-numbers (hex, leading `+`, leading/trailing `.`), `Infinity`/`NaN`, JSON5-only
-string escapes/line continuations, or Unicode identifiers/whitespace; those are
-separate follow-ups. `dump()` is always RFC 8259, so JSON5 input is normalized
-on output (comments dropped, quotes/unquoted keys rewritten, trailing commas
-removed). The compile-time `ConstJson::parse()` path stays RFC-only.
+array/object, single-quoted strings, ASCII unquoted identifier keys, the JSON5
+ASCII whitespace bytes VT/FF, and the JSON5 number spellings (hex `0x`/`0X`,
+leading `+`, leading/trailing decimal point). This cut does **not** cover
+`Infinity`/`NaN`, JSON5-only string escapes/line continuations, or Unicode
+identifiers/whitespace; those are separate follow-ups. Numbers beyond int64
+fall to a double exactly as on the RFC path, and a magnitude outside the
+finite-double range is still rejected. `dump()` is always RFC 8259, so JSON5
+input is normalized on output (comments dropped, quotes/unquoted keys
+rewritten, trailing commas removed). The compile-time `ConstJson::parse()`
+path stays RFC-only.
 
 ### Compile-time JSON construction
 

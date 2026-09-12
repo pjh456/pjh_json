@@ -212,6 +212,102 @@ namespace pjh::json
             return is_identifier_start(c) || (c >= '0' && c <= '9');
         }
 
+        // ---- JSON5 1.0.0 §6 number grammar (task 40.2) --------------------
+        // A JSON5-specific scanner alongside the RFC scan_number above; the
+        // RFC function is byte-for-byte untouched and stays the only rule
+        // consumed on the default path. This one adds the JSON5 spellings:
+        // a leading '+' sign, hexadecimal integers (0x/0X), and the ES5.1
+        // decimal forms with an omitted integer part (`.5`) or an omitted
+        // fraction part (`5.`, `5.e3`). It reuses the same `number_error`
+        // vocabulary (no new ErrorCode) and `has_leading_zero` so the two
+        // scanners cannot disagree on the shared leading-zero rule.
+        // `Infinity`/`NaN` are NOT handled here (deferred to task 40.4).
+        struct number_scan_json5
+        {
+            const char *int_start = nullptr; ///< first digit (decimal or hex)
+            std::size_t int_digits = 0;      ///< digits in that run
+            bool negative = false;           ///< leading '-' present
+            bool explicit_plus = false;      ///< leading '+' present
+            bool is_float = false;           ///< '.' or exponent present
+            bool is_hex = false;             ///< `0x`/`0X` hexadecimal integer
+        };
+
+        /// @brief Scan one JSON5 number's grammar. On success advances p past
+        ///        the token and fills out; on failure p is left at the error
+        ///        anchor (same convention as scan_number).
+        /// @note Hex has no fraction/exponent: after a valid `0x` digit run
+        ///       the token ends, matching the ES5.1 HexIntegerLiteral rule.
+        constexpr number_error scan_number_json5(const char *&p, const char *e, number_scan_json5 &out) noexcept
+        {
+            out = number_scan_json5{};
+
+            if (p < e && (*p == '+' || *p == '-'))
+            {
+                out.negative = (*p == '-');
+                out.explicit_plus = (*p == '+');
+                ++p;
+            }
+
+            // HexIntegerLiteral: 0x/0X then one or more hex digits.
+            if (p + 1 < e && p[0] == '0' && (p[1] == 'x' || p[1] == 'X'))
+            {
+                out.is_hex = true;
+                p += 2;
+                out.int_start = p;
+                while (p < e && hex_value(*p) >= 0)
+                    ++p;
+                out.int_digits = static_cast<std::size_t>(p - out.int_start);
+                if (out.int_digits == 0)
+                    return number_error::no_int_digits;
+                return number_error::ok;
+            }
+
+            // DecimalLiteral, allowing the ES5.1 optional-digit fraction:
+            //   .5   5.   5.e3   .5e3
+            if (p < e && *p == '.')
+            {
+                out.is_float = true;
+                ++p;
+                if (p >= e || *p < '0' || *p > '9')
+                    return number_error::no_frac_digits;
+                out.int_start = p;
+                while (p < e && *p >= '0' && *p <= '9')
+                    ++p;
+                out.int_digits = static_cast<std::size_t>(p - out.int_start);
+            }
+            else
+            {
+                if (p >= e || *p < '0' || *p > '9')
+                    return number_error::no_int_digits;
+                out.int_start = p;
+                while (p < e && *p >= '0' && *p <= '9')
+                    ++p;
+                out.int_digits = static_cast<std::size_t>(p - out.int_start);
+                if (has_leading_zero(out.int_start, out.int_digits))
+                    return number_error::leading_zero;
+                if (p < e && *p == '.')
+                {
+                    out.is_float = true;
+                    ++p;
+                    while (p < e && *p >= '0' && *p <= '9')
+                        ++p;
+                }
+            }
+
+            if (p < e && (*p == 'e' || *p == 'E'))
+            {
+                out.is_float = true;
+                ++p;
+                if (p < e && (*p == '+' || *p == '-'))
+                    ++p;
+                if (p >= e || *p < '0' || *p > '9')
+                    return number_error::no_exp_digits;
+                while (p < e && *p >= '0' && *p <= '9')
+                    ++p;
+            }
+            return number_error::ok;
+        }
+
     } // namespace grammar
 
 } // namespace pjh::json

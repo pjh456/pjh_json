@@ -238,6 +238,18 @@ namespace pjh::json
          */
         [[nodiscard]] bool parse_number(Json &out);
         /**
+         * @brief Parse a JSON5 number (hex / leading '+' / omitted dot side)
+         * @return false on failure (recorded in m_error)
+         * @note Only reachable when the ctor captured Config::json5();
+         *       parse_number() dispatches to it at its head. Reuses the RFC
+         *       error vocabulary (no new ErrorCode). `Infinity`/`NaN` are
+         *       deferred to task 40.4 and still fail here.
+         * @note Hex magnitudes beyond int64 fall to double, matching the
+         *       RFC decimal policy (task 06/61); a hex magnitude outside the
+         *       finite-double range is NumberOutOfRange.
+         */
+        [[nodiscard]] bool parse_number_json5(Json &out);
+        /**
          * @brief Parse literal (true/false/null) into @p out
          * @return false on failure (recorded in m_error)
          */

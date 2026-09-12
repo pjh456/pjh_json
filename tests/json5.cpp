@@ -1,6 +1,7 @@
 #include <doctest/doctest.h>
 
 #include <cstdint>
+#include <limits>
 #include <ostream> // doctest stringification on MSVC needs a complete ostream
 #include <string>
 #include <string_view>
@@ -258,6 +259,197 @@ TEST_CASE("Json5: JSON5 input dumps as RFC 8259")
 
     auto doc = parse_copy("{a:'x', b:[1,2,], /*c*/ c:'y',}");
     REQUIRE(sv(dump(doc)) == R"({"a":"x","b":[1,2],"c":"y"})");
+}
+
+TEST_CASE("Json5: hexadecimal numbers")
+{
+    Json5ConfigGuard guard;
+    Config::instance().set_json5(true);
+
+    auto d1 = parse_copy("0xdecaf");
+    REQUIRE(d1.root().is_int());
+    REQUIRE(d1.root().as_int() == (int64_t)912559);
+
+    auto d2 = parse_copy("0X10");
+    REQUIRE(d2.root().is_int());
+    REQUIRE(d2.root().as_int() == (int64_t)16);
+
+    auto d3 = parse_copy("-0xC0FFEE");
+    REQUIRE(d3.root().is_int());
+    REQUIRE(d3.root().as_int() == (int64_t)-12648430);
+
+    auto d4 = parse_copy("+0x1F");
+    REQUIRE(d4.root().is_int());
+    REQUIRE(d4.root().as_int() == (int64_t)31);
+
+    // Leading zeros are insignificant: `0x0001` is an int with one
+    // significant digit, not a 64-bit overflow.
+    auto d5 = parse_copy("0x0000000000000000001");
+    REQUIRE(d5.root().is_int());
+    REQUIRE(d5.root().as_int() == (int64_t)1);
+
+    // int64 boundaries stay exact.
+    auto m1 = parse_copy("0x7FFFFFFFFFFFFFFF");
+    REQUIRE(m1.root().is_int());
+    REQUIRE(m1.root().as_int() == std::numeric_limits<int64_t>::max());
+    auto m2 = parse_copy("-0x8000000000000000");
+    REQUIRE(m2.root().is_int());
+    REQUIRE(m2.root().as_int() == std::numeric_limits<int64_t>::min());
+
+    // Beyond int64 -> double, same policy as the RFC decimal path.
+    auto f1 = parse_copy("0x8000000000000000");
+    REQUIRE(f1.root().is_float());
+    REQUIRE(f1.root().as_float() == 9223372036854775808.0);
+    auto f2 = parse_copy("0xFFFFFFFFFFFFFFFF");
+    REQUIRE(f2.root().is_float());
+    REQUIRE(f2.root().as_float() == 18446744073709551616.0);
+    auto f3 = parse_copy("-0x8000000000000001");
+    REQUIRE(f3.root().is_float());
+    REQUIRE(f3.root().as_float() == -9223372036854775808.0);
+
+    // Hex has no fraction or exponent part: the gap is an error.
+    CHECK_THROWS_AS((void)parse_copy("0x1.5"), ParseError);
+}
+
+TEST_CASE("Json5: leading plus and decimal point variants")
+{
+    Json5ConfigGuard guard;
+    Config::instance().set_json5(true);
+
+    auto p1 = parse_copy("+1");
+    REQUIRE(p1.root().is_int());
+    REQUIRE(p1.root().as_int() == (int64_t)1);
+
+    auto p2 = parse_copy("+0.5");
+    REQUIRE(p2.root().is_float());
+    REQUIRE(p2.root().as_float() == 0.5);
+
+    auto l1 = parse_copy(".5");
+    REQUIRE(l1.root().is_float());
+    REQUIRE(l1.root().as_float() == 0.5);
+
+    auto l2 = parse_copy("-.5");
+    REQUIRE(l2.root().is_float());
+    REQUIRE(l2.root().as_float() == -0.5);
+
+    auto l3 = parse_copy("+.5");
+    REQUIRE(l3.root().is_float());
+    REQUIRE(l3.root().as_float() == 0.5);
+
+    auto t1 = parse_copy("5.");
+    REQUIRE(t1.root().is_float());
+    REQUIRE(t1.root().as_float() == 5.0);
+
+    auto t2 = parse_copy("5.e3");
+    REQUIRE(t2.root().is_float());
+    REQUIRE(t2.root().as_float() == 5000.0);
+
+    auto t3 = parse_copy(".5e2");
+    REQUIRE(t3.root().is_float());
+    REQUIRE(t3.root().as_float() == 50.0);
+
+    auto t4 = parse_copy("0.");
+    REQUIRE(t4.root().is_float());
+    REQUIRE(t4.root().as_float() == 0.0);
+
+    // `+0` keeps the RFC int/double split (-0 is int 0); an explicit plus on
+    // a 19-digit boundary still forces the double fallback.
+    auto z = parse_copy("+0");
+    REQUIRE(z.root().is_int());
+    REQUIRE(z.root().as_int() == (int64_t)0);
+
+    auto big = parse_copy("+9223372036854775808");
+    REQUIRE(big.root().is_float());
+    REQUIRE(big.root().as_float() == 9223372036854775808.0);
+}
+
+TEST_CASE("Json5: number rejections and default isolation")
+{
+    Json5ConfigGuard guard;
+    Config &cfg = Config::instance();
+
+    // Default RFC mode must reject every JSON5 number spelling.
+    cfg.set_json5(false);
+    CHECK_THROWS_AS((void)parse_copy("0x1"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("+1"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy(".5"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("5."), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("[0x1]"), ParseError);
+
+    cfg.set_json5(true);
+
+    auto expect_err = [](std::string_view input, size_t off)
+    {
+        try
+        {
+            (void)parse_copy(input);
+            REQUIRE(false);
+        }
+        catch (const ParseError &e)
+        {
+            REQUIRE(e.category() == Category::Parse);
+            REQUIRE(e.offset() == off);
+        }
+    };
+
+    expect_err("0x", 2); // hex prefix with no digits
+    expect_err("+0x", 3);
+    expect_err(".", 1); // lone dot
+    expect_err("+", 1); // lone sign
+    expect_err("-", 1);
+    expect_err("+.", 2);
+    expect_err("1e", 2); // exponent with no digits
+    expect_err("1e+", 3);
+    expect_err(".e5", 1);
+    expect_err("01", 2); // leading zeros stay illegal in JSON5
+    expect_err("+01", 3);
+    expect_err("-00", 3);
+
+    // Hex beyond the finite-double range is a range error at token start.
+    try
+    {
+        std::string huge = "0x1";
+        huge.append(256, '0'); // 16^256 = 2^1024 > DBL_MAX
+        (void)parse_copy(huge);
+        REQUIRE(false);
+    }
+    catch (const ParseError &e)
+    {
+        REQUIRE(e.offset() == 0);
+        REQUIRE(std::string(e.what()).find("Number out of double range") != std::string::npos);
+    }
+}
+
+TEST_CASE("Json5: numbers in jsonl and RFC round-trip")
+{
+    Json5ConfigGuard guard;
+    Config &cfg = Config::instance();
+
+    cfg.set_json5(false);
+    CHECK_THROWS_AS((void)parse_jsonl("0x10\n.5\n"), ParseError);
+
+    cfg.set_json5(true);
+    auto jl = parse_jsonl("0x10\n.5\n+2\n5.\n");
+    REQUIRE(jl.root().size() == 4);
+    REQUIRE(jl.root()[0].as_int() == (int64_t)16);
+    REQUIRE(jl.root()[1].as_float() == 0.5);
+    REQUIRE(jl.root()[2].as_int() == (int64_t)2);
+    REQUIRE(jl.root()[3].as_float() == 5.0);
+
+    // An unterminated hex prefix on one line must not swallow the next line
+    // (same m_end discipline as the 40.1 trivia scans).
+    CHECK_THROWS_AS((void)parse_jsonl("0x\n[1]\n"), ParseError);
+
+    // Per-line range errors stay line-relative like the RFC path.
+    std::string huge = "0x1";
+    huge.append(256, '0');
+    auto jr = parse_jsonl_result("0x10\n" + huge + "\n");
+    REQUIRE(jr.is_err());
+    REQUIRE(jr.unwrap_err().offset() == 0);
+
+    // JSON5 number spellings normalize to RFC 8259 on dump.
+    auto doc = parse_copy("{h:0x10, p:+2, l:.5, t:5.}");
+    REQUIRE(sv(dump(doc)) == R"({"h":16,"p":2,"l":0.5,"t":5.0})");
 }
 
 TEST_CASE("Json5: borrowed keys survive in-situ and view shapes")

@@ -61,6 +61,12 @@ namespace pjh::json
      */
     bool Parser::parse_number(Json &out)
     {
+        // JSON5 number extensions (task 40.2): hex / leading '+' / omitted
+        // dot side. Kept behind the captured knob so the RFC body below stays
+        // byte-for-byte identical on the default path.
+        if (m_json5)
+            return parse_number_json5(out);
+
         const char *start = m_curr;
 
         // Grammar scan (shared with the compile-time validator, grammar.hpp).
@@ -133,6 +139,152 @@ namespace pjh::json
         if (ec == std::errc::result_out_of_range)
         {
             // token start, including a leading '-'
+            fail(ErrorCode::NumberOutOfRange, start);
+            return false;
+        }
+        if (ec != std::errc{} || end != m_curr)
+        {
+            fail(ErrorCode::NumberInvalidFormat, m_curr);
+            return false;
+        }
+        out = Json(val);
+        return true;
+    }
+
+    /*
+     * Parse JSON5 number (task 40.2)
+     *
+     * 1. grammar::scan_number_json5 validates the JSON5 spellings (leading
+     *    '+' or '-', hex 0x/0X, leading/trailing decimal point) and reports
+     *    the same number_error vocabulary as the RFC scanner; the error
+     *    anchors reproduce that scanner's cursor convention, so reuse the
+     *    existing ErrorCodes (no new ErrorCode, golden table untouched).
+     * 2. Hex: values with <= 16 significant hex digits are accumulated
+     *    exactly and stay Integer whenever they fit int64 (INT64_MIN's
+     *    2^63 magnitude special-cased); anything larger falls to double via
+     *    std::from_chars(chars_format::hex) over the bare digit run (the
+     *    prefix-less form the standard parses), which also reports
+     *    result_out_of_range for a magnitude beyond the finite-double range.
+     * 3. Decimal: the RFC int64 path is reused verbatim for pure integers
+     *    (sign included), and the double fallback feeds from_chars the token
+     *    without an explicit JSON5 '+', which the standard does not accept.
+     *    from_chars general already understands `.5`, `5.` and `5.e3`.
+     */
+    bool Parser::parse_number_json5(Json &out)
+    {
+        const char *const start = m_curr;
+
+        grammar::number_scan_json5 scan;
+        switch (grammar::scan_number_json5(m_curr, m_end, scan))
+        {
+        case grammar::number_error::ok:
+            break;
+        case grammar::number_error::no_int_digits:
+            // Also anchor for `+`/`-` with no number and `0x` with no digit.
+            fail(ErrorCode::NumberNoIntDigits, m_curr);
+            return false;
+        case grammar::number_error::leading_zero:
+            fail(ErrorCode::NumberLeadingZero, m_curr);
+            return false;
+        case grammar::number_error::no_frac_digits:
+            fail(ErrorCode::NumberNoFracDigits, m_curr);
+            return false;
+        case grammar::number_error::no_exp_digits:
+            fail(ErrorCode::NumberNoExpDigits, m_curr);
+            return false;
+        }
+
+        const bool is_negative = scan.negative;
+        const char *const int_start = scan.int_start;
+        const uint32_t digits = static_cast<uint32_t>(scan.int_digits);
+
+        if (scan.is_hex)
+        {
+            // Skip leading zeros before sizing the magnitude: `0x0001` is a
+            // one-significant-digit int, not a 17-bit overflow.
+            const char *sig = int_start;
+            while (sig < m_curr && *sig == '0')
+                ++sig;
+            const size_t sig_digits = static_cast<size_t>(m_curr - sig);
+
+            if (sig_digits <= 16)
+            {
+                // 16 significant hex digits are the largest that can fit in
+                // uint64; accumulate the whole run (leading zeros do not
+                // raise the value).
+                uint64_t uval = 0;
+                for (const char *q = int_start; q < m_curr; ++q)
+                    uval = uval * 16u + static_cast<uint64_t>(grammar::hex_value(*q));
+
+                bool fits = true;
+                if (sig_digits == 16)
+                {
+                    // INT64_MAX = 0x7FFF...; |INT64_MIN| = 0x8000...
+                    const uint64_t pos_limit = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+                    fits = is_negative ? (uval <= kInt64MinAbs) : (uval <= pos_limit);
+                }
+                if (fits)
+                {
+                    int64_t val;
+                    if (is_negative && uval == kInt64MinAbs)
+                        val = std::numeric_limits<int64_t>::min();
+                    else
+                        val = is_negative ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
+                    out = Json(val);
+                    return true;
+                }
+            }
+
+            // Too large for int64 (or outside its signed range): double. The
+            // hex formatter reads a bare hex-digit run and yields
+            // result_out_of_range on overflow, independent of -ffast-math.
+            double dval = 0.0;
+            auto [end, ec] = std::from_chars(sig, m_curr, dval, std::chars_format::hex);
+            if (ec == std::errc::result_out_of_range)
+            {
+                fail(ErrorCode::NumberOutOfRange, start);
+                return false;
+            }
+            if (ec != std::errc{} || end != m_curr)
+            {
+                fail(ErrorCode::NumberInvalidFormat, m_curr);
+                return false;
+            }
+            out = Json(is_negative ? -dval : dval);
+            return true;
+        }
+
+        // Pure decimal integer: same int64 gate as the RFC path.
+        if (!scan.is_float)
+        {
+            if (digits < 19)
+            {
+                uint64_t uval = parse_u64(int_start, digits);
+                int64_t val = is_negative ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
+                out = Json(val);
+                return true;
+            }
+            if (digits == 19 && fits_int64_19(int_start, is_negative))
+            {
+                uint64_t uval = parse_u64(int_start, digits);
+                int64_t val;
+                if (is_negative && uval == kInt64MinAbs)
+                    val = std::numeric_limits<int64_t>::min();
+                else
+                    val = is_negative ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
+                out = Json(val);
+                return true;
+            }
+        }
+
+        // from_chars does not accept an explicit JSON5 '+', so feed it the
+        // spelling after the sign; the anchor for a range error stays the
+        // token start (including the sign), matching the RFC path.
+        const char *const num_start = scan.explicit_plus ? start + 1 : start;
+        double val = 0.0;
+        auto [end, ec] = std::from_chars(num_start, m_curr, val);
+        if (ec == std::errc::result_out_of_range)
+        {
             fail(ErrorCode::NumberOutOfRange, start);
             return false;
         }
