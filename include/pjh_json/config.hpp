@@ -215,15 +215,17 @@ namespace pjh::json
          *       pre-JSON5 behavior). When true the parser additionally
          *       accepts line comments, slash-star block comments
          *       (non-nesting), one trailing comma per array/object,
-         *       single-quoted strings, ASCII unquoted identifiers as
-         *       object keys, the JSON5 ASCII whitespace bytes
-         *       VT (0x0B) / FF (0x0C), the JSON5 number spellings
-         *       (hex, leading `+`, leading/trailing `.`) and the
-         *       `Infinity`/`NaN` literals with an optional `+`/`-`.
-         * @note This is a PARTIAL JSON5 1.0.0 mode: Unicode identifiers
-         *       and Unicode whitespace are still rejected; they land in
-         *       a later sub-task. Unsupported JSON5 constructs fail with
-         *       existing ErrorCodes (no JSON5-only error is introduced).
+         *       single-quoted strings, unquoted identifier keys (ASCII
+         *       or ES5.1 Unicode IdentifierName incl. `\uXXXX`), the
+         *       JSON5 whitespace bytes (ASCII VT (0x0B) / FF (0x0C)
+         *       plus Unicode Zs + NBSP/LS/PS/U+FEFF), the JSON5 number
+         *       spellings (hex, leading `+`, leading/trailing `.`) and
+         *       the `Infinity`/`NaN` literals with an optional `+`/`-`.
+         * @note Unicode identifier keys and Unicode whitespace are
+         *       supported on this runtime parse path. The compile-time
+         *       ConstJson::parse entry stays RFC-only; a consteval JSON5
+         *       entry is deliberately deferred (see below). Parse failures
+         *       reuse existing ErrorCodes (no JSON5-only error is introduced).
          * @note Output is always RFC 8259: dump() is unaffected by this
          *       knob, so a JSON5 parse followed by dump is a lossy
          *       normalization (comments dropped, single quotes and

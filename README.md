@@ -94,25 +94,27 @@ std::pmr::string pretty  = dump(doc, DumpOptions{.pretty = true, .indent = 2});
 dump_file("out.json", doc.root());
 ```
 
-### JSON5 input mode (partial)
+### JSON5 input mode
 
 `Config::instance().set_json5(true)` (default `false`) lets the runtime parser
-accept a JSON5 1.0.0 subset: `//` and `/* */` comments, one trailing comma per
+accept JSON5 1.0.0 input: `//` and `/* */` comments, one trailing comma per
 array/object, single-quoted strings (with the JSON5 string escapes and line
-continuations), ASCII unquoted identifier keys, the JSON5 ASCII whitespace
-bytes VT/FF, and the JSON5 number spellings (hex `0x`/`0X`, leading `+`,
-leading/trailing decimal point, and `Infinity`/`NaN` with an optional `+`/`-`
-sign). It does **not** cover Unicode identifiers or Unicode whitespace; that is
-a separate follow-up. Numbers beyond int64 fall to a double exactly as on the
-RFC path, and a magnitude outside the finite-double range is still rejected
-(`Infinity`/`NaN` are accepted only as those exact JSON5 literals).
+continuations), unquoted identifier keys (ASCII or full ES5.1
+`IdentifierName`, including `\uXXXX` escapes), the JSON5 whitespace set (ASCII
+VT/FF plus Unicode Zs, NBSP, LS, PS and U+FEFF), and the JSON5 number
+spellings (hex `0x`/`0X`, leading `+`, leading/trailing decimal point, and
+`Infinity`/`NaN` with an optional `+`/`-` sign). Numbers beyond int64 fall to
+a double exactly as on the RFC path, and a magnitude outside the
+finite-double range is still rejected (`Infinity`/`NaN` are accepted only as
+those exact JSON5 literals).
 `dump()` is always RFC 8259, so JSON5 input is normalized on output (comments
 dropped, quotes/unquoted keys rewritten, trailing commas removed). A parsed
 non-finite value has no RFC 8259 representation, so `dump()` rejects it with a
 `JsonError` (`"Cannot serialize non-finite double"`) — a documented round-trip
 break. That writer guard is `std::isfinite`, which `-ffast-math` may fold away;
 the library deliberately adds no such flag, so do not compile the library with
-it. The compile-time `ConstJson::parse()` path stays RFC-only.
+it. The compile-time `ConstJson::parse()` path stays RFC-only: a consteval
+JSON5 entry is deliberately deferred.
 
 ### Compile-time JSON construction
 
