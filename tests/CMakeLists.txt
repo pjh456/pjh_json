@@ -49,6 +49,7 @@ set(PJH_JSON_TEST_SOURCES
     public_header_boundary.cpp
     read_file.cpp
     schema.cpp
+    simd_baseline.cpp
     std_interop.cpp
     stream_reader.cpp
     umbrella_isolation.cpp
