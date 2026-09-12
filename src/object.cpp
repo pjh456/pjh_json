@@ -104,7 +104,14 @@ namespace pjh::json
      * 1. Guard against self-assignment.
      * 2. Compare allocators before the move (mirrors libstdc++'s own
      *    steal decision in vector::_M_move_assign).
-     * 3. Move the vector.
+     * 3. Move the vector, then explicitly clear the source. On the
+     *    unequal-allocator path the standard leaves the source "valid but
+     *    unspecified": libstdc++ empties it, but libc++/MSVC keep the
+     *    moved-from entries in place (non-empty). The wrapper's contract
+     *    (doxygen above) requires the moved-from source to be empty, so
+     *    clear() it portably; it is a no-op when already empty and never
+     *    deallocates the buffer (the source stays adoptable). clear() is
+     *    noexcept, preserving the enclosing noexcept.
      * 4. Same resource: storage was stolen and both sides stay bound to
      *    the shared resource, so m_resource is copied (value-identical)
      *    instead of transferred: the source keeps it too, so a moved-from
@@ -123,6 +130,7 @@ namespace pjh::json
         const bool same_resource =
             m_data.get_allocator() == other.m_data.get_allocator();
         m_data = std::move(other.m_data);
+        other.m_data.clear();
         if (same_resource)
             m_resource = other.m_resource;
         return *this;
