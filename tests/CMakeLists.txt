@@ -39,3 +39,13 @@ add_executable(pjh_json_header_isolation header_isolation.cpp)
 target_link_libraries(pjh_json_header_isolation PRIVATE pjh_json doctest)
 
 doctest_discover_tests(pjh_json_header_isolation)
+
+# Sanitizer flags are PRIVATE to pjh_json (root CMakeLists, same pattern as
+# PJH_JSON_PGO_FLAGS). Re-apply them so the test TUs are instrumented and the
+# sanitizer runtime is linked into both executables. Keep in lockstep with root.
+if(PJH_JSON_SANITIZER_FLAGS)
+    target_compile_options(pjh_json_tests PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
+    target_link_options(pjh_json_tests PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
+    target_compile_options(pjh_json_header_isolation PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
+    target_link_options(pjh_json_header_isolation PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
+endif()

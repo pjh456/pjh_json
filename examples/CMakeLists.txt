@@ -1,6 +1,11 @@
 function(add_example example_name example_src)
     add_executable(${example_name} ${example_src})
     target_link_libraries(${example_name} PRIVATE pjh::json)
+    # Same sanitizer re-apply as tests/CMakeLists.txt (root list). Keep in lockstep.
+    if(PJH_JSON_SANITIZER_FLAGS)
+        target_compile_options(${example_name} PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
+        target_link_options(${example_name} PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
+    endif()
 endfunction()
 
 add_example(ex_basic_parse_dump 01_basic/parse_dump.cpp)

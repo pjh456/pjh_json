@@ -67,3 +67,59 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  sanitize:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux (Clang, ASan+UBSan)
+            cc: clang
+            cxx: clang++
+            sanitizers: address,undefined
+            asan_options: detect_leaks=1:abort_on_error=1:strict_string_checks=1
+            ubsan_options: halt_on_error=1:print_stacktrace=1
+            tsan_options: ""
+          - name: Linux (Clang, TSan)
+            cc: clang
+            cxx: clang++
+            sanitizers: thread
+            asan_options: ""
+            ubsan_options: ""
+            tsan_options: halt_on_error=1:second_deadlock_stack=1
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.name }}
+          variant: ccache
+
+      - name: Configure CMake
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+        run: >
+          cmake -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DPJH_JSON_BUILD_TESTS=ON
+          -DPJH_JSON_SANITIZERS=${{ matrix.sanitizers }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        env:
+          ASAN_OPTIONS: ${{ matrix.asan_options }}
+          UBSAN_OPTIONS: ${{ matrix.ubsan_options }}
+          TSAN_OPTIONS: ${{ matrix.tsan_options }}
+        run: ctest --test-dir build --output-on-failure

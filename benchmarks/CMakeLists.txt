@@ -52,6 +52,12 @@ target_link_libraries(pjh_json_benchmark
 # rapidjson 没有现代的 cmake target，通过源码目录引入
 target_include_directories(pjh_json_benchmark PRIVATE ${rapidjson_SOURCE_DIR}/include)
 
+# Same sanitizer re-apply as tests/CMakeLists.txt (root list). Keep in lockstep.
+if(PJH_JSON_SANITIZER_FLAGS)
+    target_compile_options(pjh_json_benchmark PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
+    target_link_options(pjh_json_benchmark PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
+endif()
+
 # Benchmark data directory (project root)
 target_compile_definitions(
     pjh_json_benchmark

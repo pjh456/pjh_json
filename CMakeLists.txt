@@ -88,6 +88,43 @@ elseif(PJH_JSON_PGO STREQUAL "USE")
     endif()
 endif()
 
+# -------------------------
+# Sanitizers (ASan / UBSan / TSan) — developer/CI instrumentation only
+# -------------------------
+# Single string option: OFF (default) or a comma-separated GCC/Clang sanitizer
+# list, e.g. "address,undefined" (ASan+UBSan, combinable) or "thread" (TSan,
+# must stand alone). These are instrumentation flags and follow the same house
+# rule as PJH_JSON_PGO: PRIVATE to pjh_json, re-applied PRIVATE to every in-repo
+# executable. They are deliberately NOT exported: a sanitized static library
+# references the sanitizer runtime and is a test artifact, never a consumer one.
+set(PJH_JSON_SANITIZERS OFF CACHE STRING
+    "Sanitizers: OFF, or a comma-separated GCC/Clang list (address,undefined / thread)")
+
+set(PJH_JSON_SANITIZER_FLAGS)
+if(NOT PJH_JSON_SANITIZERS STREQUAL "OFF" AND NOT PJH_JSON_SANITIZERS STREQUAL "")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        if(PJH_JSON_SANITIZERS MATCHES "thread"
+           AND PJH_JSON_SANITIZERS MATCHES "address|undefined")
+            message(FATAL_ERROR
+                "PJH_JSON_SANITIZERS: TSan (thread) cannot be combined with "
+                "ASan/UBSan; use separate build trees.")
+        endif()
+        set(PJH_JSON_SANITIZER_FLAGS
+            "-fsanitize=${PJH_JSON_SANITIZERS}"
+            -fno-omit-frame-pointer
+            -fno-sanitize-recover=all)
+    else()
+        message(FATAL_ERROR
+            "PJH_JSON_SANITIZERS is supported only with GCC/Clang; "
+            "${CMAKE_CXX_COMPILER_ID} is not supported.")
+    endif()
+endif()
+
+if(PJH_JSON_SANITIZER_FLAGS)
+    target_compile_options(pjh_json PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
+    target_link_options(pjh_json PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
+endif()
+
 if(MSVC)
     add_compile_options(
         /utf-8
@@ -95,10 +132,15 @@ if(MSVC)
         /Zc:char8_t-
     )
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-    add_link_options(
-        -static-libgcc
-        -static-libstdc++
-        -static)
+    # -static is incompatible with the ASan/TSan runtimes (fully-static
+    # sanitizer executables are unsupported); keep the default fully-static
+    # link only in uninstrumented builds.
+    if(NOT PJH_JSON_SANITIZER_FLAGS)
+        add_link_options(
+            -static-libgcc
+            -static-libstdc++
+            -static)
+    endif()
 endif()
 
 # -------------------------
