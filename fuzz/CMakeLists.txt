@@ -38,6 +38,11 @@ function(pjh_json_add_fuzzer name corpus)
         target_link_options(${name} PRIVATE ${PJH_JSON_PGO_FLAGS})
     endif()
 
+    # Same warning re-apply as tests/CMakeLists.txt (root list). Keep in lockstep.
+    if(PJH_JSON_WARNING_FLAGS)
+        target_compile_options(${name} PRIVATE ${PJH_JSON_WARNING_FLAGS})
+    endif()
+
     pjh_json_fuzz_corpus(${name}
         ${CMAKE_CURRENT_SOURCE_DIR}/corpus/${corpus}
         ${CMAKE_CURRENT_BINARY_DIR}/corpus/${corpus})

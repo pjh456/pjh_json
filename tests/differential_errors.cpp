@@ -146,7 +146,7 @@ namespace
         size_t           offset = 0;             // golden offset()
         bool             positioned = false;     // what() carries " at offset N"
         std::string_view what;
-        std::string_view input;
+        std::string_view input{}; // default keeps -Wmissing-field-initializers quiet
         bool             has_result = true;      // false: throwing-only row
         std::string_view detail{};               // borrowed "{}" payload
         bool             strict_dup = false;

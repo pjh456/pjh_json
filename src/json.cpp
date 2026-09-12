@@ -604,6 +604,9 @@ namespace pjh::json
             return m_data.integer == other.m_data.integer;
         case Type::Floating:
             return m_data.floating == other.m_data.floating;
+        case Type::StringView: // handled by the fast path above; listed for -Wswitch
+        case Type::StringOwned:
+            return as_string() == other.as_string();
         case Type::ArrayType:
             return as_array() == other.as_array();
         case Type::ObjectType:

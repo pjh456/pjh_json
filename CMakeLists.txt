@@ -5,6 +5,39 @@ project(
     LANGUAGES CXX
 )
 
+# -------------------------
+# Minimum compiler versions
+# -------------------------
+# Floor inferred from the C++20 features used by the public headers
+# (consteval, bit_cast, FP from_chars/to_chars, designated initializers).
+# Fail at configure time with an actionable message instead of surfacing N
+# cryptic template errors deep inside the library. See STACK.md.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11)
+        message(FATAL_ERROR
+            "pjh_json requires GCC >= 11 (found ${CMAKE_CXX_COMPILER_VERSION}).")
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16)
+        message(FATAL_ERROR
+            "pjh_json requires Clang >= 16 (found ${CMAKE_CXX_COMPILER_VERSION}).")
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+    # Apple's version does NOT track LLVM: AppleClang 15.0 (Xcode 15) is
+    # LLVM 16, the first with C++20 designated initializers.
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15)
+        message(FATAL_ERROR
+            "pjh_json requires AppleClang >= 15 / Xcode 15+ "
+            "(found ${CMAKE_CXX_COMPILER_VERSION}).")
+    endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.29)
+        message(FATAL_ERROR
+            "pjh_json requires MSVC >= 19.29 / VS 2019 16.10+ "
+            "(found ${CMAKE_CXX_COMPILER_VERSION}).")
+    endif()
+endif()
+
 # export cmake compile commands
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -91,6 +124,24 @@ set_target_properties(pjh_json PROPERTIES
     CXX_STANDARD_REQUIRED ON
     EXPORT_NAME json)
 target_compile_options(pjh_json PRIVATE -std=c++20)
+
+# -------------------------
+# Warnings (first-party code only)
+# -------------------------
+# Same house rule as PJH_JSON_PGO / PJH_JSON_SANITIZERS: warning flags are
+# PRIVATE to pjh_json and re-applied PRIVATE to every in-repo executable, so
+# they never reach INTERFACE_COMPILE_OPTIONS / the install export surface.
+# No error-promotion flag here: the CI gate is compile+ctest+sanitizers,
+# not warnings.
+set(PJH_JSON_WARNING_FLAGS)
+if(MSVC)
+    set(PJH_JSON_WARNING_FLAGS /W4)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set(PJH_JSON_WARNING_FLAGS -Wall -Wextra)
+endif()
+if(PJH_JSON_WARNING_FLAGS)
+    target_compile_options(pjh_json PRIVATE ${PJH_JSON_WARNING_FLAGS})
+endif()
 
 # -------------------------
 # Compiler Optimizations

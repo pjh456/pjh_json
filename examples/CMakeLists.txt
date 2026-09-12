@@ -11,6 +11,10 @@ function(add_example example_name example_src)
         target_compile_options(${example_name} PRIVATE ${PJH_JSON_PGO_FLAGS})
         target_link_options(${example_name} PRIVATE ${PJH_JSON_PGO_FLAGS})
     endif()
+    # Same warning re-apply as tests/CMakeLists.txt (root list). Keep in lockstep.
+    if(PJH_JSON_WARNING_FLAGS)
+        target_compile_options(${example_name} PRIVATE ${PJH_JSON_WARNING_FLAGS})
+    endif()
 endfunction()
 
 add_example(ex_basic_parse_dump 01_basic/parse_dump.cpp)

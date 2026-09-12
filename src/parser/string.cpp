@@ -109,7 +109,7 @@ namespace pjh::json
                     lead = pos;
                     return;
                 }
-                if (b >= 0xE1 && b <= 0xEC || b == 0xEE || b == 0xEF)
+                if ((b >= 0xE1 && b <= 0xEC) || b == 0xEE || b == 0xEF)
                 {
                     need = 2; c1lo = 0x80; c1hi = 0xBF; m_fail_code = ErrorCode::None;
                     lead = pos;

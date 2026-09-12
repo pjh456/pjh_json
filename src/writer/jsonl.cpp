@@ -58,7 +58,7 @@ namespace pjh::json
     {
         auto dr = dump_jsonl_impl(arr, Config::instance().resource());
         if (dr.is_err())
-            return std::move(dr);
+            return dr;
         std::pmr::string out = std::move(dr).unwrap();
 
         DumpState st;

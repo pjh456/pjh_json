@@ -49,8 +49,9 @@ target_link_libraries(pjh_json_benchmark
     nlohmann_json::nlohmann_json
 )
 
-# rapidjson 没有现代的 cmake target，通过源码目录引入
-target_include_directories(pjh_json_benchmark PRIVATE ${rapidjson_SOURCE_DIR}/include)
+# rapidjson 没有现代的 cmake target，通过源码目录引入；SYSTEM 使 -Wall -Wextra
+# 不审第三方头（裁决 D，禁止 -Wno-*）。
+target_include_directories(pjh_json_benchmark SYSTEM PRIVATE ${rapidjson_SOURCE_DIR}/include)
 
 # Same sanitizer re-apply as tests/CMakeLists.txt (root list). Keep in lockstep.
 if(PJH_JSON_SANITIZER_FLAGS)
@@ -62,6 +63,11 @@ endif()
 if(PJH_JSON_PGO_FLAGS)
     target_compile_options(pjh_json_benchmark PRIVATE ${PJH_JSON_PGO_FLAGS})
     target_link_options(pjh_json_benchmark PRIVATE ${PJH_JSON_PGO_FLAGS})
+endif()
+
+# Same warning re-apply as tests/CMakeLists.txt (root list). Keep in lockstep.
+if(PJH_JSON_WARNING_FLAGS)
+    target_compile_options(pjh_json_benchmark PRIVATE ${PJH_JSON_WARNING_FLAGS})
 endif()
 
 # Benchmark 数据目录（roadmap 67）：生成物写进构建目录，不再污染仓库根。

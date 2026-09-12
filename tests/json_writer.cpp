@@ -341,7 +341,7 @@ TEST_CASE("Writer: document result entry") {
     Config::instance().set_max_depth(1);
     auto er = dump_result(d);
     REQUIRE(er.is_err());
-    JsonError e = er.unwrap_err();
+    JsonError &e = er.unwrap_err();
     REQUIRE(e.category() == Category::Json);
     REQUIRE(dynamic_cast<const JsonError *>(&e) != nullptr);
     REQUIRE(dynamic_cast<const ParseError *>(&e) == nullptr);

@@ -146,3 +146,12 @@ if(PJH_JSON_PGO_FLAGS)
     target_compile_options(pjh_json_header_isolation PRIVATE ${PJH_JSON_PGO_FLAGS})
     target_link_options(pjh_json_header_isolation PRIVATE ${PJH_JSON_PGO_FLAGS})
 endif()
+
+# Warning flags are PRIVATE to pjh_json (root CMakeLists). Re-apply so the
+# test / header-isolation / self-containment TUs are audited too. Keep in
+# lockstep with the root variable.
+if(PJH_JSON_WARNING_FLAGS)
+    target_compile_options(pjh_json_tests PRIVATE ${PJH_JSON_WARNING_FLAGS})
+    target_compile_options(pjh_json_header_isolation PRIVATE ${PJH_JSON_WARNING_FLAGS})
+    target_compile_options(pjh_json_header_selfcheck PRIVATE ${PJH_JSON_WARNING_FLAGS})
+endif()

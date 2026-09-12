@@ -132,27 +132,27 @@ TEST_CASE("Json: simple value") {
 }
 
 TEST_CASE("Json: array value") {
-    auto arr1 = std::move(Json(Array{}));
+    auto arr1 = Json(Array{});
     REQUIRE(arr1.empty());
     REQUIRE(arr1.is_array());
     REQUIRE(arr1.size() == 0);
     REQUIRE_THROWS_AS((void)arr1.at(0), std::out_of_range);
 
-    auto arr2 = std::move(Json(Array::of(Json("pjh"), Json((int64_t)123))));
+    auto arr2 = Json(Array::of(Json("pjh"), Json((int64_t)123)));
     REQUIRE(!arr2.empty());
     REQUIRE(arr1.is_array());
     REQUIRE(arr2.size() == 2);
     REQUIRE(arr2[0] == "pjh");
     REQUIRE(arr2[1] == (int64_t)123);
 
-    auto arr3 = std::move(Json(Array::of(Json((int64_t)1))));
+    auto arr3 = Json(Array::of(Json((int64_t)1)));
     REQUIRE(arr2 != arr3);
 
     REQUIRE_THROWS_AS(arr2.as_array().erase(5), std::out_of_range);
 }
 
 TEST_CASE("Json: object value") {
-    auto obj1 = std::move(Json(Object{}));
+    auto obj1 = Json(Object{});
     REQUIRE(obj1.empty());
     REQUIRE(obj1.is_object());
     REQUIRE(obj1.size() == 0);

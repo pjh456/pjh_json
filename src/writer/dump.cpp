@@ -330,7 +330,7 @@ namespace pjh::json
     {
         auto dr = dump_impl(value, opts, Config::instance().resource());
         if (dr.is_err())
-            return std::move(dr);
+            return dr;
         std::pmr::string out = std::move(dr).unwrap();
 
         DumpState st;

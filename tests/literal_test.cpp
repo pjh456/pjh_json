@@ -160,9 +160,9 @@ TEST_CASE("Literal: object literal roundtrip") {
 }
 
 TEST_CASE("Literal: trailing garbage rejection") {
-    CHECK_THROWS_AS(parse_copy("truee"), ParseError);
-    CHECK_THROWS_AS(parse_copy("falsex"), ParseError);
-    CHECK_THROWS_AS(parse_copy("tru"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("truee"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("falsex"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("tru"), ParseError);
 }
 
 TEST_CASE("Literal: dump") {
