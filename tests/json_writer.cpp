@@ -435,3 +435,54 @@ TEST_CASE("Writer: utf-8 pass-through and ascii validation") {
     auto out3 = dump(d.root());
     REQUIRE(sv(out3) == std::string_view("\"caf\xC3\xA9 \xF0\x9F\x98\x80\"", 12));
 }
+
+TEST_CASE("Writer: dump to std::string") {
+    auto d = parse_copy(R"({"a":1,"b":[true,null,"x"]})");
+
+    // Append semantics: sink keeps its previous content and the appended
+    // bytes are byte-identical to dump()
+    std::string sink = "prefix:";
+    dump_to(sink, d.root());
+    auto out = dump(d.root());
+    std::string expected = "prefix:" + std::string(out.data(), out.size());
+    REQUIRE(sink == expected);
+
+    // Empty start: pure append matches dump() byte for byte
+    std::string empty;
+    dump_to(empty, d.root());
+    REQUIRE(empty == std::string(out.data(), out.size()));
+
+    // opts pass-through: pretty and sort_keys reach the shared write_value core
+    std::string pretty;
+    dump_to(pretty, d.root(), DumpOptions{.pretty = true});
+    auto p = dump(d.root(), DumpOptions{.pretty = true});
+    REQUIRE(pretty == std::string(p.data(), p.size()));
+
+    std::string sorted;
+    dump_to(sorted, d.root(), DumpOptions{.sort_keys = true});
+    auto srt = dump(d.root(), DumpOptions{.sort_keys = true});
+    REQUIRE(sorted == std::string(srt.data(), srt.size()));
+
+    // Three sink overloads coexist (compile-time overload-resolution pin)
+    std::pmr::string pmr_sink;
+    dump_to(pmr_sink, d.root());
+    REQUIRE(sv(pmr_sink) == sv(out));
+
+    // Strong guarantee (unlike the direct-write pmr::string sink): a
+    // serialization throw happens before the append, leaving the sink intact
+    {
+        MaxDepthGuard guard;
+        Config::instance().set_max_depth(1);
+        std::string keep = "keep";
+        REQUIRE_THROWS_AS(dump_to(keep, d.root()), JsonError);
+        REQUIRE(keep == "keep");
+    }
+
+#ifndef __FAST_MATH__
+    // Non-finite double is the other serialization throw site (write_double)
+    Json bad = std::numeric_limits<double>::infinity();
+    std::string keep2 = "keep2";
+    REQUIRE_THROWS_AS(dump_to(keep2, bad), JsonError);
+    REQUIRE(keep2 == "keep2");
+#endif
+}

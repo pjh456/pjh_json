@@ -353,3 +353,38 @@ TEST_CASE("File: parse from stream config knobs") {
     }
     Config::instance().set_strict_utf8(false);
 }
+
+TEST_CASE("File: parse stream short name") {
+    // Short name forwards to parse_from_istream: same tree, same buffered
+    // padded content
+    const std::string payload = R"({"a":1,"b":[true,null,"x"]})";
+    std::istringstream s1(payload), s2(payload);
+    Document d1 = parse(s1);
+    Document d2 = parse_from_istream(s2);
+    REQUIRE(dump(d1.root()) == dump(d2.root()));
+    REQUIRE(d1.buffer() == d2.buffer());
+
+    // Truncation: offset relative to the stream start, same as the long name
+    {
+        std::istringstream t(std::string(R"({"a": 1)", 7));
+        try {
+            (void)parse(t);
+            REQUIRE(false);
+        } catch (const ParseError &e) {
+            REQUIRE(e.offset() == 7);
+        }
+    }
+
+    // Entry badbit: context-free read failure (offset 0), same taxonomy
+    {
+        std::istringstream bad;
+        bad.setstate(std::ios_base::badbit);
+        REQUIRE_THROWS_AS((void)parse(bad), ParseError);
+        try {
+            (void)parse(bad);
+            REQUIRE(false);
+        } catch (const ParseError &e) {
+            REQUIRE(e.offset() == 0);
+        }
+    }
+}

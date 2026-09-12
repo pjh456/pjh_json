@@ -281,6 +281,28 @@ namespace pjh::json
         Storage storage = Config::instance().storage());
 
     /**
+     * @brief Parse JSON from an input stream (short name)
+     * @param in  Input stream (same contract as parse_from_istream: remaining
+     *            content is read fully and the stream is consumed to end)
+     * @param storage Allocation strategy (default: global config)
+     * @return Document owning the parsed tree and the buffered stream content
+     * @throws ParseError if the stream read fails (context-free, offset 0),
+     *         or the content is invalid JSON (positioned, offsets relative to
+     *         the stream start)
+     * @note Convenience forward to parse_from_istream: identical contract,
+     *       including whole-stream buffering (NOT incremental parsing), the
+     *       kPaddingWidth NUL padding, and all Config parse knobs
+     *       (max_depth / strict_duplicate_keys / strip_bom / strict_utf8)
+     *       inherited with zero knob self-read.
+     * @note The canonical, family-consistent name is parse_from_istream; the
+     *       result form is parse_from_istream_result (there is no short
+     *       parse_result).
+     */
+    [[nodiscard]] Document parse(
+        std::istream &in,
+        Storage storage = Config::instance().storage());
+
+    /**
      * @brief Parse buffer with trailing kPaddingWidth-byte padding (result form)
      * @param buffer Padded pmr::string (must have kPaddingWidth extra NUL
      *               bytes)

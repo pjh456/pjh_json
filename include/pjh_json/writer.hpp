@@ -2,6 +2,7 @@
 #define INCLUDE_PJH_JSON_WRITER_HPP
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <memory_resource>
 #include <iosfwd>
@@ -95,6 +96,21 @@ namespace pjh::json
      * @throws JsonError if value contains non-finite double (NaN/Inf)
      */
     void dump_to(std::pmr::string &sink, const Json &value, const DumpOptions &opts = {});
+
+    /**
+     * @brief Append serialized value to an existing std::string
+     * @param sink Output string (appended to, never cleared)
+     * @param value Json tree to serialize
+     * @param opts  Formatting options
+     * @throws JsonError if value contains non-finite double (NaN/Inf)
+     * @note Append semantics, identical to dump_to(std::pmr::string&): the
+     *       sink keeps its previous content. The value is serialized into a
+     *       temporary pmr::string and then appended, so serialization
+     *       failures leave the sink unchanged (strong guarantee) at the cost
+     *       of one output-sized copy; use the pmr::string overload to write
+     *       directly into a caller-owned resource.
+     */
+    void dump_to(std::string &sink, const Json &value, const DumpOptions &opts = {});
 
     /**
      * @brief Serialize to output stream

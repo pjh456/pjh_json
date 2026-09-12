@@ -369,6 +369,17 @@ namespace pjh::json
     }
 
     /*
+     * Short-name forward to parse_from_istream: the stream entry mirrors the
+     * write-side dump_to short name. One line, zero new behavior — all
+     * buffering, offsets, error classification and Config inheritance belong
+     * to parse_from_istream.
+     */
+    Document parse(std::istream &in, Storage storage)
+    {
+        return parse_from_istream(in, storage);
+    }
+
+    /*
      * Structured-entry shells (task 16): thin catch-and-wrap over the
      * throwing entries. Ladder: ParseError -> stored by value (offset and
      * category survive the copy — no slicing, E is pinned to the most

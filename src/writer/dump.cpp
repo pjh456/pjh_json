@@ -178,6 +178,21 @@ namespace pjh::json
     }
 
     /*
+     * Serialize JSON value into an existing std::string sink
+     *
+     * 1. Materialize the value into a pmr::string (same core as dump).
+     * 2. Append the result to the caller's std::string (never cleared).
+     * The materialization precedes any sink mutation, so a serialization
+     * throw leaves the sink byte-identical (the pmr::string sink, which
+     * writes directly through write_value, can be left partially written).
+     */
+    void dump_to(std::string &sink, const Json &value, const DumpOptions &opts)
+    {
+        std::pmr::string out = dump(value, opts);
+        sink.append(out.data(), out.size());
+    }
+
+    /*
      * Serialize JSON value into a std::ostream
      */
     void dump_to(std::ostream &os, const Json &value, const DumpOptions &opts)
