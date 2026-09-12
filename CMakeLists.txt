@@ -88,7 +88,7 @@ endif()
 
 # CXX_STANDARD is a per-target property and does not propagate from pjh_json
 # to consumer targets; set the directory-scope default (after xsimd so its
-# exported interface keeps cxx_std_11) for tests/examples/benchmarks below.
+# exported interface keeps cxx_std_14) for tests/examples/benchmarks below.
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

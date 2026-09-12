@@ -1,4 +1,4 @@
-[submodule "include/xsimd"]
+[submodule "thirdparty/xsimd"]
 	path = thirdparty/xsimd
 	url = https://github.com/xtensor-stack/xsimd.git
 [submodule "thirdparty/pjh_result"]
