@@ -244,7 +244,7 @@ namespace pjh::json
             String key;
             if (m_json5 && m_curr < m_end && *m_curr == '\'')
             {
-                if (!parse_string_single(key))
+                if (!parse_string_json5(key, '\''))
                     return false;
             }
             else if (m_json5 && m_curr < m_end && *m_curr != '"' &&

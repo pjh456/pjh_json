@@ -308,6 +308,42 @@ namespace pjh::json
             return number_error::ok;
         }
 
+        // ---- JSON5 1.0.0 §5.2 string escapes (task 40.3) ------------------
+        // Pure additions alongside short_escape_value: the RFC helper is
+        // byte-for-byte unchanged. JSON5 adds the `\'` and `\v` single
+        // escapes. `\0` (NUL) deliberately has no entry here: a char return
+        // would collide with the not-an-escape sentinel, so the runtime
+        // decoder special-cases it (including the "not followed by a decimal
+        // digit" lookahead). `\xHH`, identity escapes and line continuations
+        // are likewise runtime concerns.
+
+        /// @brief JSON5 1.0.0 §5.2 single-character escapes: the RFC set
+        ///        plus `\'` -> `'` and `\v` -> VT (0x0B).
+        /// @return the decoded byte, or '\0' (never a valid result here)
+        ///         when c is not a single escape.
+        constexpr char short_escape_value_json5(char c) noexcept
+        {
+            switch (c)
+            {
+            case '\'':
+                return '\'';
+            case 'v':
+                return static_cast<char>(0x0B);
+            default:
+                return short_escape_value(c);
+            }
+        }
+
+        /// @brief JSON5 1.0.0 LineTerminator, ASCII subset: LF or CR.
+        /// @note U+2028/U+2029 are the Unicode members of the
+        ///       LineTerminator set; being multi-byte UTF-8 sequences they
+        ///       are matched by the runtime scanner, not by this byte
+        ///       predicate.
+        constexpr bool is_json5_line_terminator_ascii(unsigned char c) noexcept
+        {
+            return c == 0x0A || c == 0x0D;
+        }
+
     } // namespace grammar
 
 } // namespace pjh::json

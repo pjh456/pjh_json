@@ -52,7 +52,7 @@ namespace pjh::json
             if (m_json5 && *m_curr == '\'')
             {
                 String s;
-                if (!parse_string_single(s))
+                if (!parse_string_json5(s, '\''))
                     return false;
                 out = std::move(s);
                 return true;
@@ -119,7 +119,7 @@ namespace pjh::json
             if (m_json5 && *m_curr == '\'')
             {
                 String s;
-                if (!parse_string_single(s))
+                if (!parse_string_json5(s, '\''))
                     return false;
                 out = std::move(s);
                 return true;

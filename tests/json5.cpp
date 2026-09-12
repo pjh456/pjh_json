@@ -181,6 +181,161 @@ TEST_CASE("Json5: single-quoted strings")
     CHECK_THROWS_AS((void)parse_copy(bad), ParseError);
 }
 
+TEST_CASE("Json5: line continuations")
+{
+    Json5ConfigGuard guard;
+    Config &cfg = Config::instance();
+    cfg.set_json5(true);
+
+    const std::string ls = "\xE2\x80\xA8"; // U+2028 LINE SEPARATOR
+    const std::string ps = "\xE2\x80\xA9"; // U+2029 PARAGRAPH SEPARATOR
+
+    // Backslash + each LineTerminator is removed entirely (no character).
+    REQUIRE(parse_copy("\"a\\\nb\"").root().as_string() == std::string_view("ab"));
+    REQUIRE(parse_copy("\"a\\\rb\"").root().as_string() == std::string_view("ab"));
+    REQUIRE(parse_copy("\"a\\\r\nb\"").root().as_string() == std::string_view("ab"));
+    REQUIRE(parse_copy("'a\\\nb'").root().as_string() == std::string_view("ab"));
+    REQUIRE(parse_copy("'a\\\r\nb'").root().as_string() == std::string_view("ab"));
+    REQUIRE(parse_copy("\"a\\" + ls + "b\"").root().as_string() == std::string_view("ab"));
+    REQUIRE(parse_copy("\"a\\" + ps + "b\"").root().as_string() == std::string_view("ab"));
+    REQUIRE(parse_copy("'a\\" + ls + "b'").root().as_string() == std::string_view("ab"));
+
+    // A continuation immediately before the closing quote / several in a row.
+    REQUIRE(parse_copy("\"a\\\n\"").root().as_string() == std::string_view("a"));
+    REQUIRE(parse_copy("\"a\\\nb\\\nc\"").root().as_string() == std::string_view("abc"));
+
+    // CR consumed on its own when the next byte is not LF.
+    REQUIRE(parse_copy("\"a\\\rX\"").root().as_string() == std::string_view("aX"));
+
+    // Default RFC mode rejects a backslash before a raw LineTerminator.
+    cfg.set_json5(false);
+    CHECK_THROWS_AS((void)parse_copy("\"a\\\nb\""), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("\"a\\\r\nb\""), ParseError);
+
+    // parse_jsonl values are line sub-views: a continuation cannot pull the
+    // next physical line into the current value; the line fails instead.
+    cfg.set_json5(true);
+    CHECK_THROWS_AS((void)parse_jsonl("\"a\\\nb\"\n"), ParseError);
+}
+
+TEST_CASE("Json5: hex, NUL/VT and identity escapes")
+{
+    Json5ConfigGuard guard;
+    Config &cfg = Config::instance();
+    cfg.set_json5(true);
+
+    // \xHH in both quote styles.
+    REQUIRE(parse_copy("\"\\x41\"").root().as_string() == std::string_view("A"));
+    REQUIRE(parse_copy("'\\x41'").root().as_string() == std::string_view("A"));
+    REQUIRE(parse_copy("'\\x4a'").root().as_string() == std::string_view("J"));
+    REQUIRE(parse_copy("'\\x4A'").root().as_string() == std::string_view("J"));
+
+    // \x00 and \0 both produce an embedded NUL byte.
+    auto hx = parse_copy("'a\\x00b'");
+    REQUIRE(hx.root().as_string().size() == 3);
+    REQUIRE(hx.root().as_string()[1] == '\0');
+    auto z = parse_copy("\"a\\0b\"");
+    REQUIRE(z.root().as_string().size() == 3);
+    REQUIRE(z.root().as_string()[1] == '\0');
+
+    // \v and \' single escapes.
+    const std::string v = vt();
+    REQUIRE(parse_copy("'\\v'").root().as_string() == v);
+    REQUIRE(parse_copy("\"\\v\"").root().as_string() == v);
+    REQUIRE(parse_copy("'it\\'s'").root().as_string() == std::string_view("it's"));
+    REQUIRE(parse_copy("\"\\'\"").root().as_string() == std::string_view("'"));
+
+    // Identity escapes: any non-digit character yields itself.
+    REQUIRE(parse_copy("'\\a'").root().as_string() == std::string_view("a"));
+    REQUIRE(parse_copy("'\\z'").root().as_string() == std::string_view("z"));
+    REQUIRE(parse_copy("'\\A'").root().as_string() == std::string_view("A"));
+    REQUIRE(parse_copy("'\\!'").root().as_string() == std::string_view("!"));
+    REQUIRE(parse_copy("'\\ '").root().as_string() == std::string_view(" "));
+    REQUIRE(parse_copy("\"\\q\"").root().as_string() == std::string_view("q"));
+
+    // The RFC escapes still decode through the same path.
+    REQUIRE(parse_copy("'\\u0041\\n\\t'").root().as_string() == std::string_view("A\n\t"));
+
+    // \1..\9 and \0<digit> stay rejected (no octal); bad \x rejected too.
+    CHECK_THROWS_AS((void)parse_copy("'\\1'"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("'\\9'"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("'\\01'"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("'\\00'"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("'\\x'"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("'\\xG1'"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("'\\x1G'"), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("'\\x1'"), ParseError);
+
+    // Default RFC mode rejects every JSON5-only escape.
+    cfg.set_json5(false);
+    CHECK_THROWS_AS((void)parse_copy("\"\\x41\""), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("\"\\v\""), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("\"\\0\""), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("\"\\a\""), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("\"\\'\""), ParseError);
+}
+
+TEST_CASE("Json5: raw control characters in strings")
+{
+    Json5ConfigGuard guard;
+    Config &cfg = Config::instance();
+
+    cfg.set_json5(false);
+    CHECK_THROWS_AS((void)parse_copy(std::string("\"a") + vt() + "b\""), ParseError);
+    CHECK_THROWS_AS((void)parse_copy(std::string("\"a") + ff() + "b\""), ParseError);
+    CHECK_THROWS_AS((void)parse_copy("\"a\tb\""), ParseError);
+
+    cfg.set_json5(true);
+
+    // VT/FF/TAB are not LineTerminators: legal raw in a JSON5 string.
+    auto v = parse_copy(std::string("\"a") + vt() + "b\"");
+    REQUIRE(v.root().as_string().size() == 3);
+    REQUIRE(v.root().as_string()[1] == '\x0B');
+    auto f = parse_copy(std::string("'a") + ff() + "b'");
+    REQUIRE(f.root().as_string().size() == 3);
+    REQUIRE(f.root().as_string()[1] == '\x0C');
+    auto t = parse_copy("\"a\tb\"");
+    REQUIRE(t.root().as_string().size() == 3);
+    REQUIRE(t.root().as_string()[1] == '\t');
+
+    // Raw LF/CR remain rejected (they are LineTerminators).
+    CHECK_THROWS_AS((void)parse_copy(std::string_view("\"a\nb\"", 5)), ParseError);
+    CHECK_THROWS_AS((void)parse_copy(std::string_view("'a\rb'", 5)), ParseError);
+
+    // Raw NUL is a non-LineTerminator StringCharacter; the scalar decoder is
+    // m_end-bounded rather than padding-terminated, so it is representable.
+    const std::string raw_nul("\"a\0b\"", 5);
+    auto n = parse_copy(raw_nul);
+    REQUIRE(n.root().as_string().size() == 3);
+    REQUIRE(n.root().as_string()[1] == '\0');
+}
+
+TEST_CASE("Json5: string escapes round-trip as RFC 8259")
+{
+    Json5ConfigGuard guard;
+    Config &cfg = Config::instance();
+    cfg.set_json5(true);
+
+    const std::string expected_n("a\0b", 3);
+    const std::string expected_v = vt();
+
+    auto doc = parse_copy("{n:'a\\0b', v:'\\v', h:'\\x41', q:'it\\'s', c:'a\\x0bb'}");
+    REQUIRE(doc.root()["n"].as_string() == std::string_view(expected_n));
+    REQUIRE(doc.root()["v"].as_string() == expected_v);
+    REQUIRE(doc.root()["h"].as_string() == std::string_view("A"));
+    REQUIRE(doc.root()["q"].as_string() == std::string_view("it's"));
+    REQUIRE(doc.root()["c"].as_string().size() == 3);
+
+    const std::pmr::string dumped = dump(doc);
+    REQUIRE(sv(dumped) ==
+            std::string_view("{\"n\":\"a\\u0000b\",\"v\":\"\\u000b\",\"h\":\"A\",\"q\":\"it's\",\"c\":\"a\\u000bb\"}"));
+
+    // The RFC dump re-parses in default mode to the same DOM.
+    cfg.set_json5(false);
+    auto rt = parse_copy(dumped);
+    REQUIRE(rt.root() == doc.root());
+}
+
 TEST_CASE("Json5: unquoted identifier keys")
 {
     Json5ConfigGuard guard;

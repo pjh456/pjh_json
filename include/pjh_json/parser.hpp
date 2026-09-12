@@ -180,14 +180,22 @@ namespace pjh::json
          */
         void skip_json5_trivia();
         /**
-         * @brief Parse a single-quoted JSON5 string (scalar, m_end-bounded)
+         * @brief Parse a JSON5 string with either quote (scalar, m_end-bounded)
          * @param out Receives a borrowed view into the input buffer
+         * @param quote The opening quote character: '"' or '\''
          * @return false on failure (recorded in m_error)
-         * @note Reuses the RFC escape set (short escapes + \\uXXXX with
-         *       surrogate pairs); JSON5-only escapes and line
-         *       continuations are deferred to task 40.3.
+         * @note Covers the full JSON5 1.0.0 §5.2 string grammar: the RFC
+         *       escapes (short escapes + \\uXXXX with surrogate pairs) plus
+         *       `\\xHH`, `\\v`, `\\0`, identity escapes, `\\` + line
+         *       terminator continuations (LF/CR/CRLF/U+2028/U+2029), and
+         *       raw non-LineTerminator control bytes (VT/FF/TAB...).
+         * @note Deliberately a separate scalar decoder from the RFC `"`
+         *       SIMD path; parse_string() routes to it when the captured
+         *       JSON5 mode is on, so the RFC body is byte-for-byte
+         *       unchanged. Every read is explicitly m_end-bounded (needed
+         *       for parse_jsonl line sub-views).
          */
-        [[nodiscard]] bool parse_string_single(String &out);
+        [[nodiscard]] bool parse_string_json5(String &out, char quote);
         /**
          * @brief Parse an ASCII unquoted JSON5 identifier key
          * @param out Receives a borrowed view into the input buffer
