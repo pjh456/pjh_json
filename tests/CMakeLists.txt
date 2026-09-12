@@ -47,6 +47,7 @@ set(PJH_JSON_TEST_SOURCES
     json_types.cpp
     json_writer.cpp
     literal_test.cpp
+    merge_patch.cpp
     public_header_boundary.cpp
     read_file.cpp
     schema.cpp

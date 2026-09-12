@@ -69,6 +69,21 @@ namespace pjh::json
      */
     void patch(Json &target, const Json &patch,
                std::pmr::memory_resource *res = Config::instance().resource());
+
+    /**
+     * @brief Apply an RFC 7386 JSON Merge Patch in place
+     * @param target Value to merge into
+     * @param patch Merge patch value
+     * @param res Resource for created values/keys; must outlive target.
+     *        nullptr falls back to the global config resource.
+     * @throws std::bad_alloc on allocation failure (may leave a partial
+     *         merge; RFC 7386 has no other failure mode)
+     * @note patch non-object replaces target wholesale (cloned into res);
+     *       a null member deletes the target member; objects merge
+     *       recursively. Unlike Object::merge, null deletes rather than
+     *       overwrites. No atomicity guarantee (no semantic failure exists).
+     */
+    void merge_patch(Json &target, const Json &patch, std::pmr::memory_resource *res = Config::instance().resource());
 }
 
 #endif // INCLUDE_PJH_JSON_PATCH_HPP

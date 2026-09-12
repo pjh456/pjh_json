@@ -582,4 +582,51 @@ namespace pjh::json
         if (result.is_err())
             throw std::move(result).unwrap_err();
     }
+
+    // --- merge_patch ---
+
+    namespace
+    {
+        /*
+         * Recursive RFC 7386 merge (see the public entry for the contract)
+         *
+         * A non-object patch replaces the target wholesale; otherwise the
+         * target is coerced to an object (into res), null members delete,
+         * and every other member is merged recursively. New keys are owned
+         * into res, so the patch may die afterwards. No atomicity: only
+         * bad_alloc can fail, matching Object::merge's existing posture.
+         */
+        void merge_patch_impl(Json &target, const Json &patch, std::pmr::memory_resource *res)
+        {
+            const Object *patch_obj = patch.try_as_object();
+            if (patch_obj == nullptr)
+            {
+                target = patch.clone(res);
+                return;
+            }
+            if (!target.is_object())
+                target = Json(Object(res));
+            Object &target_obj = *target.try_as_object();
+            for (const Object::Entry &entry : *patch_obj)
+            {
+                const std::string_view key = entry.first;
+                const Json &patch_value = entry.second;
+                if (patch_value.is_null())
+                {
+                    target_obj.remove(key);
+                    continue;
+                }
+                if (!target_obj.contains(key))
+                    target_obj.insert(key, Json(), res);
+                merge_patch_impl(target_obj.at(key), patch_value, res);
+            }
+        }
+    }
+
+    void merge_patch(Json &target, const Json &patch, std::pmr::memory_resource *res)
+    {
+        if (!res)
+            res = Config::instance().resource();
+        merge_patch_impl(target, patch, res);
+    }
 }
