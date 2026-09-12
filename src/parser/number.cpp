@@ -59,7 +59,7 @@ namespace pjh::json
      *    The output value is unspecified on out-of-range across standard
      *    libraries, so only the error code may be inspected.
      */
-    Json Parser::parse_number()
+    bool Parser::parse_number(Json &out)
     {
         const char *start = m_curr;
 
@@ -72,16 +72,20 @@ namespace pjh::json
             break;
         case grammar::number_error::no_int_digits:
             // cursor at the first non-digit (== after '-' when signed)
-            throw_parse_error("Invalid number: no digits after '-'", m_curr, m_begin);
+            fail(ErrorCode::NumberNoIntDigits, m_curr);
+            return false;
         case grammar::number_error::leading_zero:
             // cursor past the integer run, exactly as before
-            throw_parse_error("Invalid number: leading zeros are not allowed", m_curr, m_begin);
+            fail(ErrorCode::NumberLeadingZero, m_curr);
+            return false;
         case grammar::number_error::no_frac_digits:
             // cursor right after '.', exactly as before
-            throw_parse_error("Invalid number: no digits after decimal point", m_curr, m_begin);
+            fail(ErrorCode::NumberNoFracDigits, m_curr);
+            return false;
         case grammar::number_error::no_exp_digits:
             // cursor right after the optional exponent sign, exactly as before
-            throw_parse_error("Invalid number: no digits in exponent", m_curr, m_begin);
+            fail(ErrorCode::NumberNoExpDigits, m_curr);
+            return false;
         }
 
         const bool is_negative = scan.negative;
@@ -97,7 +101,8 @@ namespace pjh::json
             {
                 uint64_t uval = parse_u64(int_start, digits);
                 int64_t val = is_negative ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
-                return Json(val);
+                out = Json(val);
+                return true;
             }
             // 19 digits: digit-by-digit comparison against the INT64 limits
             if (digits == 19 && fits_int64_19(int_start, is_negative))
@@ -108,7 +113,8 @@ namespace pjh::json
                     val = std::numeric_limits<int64_t>::min(); // -2^63: negation would overflow
                 else
                     val = is_negative ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
-                return Json(val);
+                out = Json(val);
+                return true;
             }
         }
 
@@ -125,9 +131,17 @@ namespace pjh::json
         double val = 0.0;
         auto [end, ec] = std::from_chars(start, m_curr, val);
         if (ec == std::errc::result_out_of_range)
-            throw_parse_error("Number out of double range", start, m_begin);
+        {
+            // token start, including a leading '-'
+            fail(ErrorCode::NumberOutOfRange, start);
+            return false;
+        }
         if (ec != std::errc{} || end != m_curr)
-            throw_parse_error("Invalid number format", m_curr, m_begin);
-        return Json(val);
+        {
+            fail(ErrorCode::NumberInvalidFormat, m_curr);
+            return false;
+        }
+        out = Json(val);
+        return true;
     }
 }

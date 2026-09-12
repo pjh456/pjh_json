@@ -251,3 +251,17 @@ TEST_CASE("Error: positional suffix only when positioned")
     CHECK(positioned.format() == "Unterminated string at offset 4");
     CHECK(context_free.format() == "Unterminated string");
 }
+
+TEST_CASE("Error: empty detail still substitutes the placeholder")
+{
+    // Regression: the placeholder replacement must not be gated on a
+    // non-empty detail. An empty duplicate key renders `Duplicate key ""`
+    // rather than leaving the literal `{}` (golden text identity).
+    Error err{ErrorCode::DuplicateKey, Category::Parse, 0, false,
+              std::string_view{}};
+    CHECK(err.format() == "Duplicate key \"\" in object");
+    ParseError exc(err);
+    CHECK(std::string_view(exc.what()) == "Duplicate key \"\" in object");
+    CHECK(exc.offset() == 0);
+    CHECK(exc.category() == Category::Parse);
+}

@@ -285,15 +285,12 @@ namespace pjh::json
     inline std::string Error::format() const
     {
         std::string out(message_of(code));
-        if (!detail.empty())
-        {
-            const auto p = out.find("{}");
-            if (p != std::string::npos)
-                out.replace(p, 2, detail);
-            // No placeholder: detail contributes nothing (defensive; every
-            // detail-carrying code carries "{}" — pinned by the golden table
-            // and the 79.5 consistency assert).
-        }
+        // Substitute whenever the template carries a placeholder, even for an
+        // empty detail: a duplicate empty key must render `Duplicate key ""`
+        // and not leave the literal `{}` (golden table / text identity).
+        const auto p = out.find("{}");
+        if (p != std::string::npos)
+            out.replace(p, 2, detail); // no placeholder => no-op
         if (positioned)
             out += " at offset " + std::to_string(position);
         return out;

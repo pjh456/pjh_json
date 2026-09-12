@@ -78,13 +78,31 @@ namespace pjh::json
 
     uint32_t Parser::parse_hex4()
     {
-        return pjh::json::parse_hex4(m_curr, m_begin);
+        uint32_t out = 0;
+        if (!parse_hex4(out))
+            throw ParseError(m_error);
+        return out;
+    }
+
+    bool Parser::parse_hex4(uint32_t &out)
+    {
+        const char *err_pos = nullptr;
+        ErrorCode c = pjh::json::parse_hex4(m_curr, out, err_pos);
+        if (c != ErrorCode::None)
+        {
+            fail(c, err_pos);
+            return false;
+        }
+        return true;
     }
 
     /*
      * Read 4 hex digits at current position (advances cursor)
+     *
+     * On success returns ErrorCode::None and fills out; on failure returns
+     * the key and sets err_pos to the offending digit.
      */
-    uint32_t parse_hex4(const char *&curr, const char *begin)
+    ErrorCode parse_hex4(const char *&curr, uint32_t &out, const char *&err_pos)
     {
         uint32_t code = 0;
         for (int i = 0; i < 4; ++i)
@@ -92,12 +110,16 @@ namespace pjh::json
             char c = *curr++;
             int v = grammar::hex_value(c);
             if (v < 0)
+            {
                 // `curr` was advanced by *curr++ above; the offending digit is
                 // the previous byte. Report that position, not the one past it.
-                throw_parse_error("Invalid hex digit in unicode escape", curr - 1, begin);
+                err_pos = curr - 1;
+                return ErrorCode::InvalidHexDigit;
+            }
             code = (code << 4) | static_cast<uint32_t>(v);
         }
-        return code;
+        out = code;
+        return ErrorCode::None;
     }
 
     /*
@@ -107,8 +129,11 @@ namespace pjh::json
      * 2-byte: U+0080 - U+07FF
      * 3-byte: U+0800 - U+FFFF
      * 4-byte: U+10000 - U+10FFFF
+     *
+     * @return false when cp is outside the Unicode range (InvalidCodepoint,
+     *         context-free)
      */
-    void encode_utf8(uint32_t cp, char *&dst)
+    bool encode_utf8(uint32_t cp, char *&dst)
     {
         if (cp <= 0x7F)
         {
@@ -134,8 +159,9 @@ namespace pjh::json
         }
         else
         {
-            throw ParseError("Invalid unicode codepoint");
+            return false;
         }
+        return true;
     }
 
     /*
@@ -145,8 +171,12 @@ namespace pjh::json
      * 2. Simple escapes (" \\ / b f n r t) write the corresponding char.
      * 3. Unicode '\uXXXX': parse hex4, handle surrogate pairs,
      *    then encode as UTF-8.
+     *
+     * @return ErrorCode::None on success; on failure the key is returned
+     *         and err_pos is the offending byte (nullptr for the
+     *         context-free InvalidCodepoint).
      */
-    void handle_escape(char *&dst, const char *&m_curr, const char *m_begin)
+    ErrorCode handle_escape(char *&dst, const char *&m_curr, const char *&err_pos)
     {
         ++m_curr;
         char decoded = grammar::short_escape_value(*m_curr);
@@ -154,13 +184,25 @@ namespace pjh::json
         {
             *dst++ = decoded;
             ++m_curr;
-            return;
+            return ErrorCode::None;
         }
         if (*m_curr != 'u')
-            throw_parse_error("Invalid escape character", m_curr, m_begin);
+        {
+            err_pos = m_curr;
+            return ErrorCode::InvalidEscapeChar;
+        }
 
         ++m_curr;
-        uint32_t cp = parse_hex4(m_curr, m_begin);
+        uint32_t cp = 0;
+        {
+            const char *ep = nullptr;
+            ErrorCode ec = pjh::json::parse_hex4(m_curr, cp, ep);
+            if (ec != ErrorCode::None)
+            {
+                err_pos = ep;
+                return ec;
+            }
+        }
 
         // High surrogate (U+D800-U+DBFF): expect a low surrogate pair
         if (grammar::is_high_surrogate(cp))
@@ -168,18 +210,39 @@ namespace pjh::json
             if (m_curr[0] == '\\' && m_curr[1] == 'u')
             {
                 m_curr += 2;
-                uint32_t cp2 = parse_hex4(m_curr, m_begin);
+                uint32_t cp2 = 0;
+                const char *ep = nullptr;
+                ErrorCode ec = pjh::json::parse_hex4(m_curr, cp2, ep);
+                if (ec != ErrorCode::None)
+                {
+                    err_pos = ep;
+                    return ec;
+                }
                 if (grammar::is_low_surrogate(cp2))
                     cp = 0x10000 + (((cp - 0xD800) << 10) | (cp2 - 0xDC00));
                 else
-                    throw_parse_error("Invalid surrogate pair", m_curr, m_begin);
+                {
+                    err_pos = m_curr;
+                    return ErrorCode::InvalidSurrogatePair;
+                }
             }
             else
-                throw_parse_error("Expected low surrogate", m_curr, m_begin);
+            {
+                err_pos = m_curr;
+                return ErrorCode::ExpectedLowSurrogate;
+            }
         }
         // Lone low surrogate (U+DC00-U+DFFF) not allowed by RFC 8259 §7
         else if (grammar::is_low_surrogate(cp))
-            throw_parse_error("Lone low surrogate, expected high surrogate first", m_curr, m_begin);
-        encode_utf8(cp, dst);
+        {
+            err_pos = m_curr;
+            return ErrorCode::LoneLowSurrogate;
+        }
+        if (!encode_utf8(cp, dst))
+        {
+            err_pos = nullptr;
+            return ErrorCode::InvalidCodepoint;
+        }
+        return ErrorCode::None;
     }
 }

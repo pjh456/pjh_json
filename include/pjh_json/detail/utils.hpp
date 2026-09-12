@@ -16,9 +16,15 @@ namespace pjh::json
         throw ParseError(std::string(msg) + " at offset " + std::to_string(off), off);
     }
 
-    uint32_t parse_hex4(const char *&curr, const char *begin);
-    void encode_utf8(uint32_t cp, char *&dst);
-    void handle_escape(char *&dst, const char *&m_curr, const char *m_begin);
+    // On success returns ErrorCode::None; on failure returns the key and sets
+    // err_pos to the offending input byte. Offsets are computed by the caller
+    // (Parser::fail) from err_pos.
+    ErrorCode parse_hex4(const char *&curr, uint32_t &out, const char *&err_pos);
+    // returns false => InvalidCodepoint (context-free)
+    bool encode_utf8(uint32_t cp, char *&dst);
+    // On success returns ErrorCode::None; err_pos==nullptr => context-free
+    // (InvalidCodepoint).
+    ErrorCode handle_escape(char *&dst, const char *&curr, const char *&err_pos);
 
 } // namespace pjh::json
 

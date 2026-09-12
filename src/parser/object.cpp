@@ -149,16 +149,16 @@ namespace pjh::json
     /*
      * Track seen keys via unordered_set for duplicate detection.
      *
-     * If the key was already inserted, throw ParseError.
-     * Only called when Config::strict_duplicate_keys() is enabled.
+     * Inserts the key and reports whether it is new (false => duplicate).
+     * Only called when Config::strict_duplicate_keys() is enabled. No string
+     * is materialised on the error path: the caller borrows the key content
+     * (a stable view into the input buffer) into the Error slot.
      */
-    static void check_duplicate_key(
+    static bool check_duplicate_key(
         std::string_view key,
         std::pmr::unordered_set<std::string_view> &seen)
     {
-        if (!seen.insert(key).second)
-            throw ParseError(
-                std::string("Duplicate key \"") + std::string(key) + "\" in object");
+        return seen.insert(key).second;
     }
 
     /*
@@ -181,10 +181,13 @@ namespace pjh::json
      *       is skipped entirely.
      *    e. Check for ',' (continue) or '}' (done).
      */
-    void Parser::parse_object_inplace(Json &out)
+    bool Parser::parse_object_inplace(Json &out)
     {
         if (m_max_depth != 0 && m_depth + 1 > m_max_depth)
-            throw_parse_error("Maximum nesting depth exceeded", m_curr, m_begin);
+        {
+            fail(ErrorCode::MaxDepthExceeded, m_curr);
+            return false;
+        }
         DepthFrame frame(*this);
 
         // Consume '{' and create object
@@ -197,7 +200,7 @@ namespace pjh::json
         {
             ++m_curr;
             out = std::move(obj);
-            return;
+            return true;
         }
 
         // Pre-allocate: the outermost container bounds its entry count
@@ -220,22 +223,36 @@ namespace pjh::json
             // Parse key
             skip_whitespace();
             if (*m_curr != '"')
-                throw_parse_error("Expected string key in object", m_curr, m_begin);
-            auto key = parse_string();
-            if (seen)
-                check_duplicate_key(key, *seen);
+            {
+                fail(ErrorCode::ExpectedStringKey, m_curr);
+                return false;
+            }
+            String key;
+            if (!parse_string(key))
+                return false;
+            if (seen && !check_duplicate_key(key, *seen))
+            {
+                // Borrow the key content (a stable view into the input
+                // buffer) into the error slot; the compat shell copies it
+                // into the owned what() string in the same frame.
+                fail_context(ErrorCode::DuplicateKey, std::string_view(key));
+                return false;
+            }
 
             // Parse colon separator
             skip_whitespace();
             if (*m_curr != ':')
-                throw_parse_error("Expected ':' in object", m_curr, m_begin);
+            {
+                fail(ErrorCode::ExpectedColon, m_curr);
+                return false;
+            }
             ++m_curr;
 
             // Parse value — last-wins duplicate policy, mirroring
             // Object::insert: the first occurrence keeps its key and
             // position, its value is overwritten in place; append only
             // when the key is unseen. When strict is ON a duplicate
-            // already threw above, so this scan block does not run at all
+            // already failed above, so this scan block does not run at all
             // and every key takes the append path.
             auto &entries = obj.data();
             size_t pos = entries.size();
@@ -273,28 +290,36 @@ namespace pjh::json
             }
             if (pos < entries.size())
             {
-                parse_value_inplace(entries[pos].second);
+                if (!parse_value_inplace(entries[pos].second))
+                    return false;
             }
             else
             {
                 entries.emplace_back(std::move(key), Json(nullptr));
-                parse_value_inplace(entries.back().second);
+                if (!parse_value_inplace(entries.back().second))
+                    return false;
             }
 
             // Check for closing brace or comma
             skip_whitespace();
             if (m_curr >= m_end)
-                throw_parse_error("Unexpected end of object", m_curr, m_begin);
+            {
+                fail(ErrorCode::UnexpectedEndOfObject, m_curr);
+                return false;
+            }
             if (*m_curr == '}')
             {
                 ++m_curr;
                 out = std::move(obj);
-                return;
+                return true;
             }
             if (*m_curr == ',')
                 ++m_curr;
             else
-                throw_parse_error("Expected ',' or '}' in object", m_curr, m_begin);
+            {
+                fail(ErrorCode::ExpectedCommaOrBrace, m_curr);
+                return false;
+            }
         }
     }
 }

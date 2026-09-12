@@ -10,6 +10,7 @@
 #include <memory_resource>
 
 #include "document.hpp"
+#include "error.hpp"
 
 namespace pjh::json
 {
@@ -37,6 +38,8 @@ namespace pjh::json
         bool m_strict_utf8;         // Strict UTF-8 validation of string content (per-Parser, ctor-captured)
         size_t m_depth = 0;         // Current nesting depth (open containers)
         size_t m_max_depth;         // Captured depth limit (0 = unlimited, default from Config)
+        Error m_error{};            // first failure wins; code==None => ok
+        bool m_has_error = false;   // fast early-out for fail()/fail_context()
 
     public:
         /**
@@ -73,9 +76,31 @@ namespace pjh::json
                 m_max_depth(Config::instance().max_depth()) {}
 
         /**
+         * @brief Zero-throw kernel: parse a complete JSON value into @p out
+         * @param out Receives the parsed value on success; untouched on
+         *        failure (callers discard it)
+         * @return true on success; false when the first failure was recorded
+         *         in error()
+         * @throws std::bad_alloc only (non-recoverable; plan 79 §3.2)
+         * @note Input must be padded (m_assume_padded must be true).
+         */
+        [[nodiscard]] bool parse(Json &out);
+
+        /**
+         * @brief First recorded kernel failure
+         * @return The slot; code==None (has_error()==false) when no failure
+         * @note `detail` inside the returned Error is a borrowed view, valid
+         *       only while the input buffer is alive; the throwing
+         *       compatibility shell materialises what() in the same frame.
+         */
+        [[nodiscard]] const Error &error() const noexcept { return m_error; }
+
+        /**
          * @brief Parse a complete JSON value
          * @return Fully constructed Json tree
          * @throws ParseError if JSON is invalid or if extra characters follow
+         * @note Compatibility shell over parse(Json&); behavior is unchanged
+         *       (type, Category, offset() and what() are byte-identical).
          * @note Skips leading and trailing whitespace. Input must be padded
          *       (m_assume_padded must be true).
          * @note Optionally strips a leading UTF-8 BOM before
@@ -91,11 +116,41 @@ namespace pjh::json
          * @brief Read 4 hex digits at current position (advances cursor)
          * @return Decoded 16-bit value
          * @throws ParseError on non-hex digit
+         * @note Compatibility shell over the internal bool form; behavior is
+         *       unchanged.
          * @note Called from unicode escape handling during string parsing.
          */
         [[nodiscard]] uint32_t parse_hex4();
 
     private:
+        // ---- error slot helpers (first error wins; zero allocation) ----
+        /**
+         * @brief Record a positioned failure at @p pos (first error wins)
+         * @param c Kernel error key
+         * @param pos Offending input position; offset = pos - m_begin
+         */
+        void fail(ErrorCode c, const char *pos) noexcept
+        {
+            if (m_has_error)
+                return;
+            m_error = Error{c, Category::Parse,
+                            static_cast<size_t>(pos - m_begin), true, {}};
+            m_has_error = true;
+        }
+
+        /**
+         * @brief Record a context-free failure (first error wins)
+         * @param c Kernel error key
+         * @param detail Borrowed detail for a `{}`-carrying message
+         */
+        void fail_context(ErrorCode c, std::string_view detail = {}) noexcept
+        {
+            if (m_has_error)
+                return;
+            m_error = Error{c, Category::Parse, 0, false, detail};
+            m_has_error = true;
+        }
+
         /**
          * @brief Skip whitespace (SIMD-accelerated)
          */
@@ -110,62 +165,57 @@ namespace pjh::json
          */
         void skip_leading_bom();
         /**
-         * @brief Parse any JSON value (returns new Json)
+         * @brief Parse any JSON value into @p out (top-level dispatch)
+         * @return false on failure (recorded in m_error)
+         * @note Preserves the "Unexpected character parsing value" /
+         *       "Unexpected end of input" messages of the top-level dispatch.
          */
-        Json parse_value();
+        [[nodiscard]] bool parse_value(Json &out);
         /**
-         * @brief Parse value into existing Json (avoids move)
+         * @brief Parse a value into an existing Json (container-element dispatch)
+         * @return false on failure (recorded in m_error)
+         * @note Preserves the "Unexpected character" message of the
+         *       container-element dispatch (distinct from parse_value()).
          */
-        void parse_value_inplace(Json &out);
-        /**
-         * @brief Parse JSON object
-         */
-        Json parse_object()
-        {
-            Json out;
-            parse_object_inplace(out);
-            return out;
-        }
-
-        /**
-         * @brief Parse JSON array
-         */
-        Json parse_array()
-        {
-            Json out;
-            parse_array_inplace(out);
-            return out;
-        }
+        [[nodiscard]] bool parse_value_inplace(Json &out);
         /**
          * @brief Parse object into existing Json
+         * @return false on failure (recorded in m_error)
          */
-        void parse_object_inplace(Json &out);
+        [[nodiscard]] bool parse_object_inplace(Json &out);
         /**
          * @brief Parse array into existing Json
+         * @return false on failure (recorded in m_error)
          */
-        void parse_array_inplace(Json &out);
+        [[nodiscard]] bool parse_array_inplace(Json &out);
         /**
          * @brief Parse JSON string (SIMD scan with escape fallback)
-         * @return Borrowed string_view into the input buffer
+         * @param out Receives a borrowed view into the input buffer
+         * @return false on failure (recorded in m_error)
          */
-        String parse_string();
+        [[nodiscard]] bool parse_string(String &out);
         /**
-         * @brief Parse JSON number (int64 or double)
-         * @return Json holding int64 or double
-         * @throws ParseError if the token is malformed, or if its value is
-         *         syntactically valid but out of double range (not
-         *         representable as a finite double; RFC 8259 §6 permits this
-         *         documented range limit)
+         * @brief Parse JSON number (int64 or double) into @p out
+         * @return false on failure (recorded in m_error)
+         * @note The token is malformed, or it is syntactically valid but out
+         *       of double range (not representable as a finite double;
+         *       RFC 8259 §6 permits this documented range limit).
          * @note The range gate is `std::from_chars`'s errc result; only the
          *       error code is inspected (the output value is unspecified on
          *       out-of-range across standard libraries).
          */
-        Json parse_number();
+        [[nodiscard]] bool parse_number(Json &out);
         /**
-         * @brief Parse literal (true/false/null) via bit_cast magic
-         * @return Json holding bool or nullptr
+         * @brief Parse literal (true/false/null) into @p out
+         * @return false on failure (recorded in m_error)
          */
-        Json parse_literal();
+        [[nodiscard]] bool parse_literal(Json &out);
+        /**
+         * @brief Read 4 hex digits at the cursor (advances cursor)
+         * @param out Receives the decoded 16-bit value
+         * @return false on failure (recorded in m_error)
+         */
+        [[nodiscard]] bool parse_hex4(uint32_t &out);
 
         /**
          * @brief Byte budget for the initial reserve of an outermost

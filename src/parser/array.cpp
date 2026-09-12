@@ -13,10 +13,13 @@ namespace pjh::json
      * 4. Loop: place a null placeholder element, parse value in-place,
      *    then check for ',' (continue) or ']' (done).
      */
-    void Parser::parse_array_inplace(Json &out)
+    bool Parser::parse_array_inplace(Json &out)
     {
         if (m_max_depth != 0 && m_depth + 1 > m_max_depth)
-            throw_parse_error("Maximum nesting depth exceeded", m_curr, m_begin);
+        {
+            fail(ErrorCode::MaxDepthExceeded, m_curr);
+            return false;
+        }
         DepthFrame frame(*this);
 
         // Consume '[' and create array
@@ -29,7 +32,7 @@ namespace pjh::json
         {
             ++m_curr;
             out = std::move(arr);
-            return;
+            return true;
         }
 
         // Pre-allocate: the outermost container bounds its element count
@@ -40,19 +43,23 @@ namespace pjh::json
         {
             // Place null then overwrite via in-place parse
             arr.data().emplace_back(nullptr);
-            parse_value_inplace(arr.data().back());
+            if (!parse_value_inplace(arr.data().back()))
+                return false;
 
             skip_whitespace();
             if (*m_curr == ']')
             {
                 ++m_curr;
                 out = std::move(arr);
-                return;
+                return true;
             }
             if (*m_curr == ',')
                 ++m_curr;
             else
-                throw_parse_error("Expected ',' or ']' in array", m_curr, m_begin);
+            {
+                fail(ErrorCode::ExpectedCommaOrBracket, m_curr);
+                return false;
+            }
         }
     }
 }

@@ -729,8 +729,15 @@ TEST_CASE("Parser: strict duplicate keys large object") {
     auto de = parse_copy(esc);
     REQUIRE(de.root().size() == (size_t)n);
 
-    // Empty-string key duplicated still throws.
-    REQUIRE_THROWS_AS((void)parse_copy(R"({"":1,"":2})"), ParseError);
+    // Empty-string key duplicated still throws, and the empty detail must
+    // substitute into the message (not leave a literal "{}").
+    try {
+        (void)parse_copy(R"({"":1,"":2})");
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 0);
+        REQUIRE(std::string(e.what()) == "Duplicate key \"\" in object");
+    }
 }
 
 TEST_CASE("Parser: in_situ padding") {
@@ -1247,4 +1254,46 @@ TEST_CASE("Parser: strict utf-8 bom boundary") {
     Config::instance().set_strip_bom(true);
     auto ok = parse_copy(bom() + "1");
     REQUIRE(ok.root().as_int() == (int64_t)1);
+}
+
+TEST_CASE("Parser: kernel status") {
+    // success: the zero-throw kernel reports true and an empty slot
+    std::string good = R"({"a":1})";
+    good.append(kPaddingWidth, '\0');
+    Parser p(std::string_view(good.data(), good.size() - kPaddingWidth),
+             Config::instance().resource(), true);
+    Json root;
+    REQUIRE(p.parse(root));
+    REQUIRE_FALSE(p.error().has_error());
+    REQUIRE(root["a"] == (int64_t)1);
+
+    // failure: the kernel reports false and the slot holds the first error
+    std::string bad = R"({"a":})";
+    bad.append(kPaddingWidth, '\0');
+    Parser q(std::string_view(bad.data(), bad.size() - kPaddingWidth),
+             Config::instance().resource(), true);
+    Json out;
+    REQUIRE_FALSE(q.parse(out));
+    REQUIRE(q.error().has_error());
+    REQUIRE(q.error().position == 5); // '}' after ':'
+    REQUIRE(q.error().category == Category::Parse);
+    REQUIRE(q.error().positioned);
+
+    // first error wins: a second call cannot overwrite the slot
+    const size_t pos = q.error().position;
+    Json out2;
+    REQUIRE_FALSE(q.parse(out2));
+    REQUIRE(q.error().position == pos);
+
+    // the compatibility shell still throws the byte-identical positioned
+    // ParseError materialised from the same slot
+    try {
+        (void)q.parse();
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == pos);
+        REQUIRE(e.category() == Category::Parse);
+        REQUIRE(std::string(e.what()) ==
+                "Unexpected character at offset 5");
+    }
 }

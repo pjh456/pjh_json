@@ -82,27 +82,48 @@ namespace pjh::json
     }
 
     /*
-     * Parse a complete JSON value from the padded input.
+     * Zero-throw kernel: parse a complete JSON value from the padded input.
      *
      * 1. Reject if the caller did not promise NUL padding (flag only -
      *    parse() never inspects padding bytes).
      * 2. Parse the top-level value (skips leading whitespace).
      * 3. Skip trailing whitespace.
      * 4. Reject extra characters after the parsed value.
+     *
+     * The first failure is recorded in m_error; every later failure is
+     * ignored (first error wins), mirroring the old immediate stack unwind.
+     */
+    bool Parser::parse(Json &out)
+    {
+        if (!m_assume_padded)
+        {
+            fail_context(ErrorCode::ParserRequiresPadding);
+            return false;
+        }
+        if (m_strip_bom)
+            skip_leading_bom();
+        if (!parse_value(out))
+            return false;
+        skip_whitespace();
+        if (m_curr < m_end)
+        {
+            fail(ErrorCode::ExtraCharactersAfterValue, m_curr);
+            return false;
+        }
+        return true;
+    }
+
+    /*
+     * Compatibility shell: same signature/behavior as before 79.2. The
+     * kernel records the first failure; materialise it as a ParseError in
+     * this frame (detail is copied into the owned what() string).
      */
     Json Parser::parse()
     {
-        if (!m_assume_padded)
-            throw ParseError(
-                "Parser requires NUL padding (kPaddingWidth trailing"
-                " NUL bytes); use the parse_* entry points");
-        if (m_strip_bom)
-            skip_leading_bom();
-        Json result = parse_value();
-        skip_whitespace();
-        if (m_curr < m_end)
-            throw_parse_error("Extra characters after complete JSON value", m_curr, m_begin);
-        return result;
+        Json out;
+        if (!parse(out))
+            throw ParseError(m_error);
+        return out;
     }
 
     /*

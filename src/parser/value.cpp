@@ -5,32 +5,35 @@
 namespace pjh::json
 {
     /*
-     * In-place value dispatch (avoids move)
+     * In-place value dispatch (container elements; avoids move)
      *
      * 1. Skip leading whitespace.
      * 2. Dispatch by the first character to a type-specific parser:
      *    - '{' '[' : in-place variants write directly into out.
-     *    - '"' t/f/n '-' 0-9 : assign via operator= or return-value.
+     *    - '"' t/f/n '-' 0-9 : assign via operator= or move.
+     * 3. Any other byte is "Unexpected character" (no "parsing value").
      */
-    void Parser::parse_value_inplace(Json &out)
+    bool Parser::parse_value_inplace(Json &out)
     {
         skip_whitespace();
         switch (*m_curr)
         {
         case '{':
-            parse_object_inplace(out);
-            return;
+            return parse_object_inplace(out);
         case '[':
-            parse_array_inplace(out);
-            return;
+            return parse_array_inplace(out);
         case '"':
-            out = parse_string();
-            return;
+        {
+            String s;
+            if (!parse_string(s))
+                return false;
+            out = std::move(s);
+            return true;
+        }
         case 't':
         case 'f':
         case 'n':
-            out = parse_literal();
-            return;
+            return parse_literal(out);
         case '-':
         case '0':
         case '1':
@@ -42,36 +45,42 @@ namespace pjh::json
         case '7':
         case '8':
         case '9':
-            out = parse_number();
-            return;
+            return parse_number(out);
         default:
-            throw_parse_error("Unexpected character", m_curr, m_begin);
+            fail(ErrorCode::UnexpectedCharacter, m_curr);
+            return false;
         }
     }
 
     /*
-     * Value dispatch returning a new Json
+     * Value dispatch for the top level (writes into out)
      *
-     * Same dispatch as in-place, but returns a new Json value each call.
-     * Also checks for '\0' sentinel to detect truncated input
-     * (only hit when padding is zeroed).
+     * Same dispatch as in-place, but also checks the '\0' sentinel to detect
+     * truncated input (only hit when padding is zeroed) and keeps the
+     * distinct "Unexpected character parsing value" message.
      */
-    Json Parser::parse_value()
+    bool Parser::parse_value(Json &out)
     {
         skip_whitespace();
 
         switch (*m_curr)
         {
         case '{':
-            return parse_object();
+            return parse_object_inplace(out);
         case '[':
-            return parse_array();
+            return parse_array_inplace(out);
         case '"':
-            return Json(parse_string());
+        {
+            String s;
+            if (!parse_string(s))
+                return false;
+            out = std::move(s);
+            return true;
+        }
         case 't':
         case 'f':
         case 'n':
-            return parse_literal();
+            return parse_literal(out);
         case '-':
         case '0':
         case '1':
@@ -83,13 +92,17 @@ namespace pjh::json
         case '7':
         case '8':
         case '9':
-            return parse_number();
+            return parse_number(out);
         case '\0':
             if (m_curr >= m_end)
-                throw_parse_error("Unexpected end of input", m_curr, m_begin);
+            {
+                fail(ErrorCode::UnexpectedEndOfInput, m_curr);
+                return false;
+            }
             [[fallthrough]];
         default:
-            throw_parse_error("Unexpected character parsing value", m_curr, m_begin);
+            fail(ErrorCode::UnexpectedValueCharacter, m_curr);
+            return false;
         }
     }
 }
