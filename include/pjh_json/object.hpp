@@ -37,6 +37,7 @@ namespace pjh::json
      *       data for parse_view); a destroyed, moved or reset() source
      *       leaves them dangling. To make a key independent of its source,
      *       use insert(key, val, res) (owned, copied into res) or clone().
+     *       A std::string temporary key is rejected at compile time.
      * @note The key is read-only through the iterators; data() remains the
      *       raw advanced surface (its key side is still writable by design).
      * @note The lookup index is a cache (`m_data` stays the order source).
@@ -342,8 +343,17 @@ namespace pjh::json
          * @note If key does not exist, default-constructed Json is inserted.
          * @note The key is borrowed on insert; for keys that must outlive
          *       their source use insert(key, val, res).
+         * @note A std::string temporary key is rejected at compile time.
          */
         Json &operator[](std::string_view key);
+
+        /**
+         * @brief Deleted: a std::string temporary key would dangle.
+         * @note Use insert(key, val, res) to own the key.
+         */
+        template <class T>
+            requires is_string_rvalue_v<T>
+        Json &operator[](T &&) = delete;
         /**
          * @brief Access key (read-only)
          * @param key Field name
@@ -405,12 +415,22 @@ namespace pjh::json
          * @note The key is borrowed: it must stay valid for the Object's
          *       lifetime. Do not pass a temporary std::string or a document
          *       buffer that may die before the Object; use
-         *       insert(key, val, res) to own the key.
+         *       insert(key, val, res) to own the key. A std::string temporary
+         *       is rejected at compile time.
          * @note The parser applies the same last-wins rule for duplicate
          *       keys unless strict_duplicate_keys is on
          *       (Config::set_strict_duplicate_keys).
          */
         void insert(std::string_view key, Json val);
+
+        /**
+         * @brief Deleted: a std::string temporary key would dangle.
+         * @note Use insert(key, val, res) to own the key.
+         */
+        template <class T>
+            requires is_string_rvalue_v<T>
+        void insert(T &&, Json) = delete;
+
         /**
          * @brief Insert or overwrite key-value pair (owns the key)
          * @param key Field name — content is copied into res; safe to let

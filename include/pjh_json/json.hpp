@@ -197,6 +197,8 @@ namespace pjh::json
          * @brief Construct string from string_view (borrowed)
          * @param sv Source view — caller must guarantee lifetime
          * @note Does NOT copy. Stores {ptr, len} inline.
+         * @note A std::string temporary is rejected at compile time; use
+         *       Json::own(sv, res) or Json(sv, res) to copy.
          */
         constexpr Json(std::string_view sv) : m_type(Type::StringView)
         {
@@ -235,6 +237,15 @@ namespace pjh::json
                 res = Config::instance().resource();
             m_data.heap = String::make_owned(sv, res);
         }
+
+        /**
+         * @brief Deleted: borrowing a std::string temporary would dangle.
+         * @note Use Json::own(sv, res) or Json(sv, res) to copy, or pass a
+         *       view over a live buffer.
+         */
+        template <class T>
+            requires is_string_rvalue_v<T>
+        explicit Json(T &&) = delete;
 
         /**
          * @brief Construct array value (takes ownership, heap-allocated)
@@ -432,8 +443,17 @@ namespace pjh::json
          * @param val Source view — caller must guarantee lifetime
          * @return *this
          * @note Does NOT copy.
+         * @note A std::string temporary is rejected at compile time.
          */
         Json &operator=(std::string_view val);
+
+        /**
+         * @brief Deleted: assigning a std::string temporary would dangle.
+         * @note Use Json::own(sv, res) or Json(sv, res) to copy.
+         */
+        template <class T>
+            requires is_string_rvalue_v<T>
+        Json &operator=(T &&) = delete;
 
         /**
          * @brief Assign C string (borrowed view)
@@ -1041,8 +1061,17 @@ namespace pjh::json
          * @note Missing key is default-constructed in place.
          * @note The key is borrowed on insert; for keys that must outlive
          *       their source use Object::insert(key, val, res).
+         * @note A std::string temporary key is rejected at compile time.
          */
         Json &operator[](std::string_view key);
+
+        /**
+         * @brief Deleted: a std::string temporary key would dangle.
+         * @note Use Object::insert(key, val, res) to own the key.
+         */
+        template <class T>
+            requires is_string_rvalue_v<T>
+        Json &operator[](T &&) = delete;
         /**
          * @brief Const access key
          * @param key Field name

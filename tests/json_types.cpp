@@ -83,6 +83,27 @@ namespace
         }
         return false;
     }
+
+    // Expression-SFINAE probes (task-19 lesson: never name a failed member
+    // lookup bare — probe the whole call expression instead).
+    template <class O, class K, class = void>
+    struct insert_key_ok : std::false_type {};
+    template <class O, class K>
+    struct insert_key_ok<O, K, std::void_t<decltype(
+        std::declval<O &>().insert(std::declval<K>(), std::declval<Json>()))>>
+        : std::true_type {};
+
+    template <class O, class K, class = void>
+    struct subscript_key_ok : std::false_type {};
+    template <class O, class K>
+    struct subscript_key_ok<O, K, std::void_t<decltype(
+        std::declval<O &>()[std::declval<K>()])>> : std::true_type {};
+
+    template <class T, class = void>
+    struct array_of_ok : std::false_type {};
+    template <class T>
+    struct array_of_ok<T, std::void_t<decltype(Array::of(std::declval<T>()))>>
+        : std::true_type {};
 }
 
 TEST_CASE("Json: simple value") {
@@ -2699,4 +2720,74 @@ TEST_CASE("Object: merge maintains hash index") {
     expected.insert("merged_a", Json((int64_t)1000));
     expected.insert("merged_b", Json((int64_t)1001));
     REQUIRE(dst == expected);
+}
+
+TEST_CASE("Json: std::string temporary borrow is deleted (compile pins)") {
+    // Negative pins: an rvalue std::string / std::pmr::string must not reach
+    // the borrowed Json/String entry points.
+    static_assert(!std::is_constructible_v<Json, std::string>);
+    static_assert(!std::is_constructible_v<Json, std::pmr::string>);
+    static_assert(!std::is_assignable_v<Json &, std::string>);
+    static_assert(!std::is_assignable_v<Json &, std::pmr::string>);
+    static_assert(!std::is_constructible_v<String, std::string>);
+    static_assert(!std::is_constructible_v<String, std::pmr::string>);
+
+    // Positive pins: borrowed and owned surfaces stay reachable.
+    static_assert(std::is_constructible_v<Json, std::string_view>);
+    static_assert(std::is_constructible_v<Json, const char *>);
+    static_assert(std::is_constructible_v<Json, const std::string &>);
+    static_assert(std::is_constructible_v<Json, std::string &>);
+    static_assert(std::is_constructible_v<Json, std::pmr::string &>);
+    static_assert(std::is_constructible_v<String, std::string_view>);
+    static_assert(std::is_constructible_v<String, const std::string &>);
+    static_assert(std::is_constructible_v<Json, std::string_view,
+                                          std::pmr::memory_resource *>);
+
+    // Runtime positive: a live lvalue borrow stays zero-copy.
+    std::string s(48, 'L');
+    Json j(s);
+    REQUIRE(j.is_string());
+    REQUIRE(j.as_string().data() == s.data());
+    REQUIRE(j.as_string() == std::string_view(s));
+
+    // The explicit owned spelling for a temporary source still copies.
+    std::pmr::memory_resource *mr = std::pmr::new_delete_resource();
+    Json owned(std::string_view(std::string(48, 'O')), mr);
+    REQUIRE(owned.is_string());
+    REQUIRE(owned.as_string() == std::string(48, 'O'));
+}
+
+TEST_CASE("Object: std::string key temporary is deleted (compile pins)") {
+    // Negative pins: an rvalue std::string key must not reach the borrowed
+    // insert/subscript entry points, at both the Object and Json boundaries.
+    static_assert(!insert_key_ok<Object, std::string>::value);
+    static_assert(!insert_key_ok<Object, std::pmr::string>::value);
+    static_assert(!subscript_key_ok<Object, std::string>::value);
+    static_assert(!subscript_key_ok<Json, std::string>::value);
+
+    // Positive pins: literals, views and lvalues stay borrowed.
+    static_assert(insert_key_ok<Object, std::string_view>::value);
+    static_assert(insert_key_ok<Object, const char *>::value);
+    static_assert(insert_key_ok<Object, std::string &>::value);
+    static_assert(insert_key_ok<Object, const std::string &>::value);
+    static_assert(subscript_key_ok<Object, std::string_view>::value);
+    static_assert(subscript_key_ok<Object, const char *>::value);
+    static_assert(subscript_key_ok<Json, const char *>::value);
+    static_assert(subscript_key_ok<Json, std::string_view>::value);
+
+    // Array::of forwarding: rvalue std::string removed, string_view kept.
+    static_assert(!array_of_ok<std::string>::value);
+    static_assert(array_of_ok<std::string_view>::value);
+
+    // Runtime positive: literal and live-lvalue keys stay zero-copy.
+    Object o;
+    o.insert("lit", Json((int64_t)1));
+    o["lit2"] = Json((int64_t)2);
+    std::string k("live-key");
+    o.insert(k, Json((int64_t)3));
+    REQUIRE(o.begin()->first.is_owned() == false);
+    REQUIRE(o.contains("live-key"));
+    REQUIRE(o.at("lit") == (int64_t)1);
+    REQUIRE(o.at("lit2") == (int64_t)2);
+    REQUIRE(o.at("live-key") == (int64_t)3);
 }

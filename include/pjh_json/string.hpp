@@ -15,6 +15,23 @@ namespace pjh::json
 {
     class Json; // fwd: friend for the owned-header allocator pair
 
+    /// @cond DOXYGEN_SKIP
+    /**
+     * @brief True for a non-lvalue std::string or std::pmr::string.
+     *
+     * Borrowing such a temporary's buffer (a string_view conversion into
+     * Json/String/Object) outlives the temporary: the view is stored while
+     * the source dies at the end of the full-expression. Used to delete the
+     * implicit borrow entry points. Lvalues are deliberately NOT matched — a
+     * named string can legitimately outlive the borrower.
+     */
+    template <class T>
+    inline constexpr bool is_string_rvalue_v =
+        (std::is_same_v<std::remove_cvref_t<T>, std::string> ||
+         std::is_same_v<std::remove_cvref_t<T>, std::pmr::string>) &&
+        !std::is_lvalue_reference_v<T>;
+    /// @endcond
+
     /**
      * @brief JSON string — view (borrowed) or arena-allocated (owned).
      *
@@ -70,6 +87,8 @@ namespace pjh::json
          * @brief Borrowed view from string_view (no copy)
          * @param sv Source view — caller must guarantee lifetime
          * @note Stores {ptr, len} inline. Does NOT copy.
+         * @note A std::string temporary is rejected at compile time; use
+         *       String::own(res) or a view over a live buffer.
          */
         constexpr String(std::string_view sv) noexcept : m_storage(Storage::View)
         {
@@ -88,6 +107,14 @@ namespace pjh::json
             view_data.data = sv.data();
             view_data.length = static_cast<uint32_t>(sv.size());
         }
+
+        /**
+         * @brief Deleted: borrowing a std::string temporary would dangle.
+         * @note Use String::own(res), or pass a view over a live buffer.
+         */
+        template <class T>
+            requires is_string_rvalue_v<T>
+        explicit String(T &&) = delete;
 
         /**
          * @brief Owned string (takes ownership of an allocator-produced header)
