@@ -16,6 +16,7 @@ set(PJH_JSON_TEST_SOURCES
     json_writer.cpp
     literal_test.cpp
     read_file.cpp
+    std_interop.cpp
 )
 
 add_executable(pjh_json_tests ${PJH_JSON_TEST_SOURCES})
