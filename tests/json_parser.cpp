@@ -26,13 +26,15 @@ namespace
         size_t m_max_depth;
         bool m_strip_bom;
         bool m_strict_utf8;
+        bool m_json5;
 
         ConfigGuard()
             : m_strict(Config::instance().strict_duplicate_keys()),
               m_arena_block(Config::instance().arena_block_size()),
               m_max_depth(Config::instance().max_depth()),
               m_strip_bom(Config::instance().strip_bom()),
-              m_strict_utf8(Config::instance().strict_utf8())
+              m_strict_utf8(Config::instance().strict_utf8()),
+              m_json5(Config::instance().json5())
         {
         }
 
@@ -43,6 +45,7 @@ namespace
             Config::instance().set_max_depth(m_max_depth);
             Config::instance().set_strip_bom(m_strip_bom);
             Config::instance().set_strict_utf8(m_strict_utf8);
+            Config::instance().set_json5(m_json5);
         }
     };
 

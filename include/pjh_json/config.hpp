@@ -27,7 +27,7 @@ namespace pjh::json
      *
      * Threading contract:
      * - The knobs (strict_duplicate_keys / arena_block_size / max_depth /
-     *   strip_bom / strict_utf8) and storage() are lock-free atomics: their
+     *   strip_bom / strict_utf8 / json5) and storage() are lock-free atomics: their
      *   setters/getters may be called concurrently from any thread; values are
      *   captured at operation start (strict_duplicate_keys is read at each
      *   object entry, i.e. from the next object onward).
@@ -206,6 +206,40 @@ namespace pjh::json
         [[nodiscard]] bool strict_utf8() const noexcept { return m_strict_utf8.load(std::memory_order_relaxed); }
 
         /**
+         * @brief Enable the JSON5 input superset at parse time
+         * @note Lock-free: relaxed atomic store/load, safe to call
+         *       concurrently with parse. The value is captured at each
+         *       Parser construction; a change takes effect from the next
+         *       parse (capture-at-start granularity).
+         * @note Default: false = strict RFC 8259 (byte-for-byte the
+         *       pre-JSON5 behavior). When true the parser additionally
+         *       accepts line comments, slash-star block comments
+         *       (non-nesting), one trailing comma per array/object,
+         *       single-quoted strings, ASCII unquoted identifiers as
+         *       object keys, and the JSON5 ASCII whitespace bytes
+         *       VT (0x0B) / FF (0x0C).
+         * @note This is a PARTIAL JSON5 1.0.0 mode: JSON5 numbers
+         *       (hex, leading `+`, leading/trailing `.`), `Infinity`/
+         *       `NaN`, JSON5-only string escapes and line continuations,
+         *       and Unicode identifiers/whitespace are still rejected;
+         *       they land in later sub-tasks. Unsupported JSON5
+         *       constructs fail with existing ErrorCodes (no JSON5-only
+         *       error is introduced).
+         * @note Output is always RFC 8259: dump() is unaffected by this
+         *       knob, so a JSON5 parse followed by dump is a lossy
+         *       normalization (comments dropped, single quotes and
+         *       unquoted keys rewritten to double quotes, trailing
+         *       commas removed, whitespace collapsed by the options).
+         * @note The compile-time path (ConstJson::parse) cannot read
+         *       runtime config (std::atomic is not constexpr): it stays
+         *       RFC-only regardless of this knob.
+         * @note Orthogonal to strip_bom / strict_utf8: those keep their
+         *       own semantics under either mode.
+         */
+        void set_json5(bool enable) noexcept { m_json5.store(enable, std::memory_order_relaxed); }
+        [[nodiscard]] bool json5() const noexcept { return m_json5.load(std::memory_order_relaxed); }
+
+        /**
          * @brief Release global document
          * @note In debug builds, asserts no outstanding allocations from the
          *       global resource.
@@ -221,7 +255,8 @@ namespace pjh::json
          * @note Equivalent to configure(Pooled, 4096),
          *       strict_duplicate_keys = false, arena_block_size = 0 (auto),
          *       max depth = kDefaultMaxDepth (512, see set_max_depth()),
-         *       strip_bom = false, strict_utf8 = false, then release().
+         *       strip_bom = false, strict_utf8 = false, json5 = false,
+         *       then release().
          * @note Knob restoration uses atomic stores, still performed under
          *       the lock, in service of release_locked().
          * @warning Exclusive global teardown: destroys and replaces the global
@@ -254,6 +289,7 @@ namespace pjh::json
         std::atomic<size_t> m_max_depth{kDefaultMaxDepth};
         std::atomic<bool> m_strip_bom{false};
         std::atomic<bool> m_strict_utf8{false};
+        std::atomic<bool> m_json5{false};
         std::atomic<Storage> m_storage{Storage::Pooled};
         size_t m_block = 4096;
         std::unique_ptr<Document> m_global;

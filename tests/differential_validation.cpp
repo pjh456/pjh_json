@@ -128,8 +128,10 @@ TEST_CASE("Differential: consteval verdict vs runtime parse (default config)")
     Config &cfg = Config::instance();
     const bool saved_bom = cfg.strip_bom();
     const bool saved_utf8 = cfg.strict_utf8();
+    const bool saved_json5 = cfg.json5();
     cfg.set_strip_bom(false);
     cfg.set_strict_utf8(false);
+    cfg.set_json5(false);
 
     for (const auto &c : kCases)
     {
@@ -154,6 +156,7 @@ TEST_CASE("Differential: consteval verdict vs runtime parse (default config)")
 
     cfg.set_strip_bom(saved_bom);
     cfg.set_strict_utf8(saved_utf8);
+    cfg.set_json5(saved_json5);
 }
 
 TEST_CASE("Differential: documented divergences under opt-in knobs")
@@ -161,6 +164,8 @@ TEST_CASE("Differential: documented divergences under opt-in knobs")
     Config &cfg = Config::instance();
     const bool saved_bom = cfg.strip_bom();
     const bool saved_utf8 = cfg.strict_utf8();
+    const bool saved_json5 = cfg.json5();
+    cfg.set_json5(false);
 
     // D2 BOM (task 23): runtime strips, consteval stays grammar-strict.
     cfg.set_strip_bom(true);
@@ -183,4 +188,5 @@ TEST_CASE("Differential: documented divergences under opt-in knobs")
 
     cfg.set_strip_bom(saved_bom);
     cfg.set_strict_utf8(saved_utf8);
+    cfg.set_json5(saved_json5);
 }

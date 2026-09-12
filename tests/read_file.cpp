@@ -118,15 +118,18 @@ TEST_CASE("File: BOM") {
     struct StripBomGuard
     {
         bool m_strip;
+        bool m_json5;
 
         StripBomGuard()
-            : m_strip(Config::instance().strip_bom())
+            : m_strip(Config::instance().strip_bom()),
+              m_json5(Config::instance().json5())
         {
         }
 
         ~StripBomGuard()
         {
             Config::instance().set_strip_bom(m_strip);
+            Config::instance().set_json5(m_json5);
         }
     } guard;
 
@@ -289,11 +292,13 @@ TEST_CASE("File: parse from stream config knobs") {
         size_t m_max_depth;
         bool m_strip_bom;
         bool m_strict_utf8;
+        bool m_json5;
 
         StreamConfigGuard()
             : m_max_depth(Config::instance().max_depth()),
               m_strip_bom(Config::instance().strip_bom()),
-              m_strict_utf8(Config::instance().strict_utf8())
+              m_strict_utf8(Config::instance().strict_utf8()),
+              m_json5(Config::instance().json5())
         {
         }
 
@@ -302,6 +307,7 @@ TEST_CASE("File: parse from stream config knobs") {
             Config::instance().set_max_depth(m_max_depth);
             Config::instance().set_strip_bom(m_strip_bom);
             Config::instance().set_strict_utf8(m_strict_utf8);
+            Config::instance().set_json5(m_json5);
         }
     } guard;
 

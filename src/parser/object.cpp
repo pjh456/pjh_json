@@ -1,6 +1,7 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
 #include "pjh_json/detail/utils.hpp"
+#include "pjh_json/grammar.hpp"
 #include <functional>
 #include <optional>
 #include <string_view>
@@ -170,7 +171,8 @@ namespace pjh::json
      *    initialized only when Config::strict_duplicate_keys() is set; the
      *    non-strict first-match index is likewise lazy (large objects only).
      * 4. Loop:
-     *    a. Parse a string key.
+     *    a. Parse a key: `"..."` by default; under JSON5 also `'...'` or
+     *       an ASCII unquoted identifier.
      *    b. Conditionally check for duplicate keys.
      *    c. Expect and consume ':' separator.
      *    d. Parse the value in-place; if the key already exists (strict
@@ -179,8 +181,24 @@ namespace pjh::json
      *       strict ON a duplicate already threw in (b), so every key is
      *       distinct and each is appended directly; the first-match scan
      *       is skipped entirely.
-     *    e. Check for ',' (continue) or '}' (done).
+     *    e. Check for ',' (continue) or '}' (done). Under JSON5 a single
+     *       trailing comma before '}' is accepted.
      */
+    bool Parser::parse_identifier_key(String &out)
+    {
+        const char *start = m_curr;
+        if (m_curr >= m_end || !grammar::is_identifier_start(static_cast<unsigned char>(*m_curr)))
+        {
+            fail(ErrorCode::ExpectedStringKey, m_curr);
+            return false;
+        }
+        ++m_curr;
+        while (m_curr < m_end && grammar::is_identifier_continue(static_cast<unsigned char>(*m_curr)))
+            ++m_curr;
+        out = String(std::string_view(start, static_cast<size_t>(m_curr - start)));
+        return true;
+    }
+
     bool Parser::parse_object_inplace(Json &out)
     {
         if (m_max_depth != 0 && m_depth + 1 > m_max_depth)
@@ -220,16 +238,31 @@ namespace pjh::json
 
         while (true)
         {
-            // Parse key
+            // Parse key: `"..."` (always), plus `'...'` / ASCII identifier
+            // under JSON5.
             skip_whitespace();
-            if (*m_curr != '"')
-            {
-                fail(ErrorCode::ExpectedStringKey, m_curr);
-                return false;
-            }
             String key;
-            if (!parse_string(key))
-                return false;
+            if (m_json5 && m_curr < m_end && *m_curr == '\'')
+            {
+                if (!parse_string_single(key))
+                    return false;
+            }
+            else if (m_json5 && m_curr < m_end && *m_curr != '"' &&
+                     grammar::is_identifier_start(static_cast<unsigned char>(*m_curr)))
+            {
+                if (!parse_identifier_key(key))
+                    return false;
+            }
+            else
+            {
+                if (*m_curr != '"')
+                {
+                    fail(ErrorCode::ExpectedStringKey, m_curr);
+                    return false;
+                }
+                if (!parse_string(key))
+                    return false;
+            }
             if (seen && !check_duplicate_key(key, *seen))
             {
                 // Borrow the key content (a stable view into the input
@@ -314,7 +347,20 @@ namespace pjh::json
                 return true;
             }
             if (*m_curr == ',')
+            {
                 ++m_curr;
+                // JSON5: allow exactly one trailing comma before '}'.
+                if (m_json5)
+                {
+                    skip_whitespace();
+                    if (m_curr < m_end && *m_curr == '}')
+                    {
+                        ++m_curr;
+                        out = std::move(obj);
+                        return true;
+                    }
+                }
+            }
             else
             {
                 fail(ErrorCode::ExpectedCommaOrBrace, m_curr);

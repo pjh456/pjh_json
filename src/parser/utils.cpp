@@ -23,6 +23,15 @@ namespace pjh::json
      */
     void Parser::skip_whitespace()
     {
+        // JSON5 mode replaces the RFC whitespace class with
+        // whitespace + comments. It is a distinct, m_end-bounded scanner;
+        // the RFC SIMD fast path below is not used (and not changed).
+        if (m_json5)
+        {
+            skip_json5_trivia();
+            return;
+        }
+
         // The SIMD loop below broadcasts the four RFC 8259 §2 whitespace
         // bytes by hand; these pins keep the wide-mask set identical to the
         // shared grammar rule (single source of truth).
@@ -73,6 +82,57 @@ namespace pjh::json
                 return;
             }
             m_curr += batch_size;
+        }
+    }
+
+    /*
+     * Skip JSON5 trivia (task 40.1): ASCII whitespace + comments.
+     *
+     * Every loop condition is explicitly m_curr/m_end-bounded. This is
+     * load-bearing: parse_jsonl builds a Parser over a LINE SUB-VIEW of
+     * the whole padded buffer, so past m_end sit the NEXT line's bytes,
+     * not NUL padding. An unbounded scan (relying on padding) would let a
+     * JSON5 blank/comment line consume the following line — recreating
+     * the task-04 `[[1],[1]]` silent-duplication bug.
+     *
+     * Line comment: two slashes up to LF/CR or m_end (LF/CR themselves are
+     * then consumed by the whitespace step on the next iteration).
+     * Block comment: slash-star to the first star-slash; non-nesting per
+     * JSON5 1.0.0. An unterminated block comment records
+     * UnexpectedEndOfInput at m_end (reusing an existing ErrorCode: zero
+     * new codes).
+     */
+    void Parser::skip_json5_trivia()
+    {
+        while (true)
+        {
+            while (m_curr < m_end && grammar::is_json5_whitespace_ascii(static_cast<unsigned char>(*m_curr)))
+                ++m_curr;
+
+            if (m_curr + 1 < m_end && m_curr[0] == '/' && m_curr[1] == '/')
+            {
+                m_curr += 2;
+                while (m_curr < m_end && *m_curr != '\n' && *m_curr != '\r')
+                    ++m_curr;
+                continue;
+            }
+
+            if (m_curr + 1 < m_end && m_curr[0] == '/' && m_curr[1] == '*')
+            {
+                m_curr += 2;
+                while (m_curr + 1 < m_end && !(m_curr[0] == '*' && m_curr[1] == '/'))
+                    ++m_curr;
+                if (m_curr + 1 >= m_end)
+                {
+                    // No closing `*` `/` before the logical end.
+                    fail(ErrorCode::UnexpectedEndOfInput, m_end);
+                    return;
+                }
+                m_curr += 2;
+                continue;
+            }
+
+            return;
         }
     }
 

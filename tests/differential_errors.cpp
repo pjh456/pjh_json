@@ -687,12 +687,14 @@ namespace
         bool   m_strict_dup;
         bool   m_strip_bom;
         bool   m_strict_utf8;
+        bool m_json5;
         size_t m_max_depth;
 
         GoldenConfigGuard()
             : m_strict_dup(Config::instance().strict_duplicate_keys()),
               m_strip_bom(Config::instance().strip_bom()),
               m_strict_utf8(Config::instance().strict_utf8()),
+              m_json5(Config::instance().json5()),
               m_max_depth(Config::instance().max_depth())
         {
         }
@@ -702,6 +704,7 @@ namespace
             Config::instance().set_strict_duplicate_keys(m_strict_dup);
             Config::instance().set_strip_bom(m_strip_bom);
             Config::instance().set_strict_utf8(m_strict_utf8);
+            Config::instance().set_json5(m_json5);
             Config::instance().set_max_depth(m_max_depth);
         }
     };
@@ -711,6 +714,7 @@ namespace
         Config::instance().set_strict_duplicate_keys(false);
         Config::instance().set_strip_bom(false);
         Config::instance().set_strict_utf8(false);
+        Config::instance().set_json5(false);
         Config::instance().set_max_depth(Config::kDefaultMaxDepth);
     }
 } // namespace
@@ -745,6 +749,7 @@ TEST_CASE("Differential errors: parse_copy with config knobs, both channels")
         Config::instance().set_strict_duplicate_keys(r.strict_dup);
         Config::instance().set_strip_bom(r.strip_bom);
         Config::instance().set_strict_utf8(r.strict_utf8);
+        Config::instance().set_json5(false);
         Config::instance().set_max_depth(r.max_depth);
         auto thr = observe_throw([&] { (void)parse_copy(r.input); });
         auto res = observe_result(parse_copy_result(r.input));
@@ -902,6 +907,7 @@ TEST_CASE("Differential errors: jsonl line-relative offsets, both channels")
         Config::instance().set_strict_duplicate_keys(false);
         Config::instance().set_strip_bom(false);
         Config::instance().set_strict_utf8(r.strict_utf8);
+        Config::instance().set_json5(false);
         Config::instance().set_max_depth(r.max_depth);
         auto thr = observe_throw([&] { (void)parse_jsonl(r.input); });
         auto res = observe_result(parse_jsonl_result(r.input));

@@ -182,6 +182,36 @@ namespace pjh::json
             return number_error::ok;
         }
 
+        // ---- JSON5 1.0.0 grammar additions (task 40.1) --------------------
+        // Pure additions: the RFC 8259 rules above are byte-for-byte
+        // unchanged. Consumed only when Config::json5() is true, so the
+        // default runtime path cannot drift.
+
+        /// @brief JSON5 1.0.0 §8 ASCII white space: the RFC four bytes plus
+        ///        VT (0x0B) and FF (0x0C).
+        /// @note The default RFC path keeps rejecting VT/FF
+        ///       (task 04 strictness); this predicate is opt-in only.
+        constexpr bool is_json5_whitespace_ascii(unsigned char c) noexcept
+        {
+            return is_whitespace(c) || c == 0x0B || c == 0x0C;
+        }
+
+        /// @brief JSON5 1.0.0 §3 IdentifierName, ASCII subset: a key may
+        ///        start with an ASCII letter, '_' or '$'.
+        /// @note The Unicode IdentifierName closure (and `\uXXXX` escapes)
+        ///       is deferred to task 40.5; do not treat this as complete.
+        constexpr bool is_identifier_start(unsigned char c) noexcept
+        {
+            return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_' || c == '$';
+        }
+
+        /// @brief JSON5 1.0.0 §3 IdentifierName continuation, ASCII subset:
+        ///        start characters plus ASCII digits.
+        constexpr bool is_identifier_continue(unsigned char c) noexcept
+        {
+            return is_identifier_start(c) || (c >= '0' && c <= '9');
+        }
+
     } // namespace grammar
 
 } // namespace pjh::json

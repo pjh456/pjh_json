@@ -47,6 +47,16 @@ namespace pjh::json
         case '9':
             return parse_number(out);
         default:
+            // JSON5 single-quoted string (40.1). Kept out of the RFC switch
+            // table so the default path's cases/errors are untouched.
+            if (m_json5 && *m_curr == '\'')
+            {
+                String s;
+                if (!parse_string_single(s))
+                    return false;
+                out = std::move(s);
+                return true;
+            }
             fail(ErrorCode::UnexpectedCharacter, m_curr);
             return false;
         }
@@ -101,6 +111,15 @@ namespace pjh::json
             }
             [[fallthrough]];
         default:
+            // JSON5 single-quoted string (40.1); see parse_value_inplace.
+            if (m_json5 && *m_curr == '\'')
+            {
+                String s;
+                if (!parse_string_single(s))
+                    return false;
+                out = std::move(s);
+                return true;
+            }
             fail(ErrorCode::UnexpectedValueCharacter, m_curr);
             return false;
         }

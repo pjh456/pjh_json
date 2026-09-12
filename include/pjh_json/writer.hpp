@@ -37,6 +37,11 @@ namespace pjh::json
      *       value byte. A U+FEFF code point stored in a string is data,
      *       not a prefix — it round-trips as raw UTF-8 (normal mode) or
      *       \uFEFF (ascii mode).
+     * @note Output is always RFC 8259, independent of the parse-time
+     *       Config::json5() mode: dumping a JSON5-parsed tree is a lossy
+     *       normalization (comments dropped by the parser, single-quoted
+     *       strings and unquoted keys become double-quoted, trailing
+     *       commas disappear).
      */
     [[nodiscard]] std::pmr::string dump(
         const Json &value,

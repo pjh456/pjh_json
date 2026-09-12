@@ -39,6 +39,7 @@ set(PJH_JSON_TEST_SOURCES
     differential_validation.cpp
     doc_examples.cpp
     error_kernel.cpp
+    json5.cpp
     json_constexpr_isolation.cpp
     json_fwd_isolation.cpp
     json_parser.cpp

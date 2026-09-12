@@ -1,6 +1,7 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
 #include "pjh_json/detail/utils.hpp"
+#include "pjh_json/grammar.hpp"
 #include <xsimd/xsimd.hpp>
 
 namespace pjh::json
@@ -181,6 +182,112 @@ namespace pjh::json
             err_pos = ck.err;
             return ck.code;
         }
+
+        /*
+         * Bounded 4-hex-digit read for the JSON5 single-quote path.
+         *
+         * The RFC parse_hex4 (detail/utils.hpp) reads four bytes
+         * unconditionally; that is only safe because the RFC caller works
+         * on a padded whole buffer. Here a line sub-view may end mid-escape,
+         * so every byte is checked against `end` first. A truncated escape
+         * reports UnterminatedString (JSON5 mode reuses existing codes).
+         */
+        ErrorCode read_hex4_bounded(const char *&curr, const char *end, uint32_t &out, const char *&err_pos)
+        {
+            uint32_t code = 0;
+            for (int i = 0; i < 4; ++i)
+            {
+                if (curr >= end)
+                {
+                    err_pos = curr;
+                    return ErrorCode::UnterminatedString;
+                }
+                int v = grammar::hex_value(*curr);
+                if (v < 0)
+                {
+                    err_pos = curr;
+                    return ErrorCode::InvalidHexDigit;
+                }
+                code = (code << 4) | static_cast<uint32_t>(v);
+                ++curr;
+            }
+            out = code;
+            return ErrorCode::None;
+        }
+
+        /*
+         * m_end-bounded equivalent of handle_escape (detail/utils.hpp) for
+         * the JSON5 single-quote string. It decodes the SAME RFC escape set
+         * (short escapes + \uXXXX with surrogate pairs); JSON5-only escapes
+         * (40.3) are intentionally absent. `end` bounds every read so a
+         * malformed escape at a parse_jsonl line end cannot read the next
+         * line. On failure err_pos == nullptr means context-free
+         * (InvalidCodepoint), matching handle_escape.
+         */
+        ErrorCode handle_escape_bounded(char *&dst, const char *&curr, const char *end, const char *&err_pos)
+        {
+            ++curr; // consume the backslash
+            if (curr >= end)
+            {
+                err_pos = curr;
+                return ErrorCode::UnterminatedString;
+            }
+            char decoded = grammar::short_escape_value(*curr);
+            if (decoded != '\0')
+            {
+                *dst++ = decoded;
+                ++curr;
+                return ErrorCode::None;
+            }
+            if (*curr != 'u')
+            {
+                err_pos = curr;
+                return ErrorCode::InvalidEscapeChar;
+            }
+            ++curr;
+
+            uint32_t cp = 0;
+            {
+                ErrorCode ec = read_hex4_bounded(curr, end, cp, err_pos);
+                if (ec != ErrorCode::None)
+                    return ec;
+            }
+
+            if (grammar::is_high_surrogate(cp))
+            {
+                if (end - curr >= 2 && curr[0] == '\\' && curr[1] == 'u')
+                {
+                    curr += 2;
+                    uint32_t cp2 = 0;
+                    ErrorCode ec = read_hex4_bounded(curr, end, cp2, err_pos);
+                    if (ec != ErrorCode::None)
+                        return ec;
+                    if (grammar::is_low_surrogate(cp2))
+                        cp = 0x10000 + (((cp - 0xD800) << 10) | (cp2 - 0xDC00));
+                    else
+                    {
+                        err_pos = curr;
+                        return ErrorCode::InvalidSurrogatePair;
+                    }
+                }
+                else
+                {
+                    err_pos = curr;
+                    return ErrorCode::ExpectedLowSurrogate;
+                }
+            }
+            else if (grammar::is_low_surrogate(cp))
+            {
+                err_pos = curr;
+                return ErrorCode::LoneLowSurrogate;
+            }
+            if (!encode_utf8(cp, dst))
+            {
+                err_pos = nullptr;
+                return ErrorCode::InvalidCodepoint;
+            }
+            return ErrorCode::None;
+        }
     }
 
     /*
@@ -340,6 +447,89 @@ namespace pjh::json
             else
             {
                 *dst++ = *m_curr++;
+            }
+        }
+    }
+
+    /*
+     * Parse a single-quoted JSON5 string (task 40.1, scalar path).
+     *
+     * Deliberately a separate function from the double-quote SIMD path:
+     * the RFC `"` scanner is byte-for-byte unchanged. This one is a plain
+     * scalar loop that is explicitly m_end-bounded at every step (needed
+     * for parse_jsonl line sub-views; see skip_json5_trivia). It borrows
+     * the content on the no-escape fast path and decodes escapes in place
+     * otherwise, exactly like parse_string's scalar fallback.
+     *
+     * Escape coverage is the RFC set only (short escapes + \uXXXX with
+     * surrogate pairs); JSON5-only escapes / line continuations land in
+     * 40.3. A raw byte < 0x20 (including LF/CR) is UnescapedControl —
+     * 40.3 narrows this to the JSON5 LineTerminator set.
+     */
+    bool Parser::parse_string_single(String &out)
+    {
+        // Caller guarantees the leading quote (value dispatch / key branch).
+        ++m_curr;
+        const char *start = m_curr;
+        char *dst = nullptr;
+        Utf8Checker ck;
+
+        while (true)
+        {
+            if (m_curr >= m_end)
+            {
+                fail(ErrorCode::UnterminatedString, m_curr);
+                return false;
+            }
+            if (*m_curr == '\'')
+            {
+                if (m_strict_utf8)
+                    ck.end();
+                if (ck.failed())
+                {
+                    fail(ck.code, ck.err);
+                    return false;
+                }
+                const char *content_end = m_curr;
+                ++m_curr;
+                if (dst)
+                    out = String(std::string_view(start, static_cast<size_t>(dst - start)));
+                else
+                    out = String(std::string_view(start, static_cast<size_t>(content_end - start)));
+                return true;
+            }
+            if (m_strict_utf8)
+                ck.feed(static_cast<uint8_t>(*m_curr), m_curr);
+            if (ck.failed())
+            {
+                fail(ck.code, ck.err);
+                return false;
+            }
+            if (*m_curr == '\\')
+            {
+                if (!dst)
+                    dst = const_cast<char *>(m_curr);
+                const char *ep = nullptr;
+                ErrorCode ec = handle_escape_bounded(dst, m_curr, m_end, ep);
+                if (ec != ErrorCode::None)
+                {
+                    if (ep)
+                        fail(ec, ep);
+                    else
+                        fail_context(ec); // InvalidCodepoint: context-free
+                    return false;
+                }
+            }
+            else if (static_cast<uint8_t>(*m_curr) < 0x20)
+            {
+                fail(ErrorCode::UnescapedControl, m_curr);
+                return false;
+            }
+            else
+            {
+                if (dst)
+                    *dst++ = *m_curr;
+                ++m_curr;
             }
         }
     }

@@ -37,6 +37,10 @@ namespace pjh::json::fuzz
         Config::instance().set_strip_bom(true);
         Config::instance().set_strict_utf8(true);
         Config::instance().set_strict_duplicate_keys(false);
+        // nlohmann has no JSON5 mode: the pjh parser must stay RFC-only so
+        // the differential premise holds even if a prior fuzz input toggled
+        // the knob (plan 40 §11.4).
+        Config::instance().set_json5(false);
     }
 
     inline void fuzz_fail(const char *what) noexcept

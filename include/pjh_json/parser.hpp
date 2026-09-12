@@ -36,6 +36,7 @@ namespace pjh::json
         bool m_assume_padded;       // If true, caller guarantees kPaddingWidth trailing NUL bytes
         bool m_strip_bom;           // Strip a leading UTF-8 BOM at parse() start (per-Parser, ctor-captured)
         bool m_strict_utf8;         // Strict UTF-8 validation of string content (per-Parser, ctor-captured)
+        bool m_json5;               // JSON5 input superset mode (per-Parser, ctor-captured from Config)
         size_t m_depth = 0;         // Current nesting depth (open containers)
         size_t m_max_depth;         // Captured depth limit (0 = unlimited, default from Config)
         Error m_error{};            // first failure wins; code==None => ok
@@ -54,26 +55,30 @@ namespace pjh::json
            *       consumed once at the whole-input start).
            * @param strict_utf8 Validate raw UTF-8 in string content
            *       (Config::strict_utf8); all six parse entries pass it.
+           * @note The JSON5 mode is NOT a ctor parameter: it is captured
+           *       directly from Config::json5(), like m_max_depth. There is
+           *       no per-entry difference (whole input and per-line parsers
+           *       both honor it), so the five entry signatures are
+           *       unchanged.
            * @note If assume_padded is false, parse() will immediately throw ParseError.
            *       All six parse_* entry points set it to true:
            *       parse_copy/parse_file/parse_from_istream/parse_jsonl over
            *       self-padded buffers,
            *       parse_in_situ/parse_view over caller-padded buffers.
            */
-          explicit Parser(
-              std::string_view json,
-              std::pmr::memory_resource *res = Config::instance().resource(),
-              bool assume_padded = false,
-              bool strip_bom = false,
-              bool strict_utf8 = false)
-              : m_begin(json.data()),
-                m_curr(json.data()),
-                m_end(json.data() + json.size()),
-                m_resource(res),
-                m_assume_padded(assume_padded),
-                m_strip_bom(strip_bom),
-                m_strict_utf8(strict_utf8),
-                m_max_depth(Config::instance().max_depth()) {}
+        explicit Parser(std::string_view json, std::pmr::memory_resource *res = Config::instance().resource(),
+                        bool assume_padded = false, bool strip_bom = false, bool strict_utf8 = false)
+            : m_begin(json.data()),
+              m_curr(json.data()),
+              m_end(json.data() + json.size()),
+              m_resource(res),
+              m_assume_padded(assume_padded),
+              m_strip_bom(strip_bom),
+              m_strict_utf8(strict_utf8),
+              m_json5(Config::instance().json5()),
+              m_max_depth(Config::instance().max_depth())
+        {
+        }
 
         /**
          * @brief Zero-throw kernel: parse a complete JSON value into @p out
@@ -164,6 +169,33 @@ namespace pjh::json
          * the BOM reports offset 3, not 0).
          */
         void skip_leading_bom();
+        /**
+         * @brief Skip JSON5 trivia: ASCII whitespace + comments
+         *
+         * Called from skip_whitespace() only when the JSON5 mode was
+         * captured. Every scan is explicitly bounded by m_end (never by
+         * NUL padding), because parse_jsonl hands each line a sub-view
+         * whose m_end is followed by the NEXT line, not by padding.
+         * An unterminated block comment records UnexpectedEndOfInput.
+         */
+        void skip_json5_trivia();
+        /**
+         * @brief Parse a single-quoted JSON5 string (scalar, m_end-bounded)
+         * @param out Receives a borrowed view into the input buffer
+         * @return false on failure (recorded in m_error)
+         * @note Reuses the RFC escape set (short escapes + \\uXXXX with
+         *       surrogate pairs); JSON5-only escapes and line
+         *       continuations are deferred to task 40.3.
+         */
+        [[nodiscard]] bool parse_string_single(String &out);
+        /**
+         * @brief Parse an ASCII unquoted JSON5 identifier key
+         * @param out Receives a borrowed view into the input buffer
+         * @return false on failure (recorded in m_error)
+         * @note ASCII subset only ([A-Za-z_$][A-Za-z0-9_$]*); full ES5.1
+         *       IdentifierName (Unicode + \\uXXXX) is deferred to 40.5.
+         */
+        [[nodiscard]] bool parse_identifier_key(String &out);
         /**
          * @brief Parse any JSON value into @p out (top-level dispatch)
          * @return false on failure (recorded in m_error)

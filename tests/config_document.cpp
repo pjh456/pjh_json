@@ -285,6 +285,7 @@ TEST_CASE("Config: reset restores defaults") {
     cfg.set_max_depth(42);
     cfg.set_strip_bom(true);
     cfg.set_strict_utf8(true);
+    cfg.set_json5(true);
     cfg.configure(Storage::Arena, 8192);
 
     cfg.reset();
@@ -294,5 +295,6 @@ TEST_CASE("Config: reset restores defaults") {
     REQUIRE(cfg.max_depth() == Config::kDefaultMaxDepth);
     REQUIRE(cfg.strip_bom() == false);
     REQUIRE(cfg.strict_utf8() == false);
+    REQUIRE(cfg.json5() == false);
     REQUIRE(cfg.storage() == Storage::Pooled);
 }

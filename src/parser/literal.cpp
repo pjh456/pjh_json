@@ -57,12 +57,20 @@ namespace pjh::json
             }
         }
 
-        // Reject trailing garbage after a literal.
-        uint8_t next = static_cast<uint8_t>(*m_curr);
-        if (!kValidAfterLiteral[next])
+        // Reject trailing garbage after a literal. Under JSON5 the
+        // following byte may legitimately be a comment or VT/FF whitespace
+        // (which kValidAfterLiteral does not list); the outer trivia skip
+        // and the structural/extra-character checks then take over. This
+        // does NOT accept `truex`: with no trivia to skip, the caller's
+        // trailing check / separator check still rejects it.
+        if (!m_json5)
         {
-            fail(ErrorCode::InvalidLiteralTrailing, m_curr);
-            return false;
+            uint8_t next = static_cast<uint8_t>(*m_curr);
+            if (!kValidAfterLiteral[next])
+            {
+                fail(ErrorCode::InvalidLiteralTrailing, m_curr);
+                return false;
+            }
         }
 
         return true;

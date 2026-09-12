@@ -117,7 +117,15 @@ namespace pjh::json
             skip_leading_bom();
         if (!parse_value(out))
             return false;
+        // A JSON5 trivia skip can record a failure (unterminated block
+        // comment) without propagating a false return up the structural
+        // recursion (skip_whitespace stays void). Convert that recorded
+        // first error into a kernel failure here, at the single top level.
+        if (m_has_error)
+            return false;
         skip_whitespace();
+        if (m_has_error)
+            return false;
         if (m_curr < m_end)
         {
             fail(ErrorCode::ExtraCharactersAfterValue, m_curr);
@@ -330,6 +338,13 @@ namespace pjh::json
         if (Config::instance().strip_bom() && starts_with_utf8_bom(base, n))
             i = 3;
 
+        // JSON5 mode widens the blank-line class to the JSON5 ASCII
+        // whitespace set: under JSON5 a line of only VT/FF must be skipped
+        // (otherwise a per-line Parser would be handed a blank line whose
+        // trivia skip could reach into the next line). Read once; the
+        // per-line Parsers capture the same value from Config.
+        const bool json5 = Config::instance().json5();
+
         while (i < n)
         {
             // Find end of current line
@@ -342,17 +357,20 @@ namespace pjh::json
             if (len > 0 && base[i + len - 1] == '\r')
                 --len;
 
-            // Skip blank/whitespace-only lines. The set delegates to
-            // grammar::is_whitespace (RFC 8259: space, tab, CR, LF; LF
-            // cannot occur inside a line, so including it is a no-op here).
+            // Skip blank/whitespace-only lines. RFC mode delegates to
+            // grammar::is_whitespace (space, tab, CR, LF; LF cannot occur
+            // inside a line, so including it is a no-op here). JSON5 mode
+            // also accepts VT/FF (grammar::is_json5_whitespace_ascii).
             // A non-blank line therefore always contains a byte the parser
-            // rejects in-line, so the SIMD skip can never hop past this line
-            // into the next one.
+            // rejects in-line, so the JSON5 trivia scan can never hop past
+            // this line into the next one (it is additionally m_end-bounded).
             bool blank = true;
             for (size_t k = 0; k < len; ++k)
             {
                 char c = base[i + k];
-                if (!grammar::is_whitespace(static_cast<unsigned char>(c)))
+                const bool ws = json5 ? grammar::is_json5_whitespace_ascii(static_cast<unsigned char>(c))
+                                      : grammar::is_whitespace(static_cast<unsigned char>(c));
+                if (!ws)
                 {
                     blank = false;
                     break;

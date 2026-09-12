@@ -54,7 +54,20 @@ namespace pjh::json
                 return true;
             }
             if (*m_curr == ',')
+            {
                 ++m_curr;
+                // JSON5: allow exactly one trailing comma before ']'.
+                if (m_json5)
+                {
+                    skip_whitespace();
+                    if (m_curr < m_end && *m_curr == ']')
+                    {
+                        ++m_curr;
+                        out = std::move(arr);
+                        return true;
+                    }
+                }
+            }
             else
             {
                 fail(ErrorCode::ExpectedCommaOrBracket, m_curr);
