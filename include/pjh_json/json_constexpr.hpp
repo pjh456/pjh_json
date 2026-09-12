@@ -688,6 +688,393 @@ namespace pjh::json
         return r;
     }
 
+    // ===================================================================
+    // const_json_has_double — recursive compile-time double detector
+    // ===================================================================
+
+    /// @brief Trait: true when a compile-time JSON type contains a double
+    ///        anywhere in its tree (the type itself or a nested element).
+    ///
+    /// consteval dump cannot format a double in C++20 (std::to_chars has no
+    /// constexpr floating-point overload), so the dump entry points reject
+    /// any tree for which this trait is true.
+    /// @tparam V A ConstJson* type.
+    template <typename V>
+    struct const_json_has_double : std::false_type
+    {
+    };
+
+    /// @brief Specialization: a double value is a double.
+    template <>
+    struct const_json_has_double<ConstJsonDouble> : std::true_type
+    {
+    };
+
+    /// @brief Specialization: an array has a double iff any element does.
+    template <typename... Ts>
+    struct const_json_has_double<ConstJsonArray<Ts...>>
+        : std::bool_constant<(const_json_has_double<std::decay_t<Ts>>::value || ...)>
+    {
+    };
+
+    /// @brief Specialization: an object has a double iff any entry value does.
+    template <typename... Es>
+    struct const_json_has_double<ConstJsonObject<Es...>>
+        : std::bool_constant<(const_json_has_double<typename Es::value_type>::value || ...)>
+    {
+    };
+
+    /// @brief Convenience variable template for const_json_has_double
+    ///        (decays the queried type first).
+    /// @tparam V A ConstJson* type.
+    template <typename V>
+    inline constexpr bool const_json_has_double_v =
+        const_json_has_double<std::decay_t<V>>::value;
+
+    // ===================================================================
+    // consteval dump — single traversal, two sinks
+    // ===================================================================
+
+    namespace detail
+    {
+        /// @brief Trait: true when T (decayed) is a ConstJsonArray.
+        template <typename T>
+        struct is_const_json_array : std::false_type
+        {
+        };
+
+        /// @brief Specialization for ConstJsonArray.
+        template <typename... Ts>
+        struct is_const_json_array<ConstJsonArray<Ts...>> : std::true_type
+        {
+        };
+
+        /// @brief Convenience variable template for is_const_json_array.
+        template <typename T>
+        inline constexpr bool is_const_json_array_v =
+            is_const_json_array<std::decay_t<T>>::value;
+
+        /// @brief Trait: true when T (decayed) is a ConstJsonObject.
+        template <typename T>
+        struct is_const_json_object : std::false_type
+        {
+        };
+
+        /// @brief Specialization for ConstJsonObject.
+        template <typename... Es>
+        struct is_const_json_object<ConstJsonObject<Es...>> : std::true_type
+        {
+        };
+
+        /// @brief Convenience variable template for is_const_json_object.
+        template <typename T>
+        inline constexpr bool is_const_json_object_v =
+            is_const_json_object<std::decay_t<T>>::value;
+
+        /// @brief Dependent-false helper for static_assert in discarded
+        ///        `if constexpr` branches.
+        template <typename>
+        inline constexpr bool const_json_dependent_false = false;
+
+        /// @brief Sink that counts the dumped byte length and discards content.
+        struct const_json_count_sink
+        {
+            std::size_t n = 0; ///< Accumulated byte count.
+
+            /// @brief Count one byte.
+            constexpr void put(char) noexcept { ++n; }
+
+            /// @brief Count every byte of a literal fragment.
+            constexpr void put(std::string_view s) noexcept { n += s.size(); }
+        };
+
+        /// @brief Sink that writes into `[p, end)` and flags overflow instead
+        ///        of ever writing out of bounds.
+        struct const_json_buf_sink
+        {
+            char *p;                  ///< Current write position.
+            char *end;                ///< One past the last writable byte.
+            std::size_t written = 0;  ///< Bytes actually written.
+            bool overflow = false;    ///< Set when a write was dropped.
+
+            /// @brief Write one byte, or set overflow when full.
+            constexpr void put(char c) noexcept
+            {
+                if (p != end)
+                {
+                    *p++ = c;
+                    ++written;
+                }
+                else
+                {
+                    overflow = true;
+                }
+            }
+
+            /// @brief Write every byte of a literal fragment.
+            constexpr void put(std::string_view s) noexcept
+            {
+                for (char c : s)
+                    put(c);
+            }
+        };
+
+        /// @brief Lower-case hex digits, matching the runtime writer table.
+        inline constexpr char const_json_hex_lower[] = "0123456789abcdef";
+
+        /// @brief Single-traversal dump dispatcher. Declared first so the
+        ///        container helpers below can recurse into it.
+        template <typename Sink, typename V>
+        constexpr void const_dump_to(Sink &sink, const V &v) noexcept;
+
+        /// @brief Emit an int64 in minimal decimal form (INT64_MIN-safe).
+        ///        Byte-identical to std::to_chars integer output.
+        template <typename Sink>
+        constexpr void const_dump_int(Sink &sink, std::int64_t v) noexcept
+        {
+            const bool neg = v < 0;
+            // -(v + 1) + 1 avoids UB on INT64_MIN (unlike -v).
+            std::uint64_t m = neg
+                                  ? static_cast<std::uint64_t>(-(v + 1)) + 1
+                                  : static_cast<std::uint64_t>(v);
+            char buf[20];
+            std::size_t n = 0;
+            do
+            {
+                buf[n++] = static_cast<char>('0' + static_cast<int>(m % 10));
+                m /= 10;
+            } while (m != 0);
+            if (neg)
+                sink.put('-');
+            while (n != 0)
+                sink.put(buf[--n]);
+        }
+
+        /// @brief Emit a JSON string with surrounding quotes and the runtime
+        ///        writer's default escaping (named escapes for the seven
+        ///        specials, lower-case \u00xx for other controls, raw bytes
+        ///        >= 0x20 including UTF-8 passthrough).
+        template <typename Sink>
+        constexpr void const_dump_string(Sink &sink, std::string_view str) noexcept
+        {
+            sink.put('"');
+            for (char c : str)
+            {
+                switch (c)
+                {
+                case '"':
+                    sink.put("\\\"");
+                    break;
+                case '\\':
+                    sink.put("\\\\");
+                    break;
+                case '\b':
+                    sink.put("\\b");
+                    break;
+                case '\f':
+                    sink.put("\\f");
+                    break;
+                case '\n':
+                    sink.put("\\n");
+                    break;
+                case '\r':
+                    sink.put("\\r");
+                    break;
+                case '\t':
+                    sink.put("\\t");
+                    break;
+                default:
+                    if (static_cast<unsigned char>(c) < 0x20)
+                    {
+                        const unsigned char u = static_cast<unsigned char>(c);
+                        const char esc[6] = {
+                            '\\', 'u', '0', '0',
+                            const_json_hex_lower[(u >> 4) & 0xF],
+                            const_json_hex_lower[u & 0xF]};
+                        sink.put(std::string_view(esc, 6));
+                    }
+                    else
+                    {
+                        sink.put(c);
+                    }
+                    break;
+                }
+            }
+            sink.put('"');
+        }
+
+        /// @brief Emit the elements of a compile-time array.
+        template <typename Sink, typename... Ts, std::size_t... I>
+        constexpr void const_dump_array_elems(Sink &sink, const ConstJsonArray<Ts...> &a,
+                                              std::index_sequence<I...>) noexcept
+        {
+            sink.put('[');
+            (
+                ((void)((I != 0) && (sink.put(','), true)),
+                 const_dump_to(sink, std::get<I>(a.elems))),
+                ...);
+            sink.put(']');
+        }
+
+        /// @brief Emit a complete compile-time array.
+        template <typename Sink, typename... Ts>
+        constexpr void const_dump_array(Sink &sink, const ConstJsonArray<Ts...> &a) noexcept
+        {
+            const_dump_array_elems(sink, a, std::index_sequence_for<Ts...>{});
+        }
+
+        /// @brief Emit the entries of a compile-time object.
+        template <typename Sink, typename... Es, std::size_t... I>
+        constexpr void const_dump_object_entries(Sink &sink, const ConstJsonObject<Es...> &o,
+                                                 std::index_sequence<I...>) noexcept
+        {
+            sink.put('{');
+            (
+                ((void)((I != 0) && (sink.put(','), true)),
+                 (const_dump_string(sink, std::get<I>(o.entries).key), sink.put(':'),
+                  const_dump_to(sink, std::get<I>(o.entries).value))),
+                ...);
+            sink.put('}');
+        }
+
+        /// @brief Emit a complete compile-time object.
+        template <typename Sink, typename... Es>
+        constexpr void const_dump_object(Sink &sink, const ConstJsonObject<Es...> &o) noexcept
+        {
+            const_dump_object_entries(sink, o, std::index_sequence_for<Es...>{});
+        }
+
+        /// @brief Dispatch one value into the sink. Uses std::index_sequence +
+        ///        fold (never std::apply) for consteval compatibility.
+        template <typename Sink, typename V>
+        constexpr void const_dump_to(Sink &sink, const V &v) noexcept
+        {
+            using T = std::decay_t<V>;
+            if constexpr (std::is_same_v<T, ConstJsonNull>)
+            {
+                sink.put("null");
+            }
+            else if constexpr (std::is_same_v<T, ConstJsonBool>)
+            {
+                sink.put(v.v ? "true" : "false");
+            }
+            else if constexpr (std::is_same_v<T, ConstJsonInt>)
+            {
+                const_dump_int(sink, v.v);
+            }
+            else if constexpr (std::is_same_v<T, ConstJsonStr>)
+            {
+                const_dump_string(sink, v.v);
+            }
+            else if constexpr (is_const_json_array_v<T>)
+            {
+                const_dump_array(sink, v);
+            }
+            else if constexpr (is_const_json_object_v<T>)
+            {
+                const_dump_object(sink, v);
+            }
+            else if constexpr (std::is_same_v<T, ConstJsonDouble>)
+            {
+                static_assert(const_json_dependent_false<T>,
+                              "consteval dump cannot format double in C++20: "
+                              "std::to_chars has no constexpr floating-point overload; "
+                              "use to_runtime() + runtime dump()");
+            }
+            else
+            {
+                static_assert(const_json_dependent_false<T>,
+                              "const_dump: unsupported ConstJson value type");
+            }
+        }
+    } // namespace detail
+
+    /// @brief Exact compact-dump length of a compile-time JSON value, in bytes
+    ///        (no trailing NUL). Never instantiates for a tree containing a
+    ///        double: that is a compile-time error in C++20.
+    /// @tparam V A ConstJson* type without a double.
+    /// @param v The value to measure.
+    /// @return Number of bytes const_dump() would write.
+    template <typename V>
+        requires requires { std::decay_t<V>::kind_v; }
+    [[nodiscard]] constexpr std::size_t const_dump_size(const V &v) noexcept
+    {
+        static_assert(!const_json_has_double_v<V>,
+                      "consteval dump cannot format double in C++20: "
+                      "std::to_chars has no constexpr floating-point overload; "
+                      "use to_runtime() + runtime dump()");
+        detail::const_json_count_sink sink;
+        detail::const_dump_to(sink, v);
+        return sink.n;
+    }
+
+    /// @brief Write the compact dump of a compile-time JSON value into a
+    ///        caller buffer `[out, out + cap)`. Writes no trailing NUL and
+    ///        never writes out of bounds.
+    /// @tparam V A ConstJson* type without a double.
+    /// @param v The value to serialize.
+    /// @param out Destination buffer (may be nullptr only when cap == 0).
+    /// @param cap Capacity of @p out in bytes.
+    /// @return Bytes written, or 0 when the dump did not fit in @p cap.
+    template <typename V>
+        requires requires { std::decay_t<V>::kind_v; }
+    [[nodiscard]] constexpr std::size_t const_dump(const V &v, char *out,
+                                                  std::size_t cap) noexcept
+    {
+        static_assert(!const_json_has_double_v<V>,
+                      "consteval dump cannot format double in C++20: "
+                      "std::to_chars has no constexpr floating-point overload; "
+                      "use to_runtime() + runtime dump()");
+        detail::const_json_buf_sink sink{out, out + cap};
+        detail::const_dump_to(sink, v);
+        return sink.overflow ? 0 : sink.written;
+    }
+
+    /// @brief Fixed-capacity inline text holding a single consteval dump.
+    /// @tparam Cap Byte capacity (at least 1).
+    ///
+    /// `data` is public and the type is a literal aggregate so a value can be
+    /// produced by consteval `const_dump()` and inspected in `static_assert`.
+    template <std::size_t Cap>
+    struct ConstJsonText
+    {
+        static_assert(Cap > 0, "ConstJsonText capacity must be at least 1");
+
+        char data[Cap]{};        ///< Raw bytes (not NUL-terminated).
+        std::size_t size = 0;    ///< Number of valid bytes in data.
+        bool overflow = false;   ///< True when the dump exceeded Cap.
+
+        /// @brief Borrowed view of the valid bytes.
+        /// @return A string_view over `[data, data + size)`.
+        [[nodiscard]] constexpr std::string_view view() const noexcept
+        {
+            return {data, size};
+        }
+    };
+
+    /// @brief Single-call consteval dump into a fixed-capacity shell.
+    /// @tparam Cap Capacity of the returned text (default 256 bytes).
+    /// @tparam V A ConstJson* type without a double.
+    /// @param v The value to serialize.
+    /// @return A ConstJsonText whose `view()` yields the compact JSON text,
+    ///         with `overflow = true` when Cap was too small.
+    template <std::size_t Cap = 256, typename V>
+        requires requires { std::decay_t<V>::kind_v; }
+    [[nodiscard]] consteval ConstJsonText<Cap> const_dump(const V &v)
+    {
+        static_assert(!const_json_has_double_v<V>,
+                      "consteval dump cannot format double in C++20: "
+                      "std::to_chars has no constexpr floating-point overload; "
+                      "use to_runtime() + runtime dump()");
+        ConstJsonText<Cap> t;
+        const std::size_t n = const_dump(v, t.data, Cap);
+        if (n == 0)
+            t.overflow = true;
+        else
+            t.size = n;
+        return t;
+    }
+
 } // namespace pjh::json
 
 #endif

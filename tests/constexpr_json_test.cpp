@@ -1,10 +1,31 @@
 #include <doctest/doctest.h>
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <ostream>
+#include <string_view>
 #include "pjh_json/json.hpp"
 #include "pjh_json/json_constexpr.hpp"
 #include "pjh_json/document.hpp"
+#include "pjh_json/writer.hpp"
 
 using namespace pjh::json;
+
+namespace
+{
+    // Exact-size buffer path at compile time: const_dump_size() sizes the
+    // buffer and const_dump() must write exactly that many bytes.
+    constexpr auto kDumpExactRoot = ConstJson::of(kv("user", ConstJson::of(kv("id", 42))));
+    constexpr auto kDumpExactBuf = []
+    {
+        std::array<char, const_dump_size(kDumpExactRoot)> b{};
+        (void)const_dump(kDumpExactRoot, b.data(), b.size());
+        return b;
+    }();
+    static_assert(kDumpExactBuf.size() == 18);
+    static_assert(std::string_view(kDumpExactBuf.data(), kDumpExactBuf.size())
+                  == R"({"user":{"id":42}})");
+} // namespace
 
 TEST_CASE("ConstJson: of_array") {
     auto arr = ConstJson::of(1, 2.5, std::string_view("hello"), true, nullptr);
@@ -175,4 +196,101 @@ TEST_CASE("ConstJson: compile-time access") {
     static_assert(as_int(get<0>(get<0>(jagg))) == 1);
     static_assert(as_int(get<1>(get<0>(jagg))) == 2);
     static_assert(as_int(front(get<1>(jagg))) == 3);
+}
+
+TEST_CASE("ConstJson: consteval dump") {
+    // ---- scalar parity with the runtime writer ----
+    static_assert(const_dump(ConstJsonNull{}).view() == "null");
+    static_assert(const_dump(ConstJsonBool{true}).view() == "true");
+    static_assert(const_dump(ConstJsonBool{false}).view() == "false");
+    static_assert(const_dump(ConstJsonInt{0}).view() == "0");
+    static_assert(const_dump(ConstJsonInt{42}).view() == "42");
+    static_assert(const_dump(ConstJsonInt{-1}).view() == "-1");
+    static_assert(const_dump(ConstJsonInt{INT64_MAX}).view() == "9223372036854775807");
+    static_assert(const_dump(ConstJsonInt{INT64_MIN}).view() == "-9223372036854775808");
+
+    // ---- containers: compact, insertion order, comma separators ----
+    static_assert(const_dump(ConstJson::of()).view() == "[]");
+    static_assert(const_dump(ConstJson::of(1, -2, 3)).view() == "[1,-2,3]");
+    static_assert(const_dump(ConstJson::of(kv("a", 1))).view() == R"({"a":1})");
+    static_assert(const_dump(ConstJsonObject<>{}).view() == "{}");
+    // nested arrays built directly (not via kv) and arrays inside objects
+    static_assert(const_dump(ConstJson::of(ConstJson::of(1, 2), ConstJson::of(3))).view()
+                  == "[[1,2],[3]]");
+    static_assert(const_dump(ConstJson::of(
+        kv("u", ConstJson::of(kv("id", 42), kv("t", ConstJson::of("a", "b")))))).view()
+        == R"({"u":{"id":42,"t":["a","b"]}})");
+
+    // ---- string escaping: byte-for-byte with string.cpp default mode ----
+    static_assert(const_dump(ConstJson::of(std::string_view("a\"b\\c"))).view()
+                  == R"(["a\"b\\c"])");
+    static_assert(const_dump(ConstJson::of(std::string_view("l\n\tt"))).view()
+                  == R"(["l\n\tt"])");
+    static_assert(const_dump(ConstJson::of(std::string_view("\x01"))).view()
+                  == R"(["\u0001"])");
+    static_assert(const_dump(ConstJson::of(std::string_view("\0", 1))).view()
+                  == R"(["\u0000"])");
+    static_assert(const_dump(ConstJson::of(std::string_view("\x1f"))).view()
+                  == R"(["\u001f"])");
+    // bytes >= 0x20 pass through raw, including UTF-8
+    static_assert(const_dump(ConstJson::of(std::string_view("caf\xC3\xA9", 5))).view()
+                  == "[\"caf\xC3\xA9\"]");
+    // object keys are escaped with the same rules
+    static_assert(const_dump(ConstJson::of(kv("a\"b", 1))).view() == R"({"a\"b":1})");
+
+    // ---- const_dump_size vs ConstJsonText size vs overflow sentinel ----
+    constexpr auto cj3 = ConstJson::of(1, 2, 3);
+    static_assert(const_dump_size(cj3) == 7);
+    static_assert(const_dump<8>(cj3).size == 7);
+    static_assert(!const_dump<8>(cj3).overflow);
+    static_assert(const_dump<8>(cj3).view() == "[1,2,3]");
+    static_assert(const_dump<7>(cj3).size == 7);  // exact capacity fits
+    static_assert(const_dump<4>(cj3).overflow);   // too small -> sentinel
+
+    // ---- caller-buffer API: exact write and no out-of-bounds on overflow ----
+    constexpr auto cj3b = ConstJson::of(1, 2, 3);
+    char buf[16];
+    for (char &c : buf)
+        c = '~';
+    REQUIRE(const_dump(cj3b, buf, sizeof buf) == 7);
+    REQUIRE(std::string_view(buf, 7) == "[1,2,3]");
+    REQUIRE(buf[7] == '~'); // no trailing NUL or overrun
+
+    // Overflow writes at most the fitting prefix into [out, out+cap) and
+    // reports 0; sentinel bytes past cap must stay untouched.
+    char guarded[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
+    REQUIRE(const_dump(cj3b, guarded, 3) == 0);
+    REQUIRE(guarded[3] == 'x');
+    REQUIRE(guarded[7] == 'x');
+
+    // ---- runtime differential: consteval text == dump(to_runtime(), {}) ----
+    auto check_parity = [](const auto &cj, std::string_view compile_time_text)
+    {
+        REQUIRE(const_dump_size(cj) == compile_time_text.size());
+        const std::pmr::string rt = dump(cj.to_runtime(), DumpOptions{});
+        REQUIRE(std::string_view(rt.data(), rt.size()) == compile_time_text);
+    };
+
+    {
+        constexpr auto cj = ConstJson::of(1, -2, true, nullptr, std::string_view("x"));
+        check_parity(cj, const_dump(cj).view());
+    }
+    {
+        constexpr auto cj = ConstJson::of(kv("a", 1), kv("b", ConstJson::of(true, nullptr)));
+        check_parity(cj, const_dump(cj).view());
+    }
+    {
+        constexpr auto cj = ConstJson::of(kv("u", ConstJson::of(
+            kv("id", 42), kv("tags", ConstJson::of("a", "b")), kv("ok", true))));
+        check_parity(cj, const_dump(cj).view());
+    }
+    {
+        constexpr auto cj = ConstJson::of(
+            std::string_view("q\"\\\n\t\x01\x7f\xC3\xA9", 9));
+        check_parity(cj, const_dump(cj).view());
+    }
+    {
+        constexpr auto cj = ConstJson::of();
+        check_parity(cj, const_dump(cj).view());
+    }
 }
