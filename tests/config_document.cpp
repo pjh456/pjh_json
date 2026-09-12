@@ -1,4 +1,8 @@
 #include <doctest/doctest.h>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <memory_resource>
 #include <string>
 #include <string_view>
 
@@ -115,6 +119,81 @@ TEST_CASE("Document: move ctor no UAF") {
     REQUIRE(ea.buffer().empty());
     REQUIRE(ea.buffer().get_allocator().resource()
             == std::pmr::new_delete_resource());
+}
+
+namespace {
+// Deallocating scribbles 0xAB through the block; makes a dangling borrowed
+// view deterministically observable without a sanitizer.
+class PoisoningResource final : public std::pmr::memory_resource {
+public:
+    explicit PoisoningResource(
+        std::pmr::memory_resource *up = std::pmr::new_delete_resource())
+        : m_up(up) {}
+private:
+    void *do_allocate(std::size_t bytes, std::size_t align) override {
+        return m_up->allocate(bytes, align);
+    }
+    void do_deallocate(void *p, std::size_t bytes, std::size_t align) override {
+        std::memset(p, 0xAB, bytes);
+        m_up->deallocate(p, bytes, align);
+    }
+    bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override {
+        return this == &other;   // never equal to the pool arena
+    }
+    std::pmr::memory_resource *m_up;
+};
+} // namespace
+
+TEST_CASE("Document: move assign foreign-resource source buffer no UAF") {
+    PoisoningResource poison;               // outlives src and dst (declared first)
+    std::pmr::string buf(&poison);          // source buffer allocator != arena
+    // 64 leading spaces push the borrowed value view past glibc's tcache
+    // metadata (which overwrites the first 16 bytes of a freed small block),
+    // so the 0xAB poison is what the dangling read sees.
+    std::string content(64, ' ');
+    content += R"(["hello"])";
+    buf.assign(content.data(), content.size());
+    buf.append(2 * xsimd::batch<uint8_t>::size, '\0');  // kPaddingWidth NUL tail
+
+    auto src = parse_in_situ(std::move(buf), Storage::Pooled);
+    REQUIRE(src.root()[0] == "hello");
+
+    // Non-empty target also exercises the task-02 old-state path.
+    Document dst = parse_copy(R"([1])");
+    dst = std::move(src);                   // pre-fix: buffer COPIED, source freed+poisoned
+
+    // Pre-fix the array element's borrowed view points into the freed,
+    // 0xAB-scribbled source storage -> mismatch (red, no sanitizer needed).
+    // Post-fix the storage is stolen and the view is intact (green).
+    REQUIRE(dst.buffer().data() != nullptr);
+    REQUIRE(dst.root()[0] == "hello");
+    REQUIRE(dump(dst) == R"(["hello"])");
+
+    // moved-from source self-contained (task 02 invariant 3, unchanged)
+    REQUIRE(src.root().is_null());
+    REQUIRE(src.buffer().empty());
+}
+
+TEST_CASE("Document: move assign parse_file source no UAF") {
+    // R_75's entry-level shape: parse_file's buffer is bound to the default
+    // resource while its arena is created inside parse_in_situ, so the source
+    // buffer allocator differs from the source arena. Under ASan the dangling
+    // borrowed views below are a heap-use-after-free pre-fix; the default
+    // resource keeps the bytes readable on a plain build.
+    const std::string f = "pjh_doc_move_parse_file.json";
+    {
+        std::ofstream out(f, std::ios::binary);
+        out << R"({"k":"hello","n":1})";
+    }
+
+    Document dst;                       // empty target still triggers
+    dst = parse_file(f, Storage::Pooled);
+
+    REQUIRE(dst.root()["k"] == "hello");
+    REQUIRE(dst.root()["n"] == (int64_t)1);
+    REQUIRE(dump(dst) == R"({"k":"hello","n":1})");
+
+    std::remove(f.c_str());
 }
 
 TEST_CASE("Document: reset no UAF") {

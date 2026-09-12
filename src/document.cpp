@@ -130,8 +130,10 @@ namespace pjh::json
      * 1. The old root/buffer are destroyed through the old arena while it
      *    is still alive; m_arena moves last, so the old resource is
      *    destroyed only after nothing references it anymore.
-     * 2. m_buffer's allocator member is rebound before the arena moves.
-     *    String assignment never updates the allocator member (both
+     * 2. m_buffer's allocator member is rebound before the arena moves,
+     *    using the SOURCE BUFFER's own allocator
+     *    (other.m_buffer.get_allocator().resource()), never the source
+     *    arena. String assignment never updates the allocator member (both
      *    propagate_on_container_copy_assignment and
      *    propagate_on_container_move_assignment are false for
      *    polymorphic_allocator), while every string operation compares
@@ -139,8 +141,17 @@ namespace pjh::json
      *    would therefore leave m_buffer pointing at the old arena after
      *    the m_arena move — a heap-use-after-free on the next comparison
      *    or destruction. Rebinding is done by destroying the member in
-     *    place and move-constructing it with the source's resource, the
-     *    only form that sets the allocator member.
+     *    place and move-constructing it with the source buffer's own
+     *    allocator, the only form that sets the allocator member.
+     *    Passing the buffer's own allocator also makes the allocators
+     *    compare equal, so the move constructor steals the source storage.
+     *    Passing the source arena instead copies whenever the source buffer
+     *    is bound to a foreign resource — parse_file's default-resource
+     *    buffer, and any caller parse_in_situ buffer on a non-arena
+     *    resource — and the later destruction of the source buffer then
+     *    frees the storage that the root moved in above borrows its string
+     *    views from. parse_copy/parse_jsonl bind the buffer to the arena,
+     *    so their resource value is unchanged.
      * 3. The moved-from source is left self-contained: its buffer is
      *    rebuilt bound to the immortal new_delete_resource, so it never
      *    keeps a pointer to the arena that moved into this document.
@@ -161,7 +172,23 @@ namespace pjh::json
         if (this != &other)
         {
             using PmrString = std::pmr::string;
-            std::pmr::memory_resource *res = other.resource();
+            // Use the source buffer's own allocator, not the source arena.
+            // std::pmr::string's allocator-extended move ctor steals the
+            // source storage iff the passed allocator compares equal to the
+            // source's; otherwise it copies and the source keeps (and later
+            // frees) the original block, dangling the borrowed views in the
+            // root just moved in above. The source buffer's allocator may
+            // differ from the source arena: parse_file's buffer is bound to
+            // the default resource before parse_in_situ creates the arena,
+            // and any foreign-resource parse_in_situ buffer is the same
+            // shape. Passing the buffer's own resource makes the allocators
+            // always equal, so the storage is stolen:
+            //   m_buffer.get_allocator().resource() ==
+            //   other.m_buffer.get_allocator().resource()
+            // The parse_copy/parse_jsonl paths bind the buffer to the arena,
+            // so this is the same resource value as other.resource() there.
+            std::pmr::memory_resource *res =
+                other.m_buffer.get_allocator().resource();
 
             m_root = std::move(other.m_root);
 

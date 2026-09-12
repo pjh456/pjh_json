@@ -97,10 +97,17 @@ namespace pjh::json
          *       into the old arena, so it must outlive them. Because pmr
          *       string assignment never updates the allocator member,
          *       both buffers are rebuilt in place (destroy + placement-
-         *       new): this's m_buffer with the source's resource, before
-         *       the arena moves; the source's m_buffer with the immortal
-         *       new_delete_resource, after. Do not reorder the body (nor
-         *       the member declarations above).
+         *       new): this's m_buffer with the source buffer's OWN
+         *       allocator, before the arena moves; the source's m_buffer
+         *       with the immortal new_delete_resource, after. The source
+         *       buffer's own allocator (not the source arena) is required:
+         *       it makes the allocators compare equal so the move ctor
+         *       steals the storage; the arena allocator would instead copy
+         *       when the source buffer is bound to a foreign resource
+         *       (parse_file, foreign parse_in_situ), after which the source
+         *       buffer's destruction frees the storage the moved-in root's
+         *       borrowed string views point into. Do not reorder the body
+         *       (nor the member declarations above).
          */
         Document &operator=(Document &&other) noexcept;
 
