@@ -1180,12 +1180,14 @@ TEST_CASE("Json: visit 8-way dispatch") {
     Array slots = make_slots();
     // visit reaches exactly the expected alternative per tag (8 case hits
     // = the 8-way coverage pin; the const overload is exercised here).
-    const char *expected[8] = {"null", "bool", "int", "double", "string",
-                               "string", "array", "object"};
+    // Compare by content, never by literal address: MSVC does not merge
+    // identical string literals, so pointer == would be host-dependent.
+    const std::string_view expected[8] = {"null", "bool", "int", "double",
+                                          "string", "string", "array", "object"};
     for (size_t i = 0; i < slots.size(); ++i)
     {
         const Json &j = slots[i];
-        REQUIRE(j.visit([](auto &&v) -> const char *
+        REQUIRE(j.visit([](auto &&v) -> std::string_view
         {
             using T = std::decay_t<decltype(v)>;
             if constexpr (std::same_as<T, std::monostate>)
