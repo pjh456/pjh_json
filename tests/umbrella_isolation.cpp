@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include <pjh_json.hpp> // deliberately the ONLY pjh header
+#include <ostream>
 
 // The umbrella must stay runtime-only: json_constexpr.hpp / validate.hpp are
 // opt-in. Their include guards must be undefined after including the umbrella.

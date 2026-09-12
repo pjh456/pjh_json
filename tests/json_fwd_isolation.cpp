@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include "pjh_json/json_fwd.hpp" // deliberately the ONLY pjh header
+#include <ostream>
 #include <type_traits>
 
 // A true forward/alias header must not drag in a definition header.
