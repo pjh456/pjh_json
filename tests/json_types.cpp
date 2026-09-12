@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <ostream>
 #include <pjh_json/json.hpp>
 #include <pjh_json/document.hpp>
 #include <pjh_json/parser.hpp>

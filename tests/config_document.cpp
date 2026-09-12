@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <ostream>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
