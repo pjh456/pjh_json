@@ -193,6 +193,30 @@ TEST_CASE("Parser: error handling") {
     CHECK_THROWS_AS((void)parse_copy("{\"a\":1,\"a\":2}"), std::runtime_error);
 }
 
+TEST_CASE("Parser: empty input null data") {
+    // Default string_view: data()==nullptr, size()==0. parse_copy must guard
+    // the memcpy (memcpy(dst, null, 0) is UB even for n==0); the parse then
+    // fails as empty input at offset 0.
+    try {
+        (void)parse_copy(std::string_view{});
+        REQUIRE(false);
+    } catch (const ParseError &e) {
+        REQUIRE(e.offset() == 0);
+        REQUIRE(std::string(e.what()).find("Unexpected end of input")
+                != std::string::npos);
+    }
+
+    // Explicit (nullptr, 0) spelling: same guard, same result.
+    CHECK_THROWS_AS((void)parse_copy(std::string_view(nullptr, 0)), ParseError);
+    CHECK_THROWS_AS((void)parse_copy_result(std::string_view{}).unwrap(),
+                    pjh::result::bad_result_access); // control: Result carries Err
+
+    // parse_jsonl: empty input is a successful empty array (no memcpy from null).
+    auto d = parse_jsonl(std::string_view{});
+    REQUIRE(d.root().is_array());
+    REQUIRE(d.root().size() == 0);
+}
+
 TEST_CASE("Parser: strict strings and escapes") {
     // Reference-side pins, dual to the consteval static_asserts in
     // tests/literal_test.cpp "ConstJson: parse strictness"

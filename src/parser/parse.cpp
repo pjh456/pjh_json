@@ -170,7 +170,10 @@ namespace pjh::json
 
         std::pmr::string buffer(res);
         buffer.resize(json.size() + kPaddingWidth, '\0');
-        std::memcpy(buffer.data(), json.data(), json.size());
+        // memcpy(dst, null, 0) is UB (the source parameter is nonnull even
+        // for n == 0): a default-constructed string_view has data()==nullptr.
+        if (!json.empty())
+            std::memcpy(buffer.data(), json.data(), json.size());
 
         Parser p(std::string_view(buffer.data(), json.size()), res, true,
                 Config::instance().strip_bom(), Config::instance().strict_utf8());
@@ -221,7 +224,9 @@ namespace pjh::json
 
         std::pmr::string buffer(res);
         buffer.resize(input.size() + kPaddingWidth, '\0');
-        std::memcpy(buffer.data(), input.data(), input.size());
+        // See parse_copy: guard the null source of an empty string_view.
+        if (!input.empty())
+            std::memcpy(buffer.data(), input.data(), input.size());
 
         Array arr(res);
         const char *base = buffer.data();
