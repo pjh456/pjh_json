@@ -1287,6 +1287,33 @@ namespace pjh::json
          * @return true if holds equal Object
          */
         [[nodiscard]] bool operator==(const Object &val) const;
+        /**
+         * @brief Strict weak ordering: class rank, then payload
+         * @param other Json to compare with
+         * @return true if *this sorts before other
+         * @note Class rank: Null < Boolean < Integer < Floating <
+         *       String < Array < Object. The two string storage tags
+         *       share one rank and are compared by CONTENT (the same
+         *       cross-tag fast path as operator==: equal content in
+         *       different storage modes compares by content, never by
+         *       tag).
+         * @note Payload: bool/int64 raw; double with NaN canonicalized
+         *       to the maximum (NaN > every non-NaN double, NaN is
+         *       incomparable with itself); string byte-lexicographic;
+         *       array element-lexicographic (a shorter prefix sorts
+         *       first); object in canonical key-sorted form (entries
+         *       ordered by key, then value -- insertion order is
+         *       irrelevant, the order Object::operator== establishes).
+         * @note Invariant (contract objects, no duplicate keys):
+         *       a == b <=> !(a < b) && !(b < a). NaN is the one
+         *       exception: equality implies incomparability and a < b
+         *       implies a != b, but NaN != NaN while neither is less
+         *       than the other. Duplicate-key objects (Object(Vec) /
+         *       data() only) are outside this contract.
+         * @warning The object compare allocates a temporary sort buffer
+         *          (two pointer vectors), so operator< is not noexcept.
+         */
+        [[nodiscard]] bool operator<(const Json &other) const;
         /**@}*/
 
     public:
@@ -1666,5 +1693,15 @@ namespace pjh::json
     };
 
 }
+
+// std::hash<Json> — content-based (equal values hash equal; the payload
+// recipe lives in src/json.cpp beside operator<'s payload compares).
+// Declaration here; the single member definition is in src/json.cpp
+// (the as_variant header-decl/src-def house shape).
+template <>
+struct std::hash<pjh::json::Json>
+{
+    size_t operator()(const pjh::json::Json &value) const;
+};
 
 #endif // INCLUDE_PJH_JSON_JSON_HPP

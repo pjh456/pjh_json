@@ -539,6 +539,46 @@ namespace pjh::json
     }
 
     /*
+     * Deep merge (see the header doxygen).
+     *
+     * 1. Direct self-merge is a defined no-op (guard); other shared
+     *    storage is UB (doxygen @warning).
+     * 2. Iterate other.m_data (const arg: never invalidated by *this
+     *    mutation); find_slot is the index-aware lookup, no iterator is
+     *    held across a m_data change.
+     * 3. Existing key: nested Objects merge recursively (no clone);
+     *    every other kind replaces wholesale, cloned into this resource
+     *    (null is a value: it overwrites).
+     * 4. Missing key: append with an OWNED key, then index_note_append —
+     *    an existing index must learn the new position or later lookups
+     *    false-miss (correctness, not just speed).
+     */
+    void Object::merge(const Object &other)
+    {
+        if (this == &other)
+            return;
+        for (const Entry &kv : other.m_data)
+        {
+            const size_t pos = find_slot(kv.first);
+            if (pos != npos)
+            {
+                if (m_data[pos].second.is_object() && kv.second.is_object())
+                    m_data[pos].second.as_object().merge(kv.second.as_object());
+                else
+                    m_data[pos].second = kv.second.clone(m_resource);
+            }
+            else
+            {
+                String owned{static_cast<std::string_view>(kv.first)};
+                owned.own(m_resource);
+                m_data.emplace_back(std::move(owned),
+                                    kv.second.clone(m_resource));
+                index_note_append(m_data.size() - 1);
+            }
+        }
+    }
+
+    /*
      * Content equality (order-insensitive), allocation-free per comparison
      * once the lookup indices exist.
      *

@@ -1,7 +1,162 @@
 #include "pjh_json/json.hpp"
 
+#include <algorithm> // std::min / std::sort
+#include <bit>       // std::bit_cast
+#include <cmath>     // std::isnan
+#include <vector>    // std::vector (object canonical sort buffer)
+
 namespace pjh::json
 {
+    // --- task 26 TU-local helpers (operator< + std::hash payload) ---
+    namespace
+    {
+        /* splitmix64: the 3-line finalizer (bijective). */
+        uint64_t splitmix64(uint64_t x)
+        {
+            x += 0x9e3779b97f4a7c15ULL;
+            x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+            x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+            return x ^ (x >> 31);
+        }
+
+        /* FNV-1a 64 over byte content (strings, object keys). */
+        uint64_t fnv1a64(std::string_view s)
+        {
+            uint64_t h = 0xcbf29ce484222325ULL;
+            for (unsigned char c : s)
+                h = (h ^ static_cast<uint64_t>(c)) * 0x100000001b3ULL;
+            return h;
+        }
+
+        /*
+         * Class rank: Null < Boolean < Integer < Floating < String <
+         * Array < Object. The two string tags share rank 4 (the
+         * cross-tag fast path decides strings by content).
+         */
+        uint8_t rank(Json::Type t)
+        {
+            switch (t)
+            {
+            case Json::Type::Null:        return 0;
+            case Json::Type::Boolean:     return 1;
+            case Json::Type::Integer:     return 2;
+            case Json::Type::Floating:    return 3;
+            case Json::Type::StringView:
+            case Json::Type::StringOwned: return 4;
+            case Json::Type::ArrayType:   return 5;
+            case Json::Type::ObjectType:  return 6;
+            }
+            return 0; // unreachable: all 8 tags covered above
+        }
+
+        /*
+         * double < with NaN canonicalized to the maximum: raw double
+         * comparison with NaN in play is not a strict weak ordering
+         * (irreflexivity/transitivity break).
+         */
+        bool float_less(double a, double b)
+        {
+            if (std::isnan(a))
+                return false;
+            if (std::isnan(b))
+                return true;
+            return a < b;
+        }
+
+        /* Element-lexicographic array order (shorter prefix first). */
+        bool array_less(const Array &a, const Array &b)
+        {
+            const size_t n = std::min(a.size(), b.size());
+            for (size_t i = 0; i < n; ++i)
+            {
+                if (a[i] < b[i])
+                    return true;
+                if (b[i] < a[i])
+                    return false;
+            }
+            return a.size() < b.size();
+        }
+
+        /*
+         * Canonical key-sorted object order. The key comparator is the
+         * SAME content predicate as Object::operator=='s find_slot
+         * lookup (string_view content+length), so the two share one key
+         * domain — CHANGE ONE, CHANGE THE OTHER. Pairs compare (key,
+         * then value); shorter canonical prefix first. Duplicate-key
+         * objects are outside the contract (see Object::operator==
+         * @warning) and compare by the full sorted multiset.
+         */
+        bool object_less(const Object &a, const Object &b)
+        {
+            std::vector<const Object::Entry *> pa, pb;
+            pa.reserve(a.size());
+            pb.reserve(b.size());
+            for (const auto &e : a.data())
+                pa.push_back(&e);
+            for (const auto &e : b.data())
+                pb.push_back(&e);
+            auto by_key = [](const Object::Entry *x, const Object::Entry *y) {
+                return static_cast<std::string_view>(x->first) <
+                       static_cast<std::string_view>(y->first);
+            };
+            std::sort(pa.begin(), pa.end(), by_key);
+            std::sort(pb.begin(), pb.end(), by_key);
+            const size_t n = std::min(pa.size(), pb.size());
+            for (size_t i = 0; i < n; ++i)
+            {
+                if (static_cast<std::string_view>(pa[i]->first) !=
+                    static_cast<std::string_view>(pb[i]->first))
+                    return static_cast<std::string_view>(pa[i]->first) <
+                           static_cast<std::string_view>(pb[i]->first);
+                if (pa[i]->second < pb[i]->second)
+                    return true;
+                if (pb[i]->second < pa[i]->second)
+                    return false;
+            }
+            return pa.size() < pb.size();
+        }
+
+        /*
+         * Content hash: rank seed + payload mix; array fold ordered
+         * (Array::== is order-dependent), object fold commutative ADD
+         * (Object::== is order-independent — CHANGE ONE, CHANGE THE
+         * OTHER). -0.0 folds to +0.0's bit pattern (0.0 == -0.0 must
+         * hash equal); NaN hashes its bits (no equal pair involves NaN).
+         * Duplicate-key objects are outside the contract (the hash folds
+         * every entry, == resolves first-occurrence).
+         */
+        uint64_t hash64(const Json &j)
+        {
+            if (j.is_null())
+                return splitmix64(0);
+            if (j.is_boolean())
+                return splitmix64(1) ^ (j.as_boolean() ? 1ULL : 0ULL);
+            if (j.is_int())
+                return splitmix64(2) ^ static_cast<uint64_t>(j.as_int());
+            if (j.is_float())
+            {
+                uint64_t bits = std::bit_cast<uint64_t>(j.as_float());
+                if (bits == 0x8000000000000000ULL) // -0.0 folds to +0.0
+                    bits = 0;
+                return splitmix64(3) ^ bits;
+            }
+            if (j.is_string())
+                return splitmix64(4) ^ fnv1a64(j.as_string());
+            if (j.is_array())
+            {
+                uint64_t h = splitmix64(5);
+                for (const Json &e : j.as_array())
+                    h = splitmix64(h ^ hash64(e));
+                return h;
+            }
+            uint64_t h = splitmix64(6);
+            for (const auto &kv : j.as_object().data())
+                h += splitmix64(fnv1a64(static_cast<std::string_view>(kv.first)) ^
+                                (hash64(kv.second) + 0x9e3779b97f4a7c15ULL));
+            return h;
+        }
+    }
+
     // --- operator= ---
 
     /*
@@ -465,4 +620,53 @@ namespace pjh::json
     bool Json::operator==(const char *val) const noexcept { return operator==(std::string_view(val)); }
     bool Json::operator==(const Array &val) const { return is_array() && as_array() == val; }
     bool Json::operator==(const Object &val) const { return is_object() && as_object() == val; }
+
+    // --- operator< ---
+
+    /*
+     * Strict weak ordering (see the header doxygen).
+     *
+     * 1. String fast path FIRST, cross-tag — verbatim the operator==
+     *    fast path, CHANGE ONE, CHANGE THE OTHER.
+     * 2. Class rank decides cross-class.
+     * 3. Same class: payload compare (bool/int raw, double via
+     *    float_less (NaN = maximum), string byte-lex, array element-lex,
+     *    object canonical key-sorted form).
+     * Contract invariant (no duplicate keys): a == b <=> !(a<b) && !(b<a).
+     */
+    bool Json::operator<(const Json &other) const
+    {
+        if (is_string() && other.is_string())
+            return as_string() < other.as_string();
+        if (rank(m_type) != rank(other.m_type))
+            return rank(m_type) < rank(other.m_type);
+        switch (m_type)
+        {
+        case Type::Null:
+            return false;
+        case Type::Boolean:
+            return m_data.boolean < other.m_data.boolean;
+        case Type::Integer:
+            return m_data.integer < other.m_data.integer;
+        case Type::Floating:
+            return float_less(m_data.floating, other.m_data.floating);
+        case Type::StringView:
+        case Type::StringOwned:
+            return as_string() < other.as_string();
+        case Type::ArrayType:
+            return array_less(as_array(), other.as_array());
+        case Type::ObjectType:
+            return object_less(as_object(), other.as_object());
+        }
+        return false; // unreachable: all 8 tags covered above
+    }
+}
+
+// The member definition must sit in a namespace enclosing std::hash, so it
+// lives at global scope here (unlike the operator< section above). hash64 is
+// the TU-local payload recipe in src/json.cpp, reachable via the unnamed
+// namespace's implicit using-directive.
+size_t std::hash<pjh::json::Json>::operator()(const pjh::json::Json &value) const
+{
+    return static_cast<size_t>(pjh::json::hash64(value));
 }

@@ -435,6 +435,32 @@ namespace pjh::json
          */
         bool remove(std::string_view key);
 
+        /**
+         * @brief Deep-merge other into *this (RFC 7386 merge-patch
+         *        shape, without delete-on-null)
+         * @param other Source object — unmodified; recursion depth
+         *        follows the input nesting
+         * @note Nested Objects merge recursively; every other value
+         *       kind (array, scalar, string, null) REPLACES the
+         *       destination's value wholesale, cloned into *this's
+         *       resource. null is a value here: it overwrites
+         *       (delete-on-null is the roadmap-36 patch format's ruling,
+         *       not this primitive's).
+         * @note Entry order: existing keys keep their position
+         *       (last-wins position rule, same as insert); new keys
+         *       append in other's entry order, owning the key (copied
+         *       into *this's resource) — the merge never borrows
+         *       other's key memory. The lookup index is maintained, so
+         *       later lookups on a merged object stay O(1).
+         * @warning *this == &other is a defined no-op; any other
+         *          storage sharing between *this and other (an Object
+         *          stored inside *this also reachable inside other)
+         *          is undefined behavior.
+         * @throws std::bad_alloc (value clones, owned keys and any index
+         *         build allocate into *this's resource)
+         */
+        void merge(const Object &other);
+
     public:
         /**
          * @brief Compare by content (order-insensitive)

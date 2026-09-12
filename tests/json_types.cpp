@@ -9,6 +9,8 @@
 #include <functional>
 #include <variant>
 #include <cstring>
+#include <string>
+#include <string_view>
 
 using namespace pjh::json;
 
@@ -2339,4 +2341,361 @@ TEST_CASE("Parser: initial reserve nested keeps fixed hint") {
     REQUIRE(root.is_array());
     REQUIRE(root.as_array()[0].is_array());
     REQUIRE(root.as_array()[0].as_array().data().capacity() == 4);
+}
+
+// --- task 26: std::hash<Json> + operator< + Object::merge ---
+
+TEST_CASE("Json: hash equal values same hash") {
+    std::hash<Json> h;
+    using E = Object::Entry;
+
+    // Same object content, different insertion order (== is order-insensitive).
+    Json o1(Object::of(E{"x", Json((int64_t)1)}, E{"y", Json((int64_t)2)}));
+    Json o2(Object::of(E{"y", Json((int64_t)2)}, E{"x", Json((int64_t)1)}));
+    REQUIRE(o1 == o2);
+    REQUIRE(h(o1) == h(o2));
+
+    // Same string content across the two storage tags (cross-tag ==).
+    static const char kLit[] = "hello";
+    Json borrowed(kLit);
+    Json owned(std::string_view(kLit), std::pmr::new_delete_resource());
+    REQUIRE(borrowed == owned);
+    REQUIRE(h(borrowed) == h(owned));
+
+    // +0.0 == -0.0 must hash equal (the -0.0 bit-fold).
+    Json pos(0.0);
+    Json neg(-0.0);
+    REQUIRE(pos == neg);
+    REQUIRE(h(pos) == h(neg));
+
+    // Deeply equal arrays built two ways.
+    Json a1(Array::of(Json((int64_t)1), Json("s"), Json(Object::of(E{"k", Json(true)}))));
+    Json a2(Array::of(Json((int64_t)1), Json("s"), Json(Object::of(E{"k", Json(true)}))));
+    REQUIRE(a1 == a2);
+    REQUIRE(h(a1) == h(a2));
+}
+
+TEST_CASE("Json: hash different values distinct (fixed set)") {
+    std::hash<Json> h;
+    using E = Object::Entry;
+
+    std::vector<Json> vals;
+    vals.push_back(Json());
+    vals.push_back(Json(true));
+    vals.push_back(Json(false));
+    vals.push_back(Json((int64_t)0));
+    vals.push_back(Json((int64_t)1));
+    vals.push_back(Json((int64_t)-1));
+    vals.push_back(Json(0.0));
+    vals.push_back(Json(1.0));
+    vals.push_back(Json(-1.5));
+    vals.push_back(Json("a"));
+    vals.push_back(Json("b"));
+    vals.push_back(Json(Array{}));
+    vals.push_back(Json(Array::of(Json((int64_t)1))));
+    vals.push_back(Json(Object{}));
+    vals.push_back(Json(Object::of(E{"k", Json((int64_t)1)})));
+    vals.push_back(Json(Object::of(E{"k", Json((int64_t)2)})));
+
+    for (size_t i = 0; i < vals.size(); ++i)
+        for (size_t j = i + 1; j < vals.size(); ++j)
+        {
+            REQUIRE(vals[i] != vals[j]);
+            REQUIRE(h(vals[i]) != h(vals[j]));
+        }
+}
+
+TEST_CASE("Json: hash NaN callable and stable") {
+    std::hash<Json> h;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    Json j(nan);
+    REQUIRE(j.is_float());
+    const size_t first = h(j);
+    const size_t second = h(j);
+    REQUIRE(first == second); // same object: stable
+    // NaN has no equality obligations; only callable + stable are pinned.
+}
+
+TEST_CASE("Json: operator< 8-kind rank order") {
+    std::vector<Json> vals;
+    vals.push_back(Json());           // rank 0: null
+    vals.push_back(Json(false));      // rank 1: boolean
+    vals.push_back(Json((int64_t)5)); // rank 2: integer
+    vals.push_back(Json(5.0));        // rank 3: floating
+    vals.push_back(Json("s"));        // rank 4: string
+    vals.push_back(Json(Array{}));    // rank 5: array
+    vals.push_back(Json(Object{}));   // rank 6: object
+
+    for (size_t i = 0; i < vals.size(); ++i)
+        for (size_t j = i + 1; j < vals.size(); ++j)
+        {
+            REQUIRE(vals[i] < vals[j]);
+            REQUIRE(!(vals[j] < vals[i]));
+        }
+
+    // Rank beats value magnitude: int 5 < float 5.0; int -1 < float -1.5.
+    REQUIRE(Json((int64_t)5) < Json(5.0));
+    REQUIRE(Json((int64_t)-1) < Json(-1.5));
+    REQUIRE(Json("s") < Json(Array{}));
+}
+
+TEST_CASE("Json: operator< ==/< consistency and transitivity") {
+    using E = Object::Entry;
+    std::vector<Json> vals;
+    vals.push_back(Json());
+    vals.push_back(Json(false));
+    vals.push_back(Json(true));
+    vals.push_back(Json((int64_t)-7));
+    vals.push_back(Json((int64_t)0));
+    vals.push_back(Json((int64_t)7));
+    vals.push_back(Json(-2.5));
+    vals.push_back(Json(0.0));
+    vals.push_back(Json(2.5));
+    vals.push_back(Json("apple"));
+    vals.push_back(Json("banana"));
+    vals.push_back(Json("s"));
+    {
+        static const char kS[] = "s";
+        vals.push_back(Json(std::string_view(kS), std::pmr::new_delete_resource()));
+    }
+    vals.push_back(Json(Array{}));
+    vals.push_back(Json(Array::of(Json((int64_t)1))));
+    vals.push_back(Json(Object{}));
+    vals.push_back(Json(Object::of(E{"k", Json((int64_t)1)})));
+
+    for (size_t i = 0; i < vals.size(); ++i)
+        for (size_t j = 0; j < vals.size(); ++j)
+        {
+            const bool lt = vals[i] < vals[j];
+            const bool gt = vals[j] < vals[i];
+            const bool eq = vals[i] == vals[j];
+            const bool consistent = !(lt && gt);
+            const bool total = eq || lt || gt;
+            const bool eq_incomparable = !lt && !gt;
+            REQUIRE(consistent);
+            REQUIRE(total);
+            if (eq)
+                REQUIRE(eq_incomparable);
+        }
+
+    // The cross-tag equal pair is equal and incomparable, never tag-ordered.
+    REQUIRE(vals[11] == vals[12]);
+    REQUIRE(!(vals[11] < vals[12]));
+    REQUIRE(!(vals[12] < vals[11]));
+
+    // ±0.0 are equal and mutually incomparable.
+    REQUIRE(Json(0.0) == Json(-0.0));
+    REQUIRE(!(Json(0.0) < Json(-0.0)));
+    REQUIRE(!(Json(-0.0) < Json(0.0)));
+
+    // Transitivity over a 5-chain: low < mid < high implies low < high.
+    std::vector<Json> chain;
+    chain.push_back(Json());
+    chain.push_back(Json((int64_t)-1));
+    chain.push_back(Json(0.0));
+    chain.push_back(Json("m"));
+    chain.push_back(Json(Array::of(Json((int64_t)1))));
+    for (size_t i = 0; i + 2 < chain.size(); ++i)
+    {
+        REQUIRE(chain[i] < chain[i + 1]);
+        REQUIRE(chain[i + 1] < chain[i + 2]);
+        REQUIRE(chain[i] < chain[i + 2]);
+    }
+}
+
+TEST_CASE("Json: operator< object canonical (key-sorted) order") {
+    using E = Object::Entry;
+    Json a(Object::of(E{"a", Json((int64_t)1)}, E{"b", Json((int64_t)2)}));
+    Json b(Object::of(E{"b", Json((int64_t)2)}, E{"a", Json((int64_t)1)}));
+    // Same key/value multiset => equal, hence mutually incomparable.
+    REQUIRE(a == b);
+    REQUIRE(!(a < b));
+    REQUIRE(!(b < a));
+
+    // Key order decides regardless of insertion order: {a:9} < {b:0}.
+    Json c(Object::of(E{"a", Json((int64_t)9)}));
+    Json d(Object::of(E{"b", Json((int64_t)0)}));
+    REQUIRE(c < d);
+    REQUIRE(!(d < c));
+
+    // Insertion-order discriminator: an order-sensitive compare would see
+    // {b:2,a:1} after {a:1,b:2}; canonical must see them equal.
+    Json e(Object::of(E{"a", Json((int64_t)1)}, E{"b", Json((int64_t)2)}));
+    Json f(Object::of(E{"b", Json((int64_t)2)}, E{"a", Json((int64_t)1)}));
+    REQUIRE(!(e < f));
+    REQUIRE(!(f < e));
+
+    // Same keys, value decides: {a:1,b:2} < {a:1,b:3}.
+    Json g(Object::of(E{"a", Json((int64_t)1)}, E{"b", Json((int64_t)2)}));
+    Json hh(Object::of(E{"a", Json((int64_t)1)}, E{"b", Json((int64_t)3)}));
+    REQUIRE(g < hh);
+    REQUIRE(!(hh < g));
+
+    // Shorter canonical prefix first.
+    Json i1(Object::of(E{"a", Json((int64_t)1)}));
+    Json i2(Object::of(E{"a", Json((int64_t)1)}, E{"b", Json((int64_t)2)}));
+    REQUIRE(i1 < i2);
+    REQUIRE(!(i2 < i1));
+}
+
+TEST_CASE("Json: operator< NaN canonicalization and -0.0") {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    Json jnan(nan);
+
+    // NaN is the maximum element: every non-NaN double sorts before it.
+    REQUIRE(Json(-1.0e308) < jnan);
+    REQUIRE(Json(1.0e308) < jnan);
+    REQUIRE(Json(0.0) < jnan);
+
+    // NaN is self-incomparable (both directions false).
+    REQUIRE(!(jnan < jnan));
+
+    // ±0.0 are equal and mutually incomparable.
+    REQUIRE(Json(0.0) == Json(-0.0));
+    REQUIRE(!(Json(0.0) < Json(-0.0)));
+    REQUIRE(!(Json(-0.0) < Json(0.0)));
+}
+
+TEST_CASE("Json: int and double cross-kind not equal") {
+    std::hash<Json> h;
+    // Type-strict equality: an int and a float are never equal, are
+    // rank-separated by <, and must hash differently.
+    REQUIRE(Json((int64_t)1) != Json(1.0));
+    REQUIRE(Json((int64_t)1) < Json(1.0));
+    REQUIRE(!(Json(1.0) < Json((int64_t)1)));
+    REQUIRE(h(Json((int64_t)1)) != h(Json(1.0)));
+}
+
+TEST_CASE("Object: merge deep shape") {
+    using E = Object::Entry;
+    Object dst = Object::of(
+        E{"a", Json(Object::of(E{"x", Json((int64_t)1)}))},
+        E{"b", Json((int64_t)1)},
+        E{"c", Json((int64_t)1)});
+    Object src = Object::of(
+        E{"a", Json(Object::of(E{"y", Json((int64_t)2)}))},
+        E{"b", Json((int64_t)99)},
+        E{"c", Json(Array::of(Json((int64_t)7)))},
+        E{"d", Json()});
+
+    dst.merge(src);
+
+    // Nested object merges recursively: x survives, y is added.
+    REQUIRE(dst["a"].is_object());
+    REQUIRE(dst["a"]["x"] == (int64_t)1);
+    REQUIRE(dst["a"]["y"] == (int64_t)2);
+    // Scalar replaces wholesale.
+    REQUIRE(dst["b"] == (int64_t)99);
+    // Array replaces wholesale (not concatenated).
+    REQUIRE(dst["c"].is_array());
+    REQUIRE(dst["c"].as_array().size() == 1);
+    REQUIRE(dst["c"][0] == (int64_t)7);
+    // null is a value here: it overwrites.
+    REQUIRE(dst.contains("d"));
+    REQUIRE(dst["d"].is_null());
+
+    // Source is unchanged.
+    REQUIRE(src["a"].as_object().size() == 1);
+    REQUIRE(src["a"]["y"] == (int64_t)2);
+    REQUIRE(src["b"] == (int64_t)99);
+    REQUIRE(src["c"].as_array().size() == 1);
+    REQUIRE(!src.contains("x"));
+}
+
+TEST_CASE("Object: merge order and position") {
+    using E = Object::Entry;
+    Object dst = Object::of(
+        E{"a", Json((int64_t)1)},
+        E{"b", Json((int64_t)2)});
+    Object src = Object::of(
+        E{"b", Json((int64_t)20)},
+        E{"c", Json((int64_t)3)},
+        E{"d", Json((int64_t)4)});
+    dst.merge(src);
+
+    // Existing keys keep their position; new keys append in other's order.
+    std::vector<std::string> got;
+    for (std::string_view k : dst.keys())
+        got.emplace_back(k);
+    REQUIRE(got == std::vector<std::string>{"a", "b", "c", "d"});
+    REQUIRE(dst["b"] == (int64_t)20);
+}
+
+TEST_CASE("Object: merge independence and ownership") {
+    Object dst;
+    {
+        // The source's key lives on a std::string that dies before the
+        // check; merge must have owned its copy.
+        std::string key = "transient_key";
+        Object src;
+        src.insert(key, Json((int64_t)1));
+        dst.merge(src);
+    }
+    REQUIRE(dst.contains("transient_key"));
+    REQUIRE(dst["transient_key"] == (int64_t)1);
+
+    // Deep clone independence: mutating the source after the merge must
+    // not touch the destination.
+    Object src2;
+    src2.insert("n", Json(Object::of(Object::Entry{"v", Json((int64_t)5)})));
+    Object dst2;
+    dst2.merge(src2);
+    REQUIRE(dst2["n"]["v"] == (int64_t)5);
+    src2["n"]["v"] = Json((int64_t)500);
+    REQUIRE(dst2["n"]["v"] == (int64_t)5);
+}
+
+TEST_CASE("Object: merge self-aliasing and no-op") {
+    using E = Object::Entry;
+    Object o = Object::of(E{"a", Json((int64_t)1)}, E{"b", Json((int64_t)2)});
+    o.merge(o); // direct self-merge is a defined no-op
+    REQUIRE(o.size() == 2);
+    REQUIRE(o["a"] == (int64_t)1);
+    REQUIRE(o["b"] == (int64_t)2);
+
+    // Empty source is a no-op; empty destination picks up the source.
+    Object empty;
+    o.merge(empty);
+    REQUIRE(o.size() == 2);
+    Object dst;
+    dst.merge(o);
+    REQUIRE(dst.size() == 2);
+    REQUIRE(dst == o);
+}
+
+TEST_CASE("Object: merge maintains hash index") {
+    constexpr int N = 40;
+    std::vector<std::string> keys;
+    keys.reserve(N);
+    for (int i = 0; i < N; ++i)
+        keys.push_back("base_" + std::to_string(i));
+
+    Object dst;
+    for (int i = 0; i < N; ++i)
+        dst.insert(keys[i], Json((int64_t)i));
+    // Materialise the lookup index (> kIndexThreshold) and prove it is live.
+    for (int i = 0; i < N; ++i)
+        REQUIRE(dst.contains(keys[i]));
+
+    Object src;
+    src.insert("merged_a", Json((int64_t)1000));
+    src.insert("merged_b", Json((int64_t)1001));
+    dst.merge(src);
+
+    // New keys must be found through the already-built index — the
+    // index_note_append correctness pin (a missing note false-misses, red).
+    REQUIRE(dst.contains("merged_a"));
+    REQUIRE(dst.contains("merged_b"));
+    REQUIRE(dst.at("merged_a") == (int64_t)1000);
+    REQUIRE(dst.at("merged_b") == (int64_t)1001);
+    REQUIRE(dst["merged_a"] == (int64_t)1000);
+    REQUIRE(dst.size() == (size_t)(N + 2));
+
+    // == sees the appended entries too.
+    Object expected;
+    for (int i = 0; i < N; ++i)
+        expected.insert(keys[i], Json((int64_t)i));
+    expected.insert("merged_a", Json((int64_t)1000));
+    expected.insert("merged_b", Json((int64_t)1001));
+    REQUIRE(dst == expected);
 }
