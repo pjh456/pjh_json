@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <ostream>
 
 #include <cstdint>
 #include <stdexcept>

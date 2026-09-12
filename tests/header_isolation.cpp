@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <ostream>
 #include <pjh_json/json.hpp> // deliberately no document.hpp / pjh_json.hpp
 
 using namespace pjh::json;
