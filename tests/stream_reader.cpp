@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include <pjh_json/stream.hpp>
 #include <pjh_json/writer.hpp>
@@ -260,4 +261,409 @@ TEST_CASE("Stream: jsonl reader config knobs") {
         REQUIRE(reader.has_error());
         REQUIRE(reader.error().offset() == 0);
     }
+}
+
+namespace
+{
+    // An event with owned text: reading past the next() call must not be
+    // required (the borrowed view is copied immediately).
+    struct OwnedEvent
+    {
+        EventType type = EventType::Null;
+        std::string text;
+        bool boolean = false;
+        int64_t integer = 0;
+        double number = 0.0;
+    };
+
+    std::vector<OwnedEvent> collect_events(StreamReader &reader)
+    {
+        std::vector<OwnedEvent> events;
+        JsonEvent ev;
+        while (reader.next(ev))
+        {
+            OwnedEvent owned;
+            owned.type = ev.type;
+            owned.text = std::string(ev.text);
+            owned.boolean = ev.boolean;
+            owned.integer = ev.integer;
+            owned.number = ev.number;
+            events.push_back(std::move(owned));
+        }
+        return events;
+    }
+
+    bool same_events(const std::vector<OwnedEvent> &a, const std::vector<OwnedEvent> &b)
+    {
+        if (a.size() != b.size())
+            return false;
+        for (size_t i = 0; i < a.size(); ++i)
+        {
+            if (a[i].type != b[i].type || a[i].text != b[i].text || a[i].boolean != b[i].boolean ||
+                a[i].integer != b[i].integer || a[i].number != b[i].number)
+                return false;
+        }
+        return true;
+    }
+
+    // Rebuild a Json tree from the flat event stream (the plan's core
+    // differential: dump(rebuilt) == dump(parse_copy(input))).
+    Json rebuild_value(const std::vector<OwnedEvent> &events, size_t &i, std::pmr::memory_resource *res)
+    {
+        const OwnedEvent &ev = events[i++];
+        switch (ev.type)
+        {
+        case EventType::Null:
+            return Json(nullptr);
+        case EventType::Boolean:
+            return Json(ev.boolean);
+        case EventType::Integer:
+            return Json(ev.integer);
+        case EventType::Double:
+            return Json(ev.number);
+        case EventType::String:
+            return Json::own(ev.text, res);
+        case EventType::BeginArray:
+        {
+            Array arr(res);
+            while (events[i].type != EventType::EndArray)
+                arr.push_back(rebuild_value(events, i, res));
+            ++i;
+            return Json(std::move(arr));
+        }
+        case EventType::BeginObject:
+        {
+            Object obj(res);
+            while (events[i].type != EventType::EndObject)
+            {
+                std::string key = events[i++].text;
+                obj.insert(key, rebuild_value(events, i, res), res);
+            }
+            ++i;
+            return Json(std::move(obj));
+        }
+        case EventType::MapKey:
+        case EventType::EndObject:
+        case EventType::EndArray:
+            break;
+        }
+        return Json(nullptr);
+    }
+
+    // Pull every event until clean end or failure, then assert the failure.
+    void expect_error(const std::string &input, ErrorCode code, size_t offset)
+    {
+        std::istringstream in(input);
+        StreamReader reader(in, 3); // tiny window also exercises refill paths
+        JsonEvent ev;
+        while (reader.next(ev))
+        {
+        }
+        REQUIRE(reader.has_error());
+        REQUIRE(reader.error().code == code);
+        REQUIRE(reader.error().offset() == offset);
+
+        // Both entry points must reject the same input (classification parity
+        // is sampled here, not pinned byte-for-byte).
+        REQUIRE(parse_copy_result(input).is_err());
+    }
+}
+
+TEST_CASE("Stream: event sequence")
+{
+    const std::string input = "{\"a\":[1,true],\"b\":{\"c\":null},\"d\":\"x\"}";
+    std::istringstream in(input);
+    StreamReader reader(in);
+    auto events = collect_events(reader);
+    REQUIRE(!reader.has_error());
+
+    const std::vector<EventType> expected = {
+        EventType::BeginObject, EventType::MapKey, EventType::BeginArray,  EventType::Integer,   EventType::Boolean,
+        EventType::EndArray,    EventType::MapKey, EventType::BeginObject, EventType::MapKey,    EventType::Null,
+        EventType::EndObject,   EventType::MapKey, EventType::String,      EventType::EndObject,
+    };
+    REQUIRE(events.size() == expected.size());
+    for (size_t i = 0; i < expected.size(); ++i)
+        REQUIRE(events[i].type == expected[i]);
+
+    REQUIRE(events[1].text == "a");
+    REQUIRE(events[3].integer == (int64_t)1);
+    REQUIRE(events[4].boolean == true);
+    REQUIRE(events[6].text == "b");
+    REQUIRE(events[8].text == "c");
+    REQUIRE(events[12].text == "x");
+}
+
+TEST_CASE("Stream: single root values")
+{
+    const char *inputs[] = {"null", "true", "false", "0", "-17", "3.5", "\"hi\"", "{}", "[]"};
+    for (const char *input : inputs)
+    {
+        std::istringstream in(input);
+        StreamReader reader(in);
+        auto events = collect_events(reader);
+        REQUIRE(!reader.has_error());
+        REQUIRE(!events.empty());
+        REQUIRE(events.front().type != EventType::EndObject);
+        REQUIRE(events.front().type != EventType::EndArray);
+    }
+
+    {
+        std::istringstream in("null");
+        StreamReader reader(in);
+        JsonEvent ev;
+        REQUIRE(reader.next(ev));
+        REQUIRE(ev.type == EventType::Null);
+        REQUIRE(reader.next(ev) == false);
+        REQUIRE(!reader.has_error());
+    }
+    {
+        std::istringstream in("-17");
+        StreamReader reader(in);
+        JsonEvent ev;
+        REQUIRE(reader.next(ev));
+        REQUIRE(ev.type == EventType::Integer);
+        REQUIRE(ev.integer == (int64_t)-17);
+    }
+    {
+        std::istringstream in("3.5e2");
+        StreamReader reader(in);
+        JsonEvent ev;
+        REQUIRE(reader.next(ev));
+        REQUIRE(ev.type == EventType::Double);
+        REQUIRE(ev.number == 350.0);
+    }
+}
+
+TEST_CASE("Stream: events rebuild dom")
+{
+    const char *inputs[] = {
+        "null",
+        "true",
+        "-123456789",
+        "18446744073709551615",
+        "1.5e3",
+        "\"a\\nb\\u00e9\\ud83d\\ude00\"",
+        "{}",
+        "[]",
+        "{\"a\":1,\"b\":[true,false,null,3.5,-7,1e3],\"c\":{\"d\":\"x\\ny\"}}",
+        "[{\"k\":\"v\"},[1,[2,[3]]]]",
+        "[[],{},[{}]]",
+    };
+
+    std::pmr::memory_resource *res = Config::instance().resource();
+    for (const char *input : inputs)
+    {
+        std::istringstream in(input);
+        StreamReader reader(in, 2);
+        auto events = collect_events(reader);
+        REQUIRE(!reader.has_error());
+
+        size_t cursor = 0;
+        Json rebuilt = rebuild_value(events, cursor, res);
+        REQUIRE(cursor == events.size());
+
+        auto reference = parse_copy(input);
+        REQUIRE(dump(rebuilt) == dump(reference.root()));
+    }
+}
+
+TEST_CASE("Stream: chunk boundary")
+{
+    const std::string long_string(1000, 'q');
+    const std::string input = "{\"key1\":\"abcdefghijklmnopqrstuvwxyz0123456789\","
+                              "\"key2\":1234567890123456789012345,"
+                              "\"key3\":[true,false,null,{\"deep\":\"end\"}],"
+                              "\"key4\":\"\\u00e9\\ud83d\\ude00\","
+                              "\"key5\":\"" +
+                              long_string + "\"}";
+
+    std::istringstream baseline_in(input);
+    StreamReader baseline(baseline_in, 64 * 1024);
+    auto expected = collect_events(baseline);
+    REQUIRE(!baseline.has_error());
+
+    for (size_t chunk : {size_t(1), size_t(2), size_t(3), size_t(7)})
+    {
+        std::istringstream in(input);
+        StreamReader reader(in, chunk);
+        auto events = collect_events(reader);
+        REQUIRE(!reader.has_error());
+        REQUIRE(same_events(events, expected));
+    }
+
+    // The decoded long string keeps every byte regardless of window splits.
+    std::istringstream long_in("[\"" + long_string + "\"]");
+    StreamReader long_reader(long_in, 4);
+    auto long_events = collect_events(long_reader);
+    REQUIRE(!long_reader.has_error());
+    REQUIRE(long_events.size() == 3);
+    REQUIRE(long_events[1].type == EventType::String);
+    REQUIRE(long_events[1].text == long_string);
+}
+
+TEST_CASE("Stream: large bounded")
+{
+    // An array much larger than the window: memory stays bounded by the
+    // window while the element count is exact, proving no whole-input
+    // buffering assumption.
+    std::string input = "[";
+    const size_t count = 2000;
+    for (size_t i = 0; i < count; ++i)
+    {
+        if (i != 0)
+            input += ',';
+        input += std::to_string(i);
+    }
+    input += ']';
+
+    std::istringstream in(input);
+    StreamReader reader(in, 16);
+    JsonEvent ev;
+    size_t integers = 0;
+    while (reader.next(ev))
+    {
+        if (ev.type == EventType::Integer)
+            ++integers;
+    }
+    REQUIRE(!reader.has_error());
+    REQUIRE(integers == count);
+}
+
+TEST_CASE("Stream: depth limit")
+{
+    ConfigGuard guard;
+
+    Config::instance().set_max_depth(1);
+    {
+        // A root container counts as level 1; a nested container is rejected
+        // at the second opening bracket.
+        std::istringstream in("[[1]]");
+        StreamReader reader(in);
+        JsonEvent ev;
+        REQUIRE(reader.next(ev));
+        REQUIRE(ev.type == EventType::BeginArray);
+        REQUIRE(reader.next(ev) == false);
+        REQUIRE(reader.has_error());
+        REQUIRE(reader.error().code == ErrorCode::MaxDepthExceeded);
+        REQUIRE(reader.error().offset() == 1);
+    }
+    {
+        std::istringstream in("[1]");
+        StreamReader reader(in);
+        auto events = collect_events(reader);
+        REQUIRE(!reader.has_error());
+        REQUIRE(events.size() == 3);
+    }
+
+    Config::instance().set_max_depth(2);
+    {
+        std::istringstream in("[[1]]");
+        StreamReader reader(in);
+        auto events = collect_events(reader);
+        REQUIRE(!reader.has_error());
+        REQUIRE(events.size() == 5);
+    }
+}
+
+TEST_CASE("Stream: errors")
+{
+    // Structure.
+    expect_error("[1 2]", ErrorCode::ExpectedCommaOrBracket, 3);
+    expect_error("{\"a\" 1}", ErrorCode::ExpectedColon, 5);
+    expect_error("[1,]", ErrorCode::UnexpectedCharacter, 3);
+    expect_error("{\"a\":}", ErrorCode::UnexpectedCharacter, 5);
+    expect_error("[", ErrorCode::UnexpectedCharacter, 1);
+    expect_error("{\"a\":1,}", ErrorCode::ExpectedStringKey, 7);
+
+    // Numbers.
+    expect_error("[01]", ErrorCode::NumberLeadingZero, 3);
+    expect_error("[1.]", ErrorCode::NumberNoFracDigits, 3);
+    expect_error("[1e]", ErrorCode::NumberNoExpDigits, 3);
+
+    // Strings.
+    expect_error("\"abc", ErrorCode::UnterminatedString, 4);
+    expect_error("\"a\nb\"", ErrorCode::UnescapedControl, 2);
+    expect_error("\"\\q\"", ErrorCode::InvalidEscapeChar, 2);
+
+    // Literals and trailing content.
+    expect_error("truex", ErrorCode::InvalidLiteralTrailing, 4);
+    expect_error("[truex]", ErrorCode::InvalidLiteralTrailing, 5);
+    expect_error("1 2", ErrorCode::ExtraCharactersAfterValue, 2);
+}
+
+TEST_CASE("Stream: eof mid token")
+{
+    expect_error("", ErrorCode::UnexpectedEndOfInput, 0);
+    expect_error("{", ErrorCode::ExpectedStringKey, 1);
+    expect_error("[1", ErrorCode::ExpectedCommaOrBracket, 2);
+    expect_error("{\"a\":1", ErrorCode::UnexpectedEndOfObject, 6);
+    expect_error("{\"a\":", ErrorCode::UnexpectedCharacter, 5);
+    expect_error("[1,", ErrorCode::UnexpectedCharacter, 3);
+    expect_error("tru", ErrorCode::UnexpectedEndOfInput, 3);
+    expect_error("fals", ErrorCode::UnexpectedEndOfInput, 4);
+    expect_error("-", ErrorCode::NumberNoIntDigits, 1);
+    expect_error("1e+", ErrorCode::NumberNoExpDigits, 3);
+}
+
+TEST_CASE("Stream: borrowed view lifetime")
+{
+    // The event's text is copied before the next pull; that is the whole
+    // contract (the buffer is reused by the following event).
+    std::istringstream in("[\"alpha\",\"beta\",\"gamma\"]");
+    StreamReader reader(in, 1);
+    JsonEvent ev;
+    REQUIRE(reader.next(ev));
+    REQUIRE(ev.type == EventType::BeginArray);
+
+    std::string first;
+    REQUIRE(reader.next(ev));
+    REQUIRE(ev.type == EventType::String);
+    first = std::string(ev.text);
+    REQUIRE(first == "alpha");
+
+    REQUIRE(reader.next(ev));
+    REQUIRE(ev.type == EventType::String);
+    REQUIRE(std::string(ev.text) == "beta");
+
+    REQUIRE(reader.next(ev));
+    REQUIRE(ev.type == EventType::String);
+    REQUIRE(std::string(ev.text) == "gamma");
+
+    // A decoded escape is also copied out before the buffer is reused.
+    REQUIRE(reader.next(ev));
+    REQUIRE(ev.type == EventType::EndArray);
+    REQUIRE(reader.next(ev) == false);
+    REQUIRE(!reader.has_error());
+
+    // Throwing shell / result shell.
+    std::istringstream shell_in("\"esc\\n\"");
+    StreamReader shell(shell_in, 2);
+    std::optional<JsonEvent> maybe = shell.next();
+    REQUIRE(maybe.has_value());
+    REQUIRE(maybe->type == EventType::String);
+    REQUIRE(std::string(maybe->text) == "esc\n");
+    REQUIRE(!shell.next().has_value());
+    REQUIRE(!shell.has_error());
+
+    std::istringstream result_in("42");
+    StreamReader result_reader(result_in);
+    auto ok = result_reader.next_result();
+    REQUIRE(ok.is_ok());
+    REQUIRE(ok.unwrap().has_value());
+    REQUIRE(ok.unwrap()->type == EventType::Integer);
+    REQUIRE(ok.unwrap()->integer == (int64_t)42);
+    auto end = result_reader.next_result();
+    REQUIRE(end.is_ok());
+    REQUIRE(!end.unwrap().has_value());
+
+    std::istringstream bad_in("[1 2]");
+    StreamReader bad_reader(bad_in);
+    JsonEvent sink;
+    while (bad_reader.next(sink))
+    {
+    }
+    auto err = bad_reader.next_result();
+    REQUIRE(err.is_err());
+    REQUIRE(err.unwrap_err().offset() == 3);
 }

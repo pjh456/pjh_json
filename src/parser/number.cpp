@@ -37,12 +37,10 @@ namespace pjh::json
     }
 
     /*
-     * Parse JSON number
+     * Classify a grammar-scanned RFC 8259 number token (shared by the DOM
+     * parser and the streaming event core; declaration in detail/utils.hpp).
      *
-     * 1. Consume optional leading '-'.
-     * 2. Consume integer digits; reject no-digits and leading-zero errors.
-     * 3. Consume fractional / exponent parts if present (float indicators).
-     * 4. Pure-integer token: int64 when the magnitude fits, else double.
+     * 1. Pure-integer token: int64 when the magnitude fits, else double.
      *    - <= 18 digits always fit (max 999999999999999999 < INT64_MAX).
      *    - 19 digits are compared digit by digit against the INT64 limits
      *      (see fits_int64_19); the negative magnitude limit is one above
@@ -51,13 +49,79 @@ namespace pjh::json
      *      slot) and fall to double, rounded to the nearest representable
      *      value (e.g. UINT64_MAX -> 2^64.0). That rounding is a property
      *      of double, not a parse error.
-     * 5. Float indicators, or a 19+-digit integer out of int64 range:
+     * 2. Float indicators, or a 19+-digit integer out of int64 range:
      *    parse the whole token as double via std::from_chars. When its
      *    error code reports out-of-range, the token is grammar-legal but
      *    its magnitude is outside the finite-double range (the documented
      *    RFC 8259 §6 limit): that is a range error, not a format error.
      *    The output value is unspecified on out-of-range across standard
      *    libraries, so only the error code may be inspected.
+     */
+    ErrorCode classify_number(const char *token_begin, const char *token_end, const grammar::number_scan &scan,
+                              Json &out, const char *&err_pos) noexcept
+    {
+        const bool is_negative = scan.negative;
+        const char *const int_start = scan.int_start;
+        const uint32_t digits = static_cast<uint32_t>(scan.int_digits);
+
+        // Pure integer token: int64 when the magnitude fits, else double
+        if (!scan.is_float)
+        {
+            // <= 18 digits always fit int64 (max 999999999999999999 < INT64_MAX)
+            if (digits < 19)
+            {
+                uint64_t uval = parse_u64(int_start, digits);
+                int64_t val = is_negative ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
+                out = Json(val);
+                return ErrorCode::None;
+            }
+            // 19 digits: digit-by-digit comparison against the INT64 limits
+            if (digits == 19 && fits_int64_19(int_start, is_negative))
+            {
+                uint64_t uval = parse_u64(int_start, digits);
+                int64_t val;
+                if (is_negative && uval == kInt64MinAbs)
+                    val = std::numeric_limits<int64_t>::min(); // -2^63: negation would overflow
+                else
+                    val = is_negative ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
+                out = Json(val);
+                return ErrorCode::None;
+            }
+        }
+
+        // Float indicators, or integer out of int64 range: parse as double.
+        // RFC 8259 §6 permits implementations to bound the accepted number
+        // range; this library's bound is a finite IEEE-754 double. A token
+        // that matches the grammar but is not representable as a finite
+        // double (overflow to infinity, or underflow to zero) is a RANGE
+        // error, not a format error — report it distinctly and do not read
+        // the output value: when the result is out-of-range its value is
+        // unspecified across implementations (libstdc++ leaves it
+        // unmodified; libc++/MSVC write +/-inf or +/-0), and the error code
+        // does not tell overflow from underflow (LWG 3081).
+        double val = 0.0;
+        auto [end, ec] = std::from_chars(token_begin, token_end, val);
+        if (ec == std::errc::result_out_of_range)
+        {
+            err_pos = token_begin; // token start, including a leading '-'
+            return ErrorCode::NumberOutOfRange;
+        }
+        if (ec != std::errc{} || end != token_end)
+        {
+            err_pos = token_end;
+            return ErrorCode::NumberInvalidFormat;
+        }
+        out = Json(val);
+        return ErrorCode::None;
+    }
+
+    /*
+     * Parse JSON number
+     *
+     * 1. Grammar scan (shared with the compile-time validator, grammar.hpp);
+     *    the error anchors reproduce the pre-dedup cursors byte for byte.
+     * 2. classify_number decides int64 vs double and reports range/format
+     *    failures with the same anchors the parser always used.
      */
     bool Parser::parse_number(Json &out)
     {
@@ -94,60 +158,15 @@ namespace pjh::json
             return false;
         }
 
-        const bool is_negative = scan.negative;
-        const char *const int_start = scan.int_start;
-        const uint32_t digits = static_cast<uint32_t>(scan.int_digits);
-        const bool is_float = scan.is_float;
-
-        // Pure integer token: int64 when the magnitude fits, else double
-        if (!is_float)
+        Json val;
+        const char *err_pos = nullptr;
+        const ErrorCode ec = classify_number(start, m_curr, scan, val, err_pos);
+        if (ec != ErrorCode::None)
         {
-            // <= 18 digits always fit int64 (max 999999999999999999 < INT64_MAX)
-            if (digits < 19)
-            {
-                uint64_t uval = parse_u64(int_start, digits);
-                int64_t val = is_negative ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
-                out = Json(val);
-                return true;
-            }
-            // 19 digits: digit-by-digit comparison against the INT64 limits
-            if (digits == 19 && fits_int64_19(int_start, is_negative))
-            {
-                uint64_t uval = parse_u64(int_start, digits);
-                int64_t val;
-                if (is_negative && uval == kInt64MinAbs)
-                    val = std::numeric_limits<int64_t>::min(); // -2^63: negation would overflow
-                else
-                    val = is_negative ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
-                out = Json(val);
-                return true;
-            }
-        }
-
-        // Float indicators, or integer out of int64 range: parse as double.
-        // RFC 8259 §6 permits implementations to bound the accepted number
-        // range; this library's bound is a finite IEEE-754 double. A token
-        // that matches the grammar but is not representable as a finite
-        // double (overflow to infinity, or underflow to zero) is a RANGE
-        // error, not a format error — report it distinctly and do not read
-        // the output value: when the result is out-of-range its value is
-        // unspecified across implementations (libstdc++ leaves it
-        // unmodified; libc++/MSVC write +/-inf or +/-0), and the error code
-        // does not tell overflow from underflow (LWG 3081).
-        double val = 0.0;
-        auto [end, ec] = std::from_chars(start, m_curr, val);
-        if (ec == std::errc::result_out_of_range)
-        {
-            // token start, including a leading '-'
-            fail(ErrorCode::NumberOutOfRange, start);
+            fail(ec, err_pos);
             return false;
         }
-        if (ec != std::errc{} || end != m_curr)
-        {
-            fail(ErrorCode::NumberInvalidFormat, m_curr);
-            return false;
-        }
-        out = Json(val);
+        out = std::move(val);
         return true;
     }
 

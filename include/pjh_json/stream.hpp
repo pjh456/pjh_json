@@ -1,9 +1,16 @@
 #ifndef INCLUDE_PJH_JSON_STREAM_HPP
 #define INCLUDE_PJH_JSON_STREAM_HPP
 
+#include <cstddef>
+#include <cstdint>
 #include <iosfwd>
+#include <memory_resource>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <vector>
+
+#include <pjh_result/result.hpp>
 
 #include "config.hpp"
 #include "document.hpp"
@@ -92,6 +99,228 @@ namespace pjh::json
         bool m_started = false;
         std::string m_line;
         std::optional<ParseError> m_error;
+    };
+
+    /**
+     * @brief Incremental JSON event kind (ijson-style)
+     *
+     * The event stream of one top-level JSON value is:
+     * BeginObject ... EndObject / BeginArray ... EndArray for containers,
+     * MapKey before each object member value, and one of
+     * Null/Boolean/Integer/Double/String per scalar.
+     */
+    enum class EventType : uint8_t
+    {
+        BeginObject,
+        MapKey,
+        EndObject,
+        BeginArray,
+        EndArray,
+        Null,
+        Boolean,
+        Integer,
+        Double,
+        String,
+    };
+
+    /**
+     * @brief One incremental parse event
+     *
+     * `boolean` / `integer` / `number` carry the scalar payloads; `text`
+     * carries decoded content for MapKey and String.
+     *
+     * @warning `text` is a BORROWED view into the reader's internal token
+     *          buffer. It is valid only until the next StreamReader::next()
+     *          call or the reader's destruction; the buffer is overwritten by
+     *          the following event. Copy it (std::string / Json::own) to
+     *          retain it.
+     */
+    struct JsonEvent
+    {
+        EventType type = EventType::Null;
+        std::string_view text{}; ///< MapKey / String: decoded content
+        bool boolean = false;    ///< Boolean payload
+        int64_t integer = 0;     ///< Integer payload
+        double number = 0.0;     ///< Double payload
+    };
+
+    /**
+     * @brief Single-root incremental JSON event reader over an std::istream
+     *
+     * Pulls one JSON event at a time from one top-level value without ever
+     * materialising the whole input or a DOM. An independent, byte-oriented
+     * state machine scans a sliding window of `chunk_size` bytes, growing the
+     * window (never truncating) so tokens, strings and numbers may straddle
+     * refill boundaries. Memory is bounded by O(nesting depth + longest single
+     * token + chunk_size): the stream size does not appear.
+     *
+     * This is the explicit divergence from the DOM parser: the event core uses
+     * no SIMD and requires NEITHER the kPaddingWidth trailing NUL bytes nor a
+     * fully buffered input. Do not feed it through Parser.
+     *
+     * Shared with the DOM parser: the constexpr grammar (grammar.hpp), the
+     * buffered escape decoder (detail/utils.hpp) and the Error/ErrorCode
+     * kernel vocabulary (error.hpp) -- zero new error codes.
+     *
+     * @note Current scope is RFC 8259 single-root mode only. Config::strip_bom,
+     *       Config::strict_utf8 and Config::json5 are NOT consulted yet
+     *       (deferred); max_depth is captured once, in the constructor, with
+     *       the same "root container counts as level 1" semantics as Parser.
+     * @note Root completion is observed lazily: the trailing-content check
+     *       (ExtraCharactersAfterValue) runs on the first next() after the
+     *       event that completes the root, not before it.
+     */
+    class StreamReader
+    {
+    public:
+        /**
+         * @brief Construct over an input stream
+         * @param in         Input stream; consumed sequentially (no seek/tellg)
+         * @param chunk_size Refill block size in bytes (default 64 KiB). It is
+         *                   also the sliding-window target and is exposed for
+         *                   tests that must force tokens across refill
+         *                   boundaries. Values below 1 are clamped to 1.
+         * @param res        Scratch-buffer resource (default: global config)
+         */
+        explicit StreamReader(std::istream &in, size_t chunk_size = 64 * 1024,
+                              std::pmr::memory_resource *res = Config::instance().resource());
+
+        /**
+         * @brief Copy not allowed (stateful single-pass reader)
+         */
+        StreamReader(const StreamReader &) = delete;
+        /**
+         * @brief Copy not allowed (stateful single-pass reader)
+         */
+        StreamReader &operator=(const StreamReader &) = delete;
+
+        /**
+         * @brief Zero-throw kernel: pull the next event
+         * @param out Receives the event on success; untouched on failure
+         * @return true = @p out holds an event; false = clean end of the root
+         *         value (no error) or the first failure (check
+         *         has_error()/error())
+         * @throws std::bad_alloc only (propagated unconverted)
+         * @note After clean end or failure every later call returns false
+         *       immediately (sticky, idempotent).
+         * @warning `out.text` (MapKey / String) borrows the reader's token
+         *          buffer; see JsonEvent.
+         */
+        [[nodiscard]] bool next(JsonEvent &out);
+
+        /**
+         * @brief true once a failure has been recorded (sticky)
+         * @return Whether error() holds a value
+         */
+        [[nodiscard]] bool has_error() const noexcept;
+
+        /**
+         * @brief First recorded kernel failure
+         * @return The fixed-size Error slot; `detail` is always empty here, so
+         *         the view stays valid until the reader is destroyed
+         * @note Precondition: has_error() is true
+         */
+        [[nodiscard]] const Error &error() const noexcept;
+
+        /**
+         * @brief Throwing shell: pull the next event
+         * @return The event on success, std::nullopt at clean end
+         * @throws ParseError on failure (materialised from error())
+         * @throws std::bad_alloc only otherwise (propagated unconverted)
+         * @warning Same borrowed-view contract as the kernel.
+         */
+        [[nodiscard]] std::optional<JsonEvent> next();
+
+        /**
+         * @brief Result shell: pull the next event
+         * @return Ok(event) on success, Ok(std::nullopt) at clean end,
+         *         Err(ParseError) on failure
+         * @throws std::bad_alloc only (propagated unconverted)
+         * @warning Same borrowed-view contract as the kernel.
+         */
+        [[nodiscard]] pjh::result::Result<std::optional<JsonEvent>, ParseError> next_result();
+
+    private:
+        /**
+         * @brief One open container's state
+         *
+         * Phases encode what the next event/byte must be; the stack depth is
+         * the current nesting depth (bounded by max_depth).
+         */
+        struct Frame
+        {
+            enum class Kind : uint8_t
+            {
+                Object,
+                Array,
+            };
+            enum class Phase : uint8_t
+            {
+                ObjectKeyOrEnd, ///< '{' consumed, or after a member value
+                ObjectKey,      ///< after ',' (no trailing comma accepted)
+                ObjectColon,    ///< MapKey emitted
+                ObjectValue,
+                ObjectCommaOrEnd,
+                ArrayValueOrEnd, ///< '[' consumed, or after a comma
+                ArrayValue,
+                ArrayCommaOrEnd,
+            };
+            Kind kind = Kind::Array;
+            Phase phase = Phase::ArrayValueOrEnd;
+        };
+
+        // ---- window / refill ----
+        /**
+         * @brief Compact [m_pos, m_len) to the front and append one chunk
+         *
+         * Sets m_eof on a short read; sets error() on a hard stream failure.
+         */
+        void fill();
+        /**
+         * @brief Grow the unconsumed window to hold at least @p n bytes
+         * @return true when at least @p n bytes are available
+         */
+        [[nodiscard]] bool ensure(size_t n);
+        /// @brief Absolute stream offset of the next unconsumed byte
+        [[nodiscard]] size_t abs() const noexcept { return m_abs_base + m_pos; }
+        /// @brief Consume whitespace, filling until a non-blank byte or EOF
+        void skip_ws();
+
+        // ---- token decoders ----
+        /// @brief Parse the '"'-delimited string at the cursor into m_token
+        [[nodiscard]] bool parse_string_token();
+        /// @brief Parse a literal at the cursor (true/false/null)
+        [[nodiscard]] bool parse_literal(JsonEvent &out);
+        /// @brief Parse and classify a number at the cursor
+        [[nodiscard]] bool parse_number(JsonEvent &out);
+        /// @brief Expect a value at the cursor and emit its first event
+        [[nodiscard]] bool expect_value(JsonEvent &out, bool at_root);
+        /// @brief Push a container frame (checks max_depth at open_offset)
+        [[nodiscard]] bool enter_container(Frame::Kind kind, size_t open_offset);
+        /// @brief Mark the just-emitted value complete in its parent frame
+        void complete_value();
+
+        // ---- error slot ----
+        /// @brief Record a positioned failure (first error wins)
+        void fail(ErrorCode c, size_t offset) noexcept;
+        /// @brief Record a context-free failure (first error wins)
+        void fail_context(ErrorCode c) noexcept;
+
+        std::istream &m_in;
+        std::pmr::vector<char> m_buf;    ///< unconsumed window [m_pos, m_len)
+        std::pmr::string m_token;        ///< raw/decoded string token scratch
+        std::pmr::vector<Frame> m_stack; ///< open containers (depth)
+        size_t m_chunk_size;
+        size_t m_max_depth;
+        size_t m_pos = 0;       ///< index of the next unconsumed byte
+        size_t m_len = 0;       ///< one past the last valid byte in m_buf
+        size_t m_abs_base = 0;  ///< absolute stream offset of m_buf[0]
+        size_t m_token_len = 0; ///< decoded length of the current m_token
+        bool m_eof = false;
+        bool m_root_done = false;
+        bool m_finished = false;
+        bool m_has_error = false;
+        Error m_error{};
     };
 }
 

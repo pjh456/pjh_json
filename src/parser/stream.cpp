@@ -1,6 +1,9 @@
 #include "pjh_json/stream.hpp"
+#include "pjh_json/detail/utils.hpp"
 #include "pjh_json/grammar.hpp"
+#include "pjh_json/json.hpp"
 
+#include <cstring>
 #include <istream>
 #include <string>
 #include <utility>
@@ -29,6 +32,61 @@ namespace pjh::json
                     return false;
             }
             return true;
+        }
+
+        // Byte class Parser::parse_literal accepts after a literal
+        // (src/parser/literal.cpp kValidAfterLiteral): whitespace, structural
+        // separators, and the NUL sentinel. Absent bytes at stream end stand in
+        // for that sentinel, so EOF is always accepted.
+        bool valid_after_literal(unsigned char c) noexcept
+        {
+            switch (c)
+            {
+            case 0x00:
+            case 0x09:
+            case 0x0A:
+            case 0x0D:
+            case 0x20:
+            case ',':
+            case ':':
+            case ']':
+            case '}':
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        // Map a grammar::number_error to the shared ErrorCode vocabulary.
+        ErrorCode number_error_code(grammar::number_error e) noexcept
+        {
+            switch (e)
+            {
+            case grammar::number_error::no_int_digits:
+                return ErrorCode::NumberNoIntDigits;
+            case grammar::number_error::leading_zero:
+                return ErrorCode::NumberLeadingZero;
+            case grammar::number_error::no_frac_digits:
+                return ErrorCode::NumberNoFracDigits;
+            case grammar::number_error::no_exp_digits:
+                return ErrorCode::NumberNoExpDigits;
+            case grammar::number_error::ok:
+                break;
+            }
+            return ErrorCode::NumberInvalidFormat;
+        }
+
+        // Trailing NUL lookahead appended to the raw string token before the
+        // buffered escape decoder runs. handle_escape reads at most 12 bytes
+        // from a backslash (a surrogate pair's second \uXXXX), so 16 is safe;
+        // the decoder writes at or below its read cursor.
+        constexpr size_t kStringDecodePadding = 16;
+
+        // Scratch containers must never be built on a null resource; the
+        // public default is Config::resource(), but a caller may pass null.
+        std::pmr::memory_resource *scratch_resource(std::pmr::memory_resource *res) noexcept
+        {
+            return res ? res : std::pmr::new_delete_resource();
         }
     }
 
@@ -126,5 +184,610 @@ namespace pjh::json
             return std::nullopt;
         }
         return std::optional<Document>(std::move(out));
+    }
+
+    // ======================================================================
+    // StreamReader — single-root incremental event core
+    // ======================================================================
+
+    StreamReader::StreamReader(std::istream &in, size_t chunk_size, std::pmr::memory_resource *res)
+        : m_in(in),
+          m_buf(scratch_resource(res)),
+          m_token(scratch_resource(res)),
+          m_stack(scratch_resource(res)),
+          m_chunk_size(chunk_size == 0 ? 1 : chunk_size),
+          m_max_depth(Config::instance().max_depth())
+    {
+        m_buf.reserve(m_chunk_size);
+        m_stack.reserve(16);
+    }
+
+    /*
+     * Compact the unconsumed window to the front, then append one chunk.
+     * A short extraction is the normal end of stream; only badbit marks a real
+     * read failure (a 0-byte read at EOF may set failbit, which is not an
+     * error) — the same discipline parse_from_istream uses.
+     */
+    void StreamReader::fill()
+    {
+        if (m_has_error || m_eof)
+            return;
+
+        if (m_pos != 0)
+        {
+            const size_t remaining = m_len - m_pos;
+            if (remaining != 0)
+                std::memmove(m_buf.data(), m_buf.data() + m_pos, remaining);
+            m_abs_base += m_pos;
+            m_len = remaining;
+            m_pos = 0;
+        }
+
+        const size_t need = m_len + m_chunk_size;
+        if (m_buf.size() < need)
+            m_buf.resize(need);
+
+        m_in.read(m_buf.data() + m_len, static_cast<std::streamsize>(m_chunk_size));
+        const std::streamsize got = m_in.gcount();
+        if (got > 0)
+            m_len += static_cast<size_t>(got);
+        if (got < static_cast<std::streamsize>(m_chunk_size))
+        {
+            if (m_in.bad())
+            {
+                fail_context(ErrorCode::StreamReadFailed);
+                return;
+            }
+            m_eof = true;
+        }
+    }
+
+    bool StreamReader::ensure(size_t n)
+    {
+        while (m_len - m_pos < n && !m_eof && !m_has_error)
+            fill();
+        return m_len - m_pos >= n;
+    }
+
+    void StreamReader::skip_ws()
+    {
+        while (!m_has_error)
+        {
+            if (m_len == m_pos)
+            {
+                if (m_eof)
+                    return;
+                fill();
+                continue;
+            }
+            if (!grammar::is_whitespace(static_cast<unsigned char>(m_buf[m_pos])))
+                return;
+            ++m_pos;
+        }
+    }
+
+    void StreamReader::fail(ErrorCode c, size_t offset) noexcept
+    {
+        if (m_has_error)
+            return;
+        m_error = Error{c, Category::Parse, offset, true, {}};
+        m_has_error = true;
+    }
+
+    void StreamReader::fail_context(ErrorCode c) noexcept
+    {
+        if (m_has_error)
+            return;
+        m_error = Error{c, Category::Parse, 0, false, {}};
+        m_has_error = true;
+    }
+
+    /*
+     * Accumulate one raw '"'-delimited string body into m_token across refill
+     * boundaries, then decode escapes in place. Control bytes are rejected at
+     * their absolute stream offset; a token that crosses chunk boundaries is
+     * grown in m_token rather than truncated.
+     */
+    bool StreamReader::parse_string_token()
+    {
+        ++m_pos; // consume the opening quote
+        const size_t content_base = abs();
+        m_token.clear();
+        bool escaped = false;
+        bool has_escape = false;
+
+        for (;;)
+        {
+            if (m_len == m_pos)
+            {
+                if (m_eof)
+                {
+                    fail(ErrorCode::UnterminatedString, abs());
+                    return false;
+                }
+                fill();
+                if (m_has_error)
+                    return false;
+                continue;
+            }
+            const char c = m_buf[m_pos];
+            ++m_pos;
+            if (escaped)
+            {
+                m_token.push_back(c);
+                escaped = false;
+            }
+            else if (c == '"')
+            {
+                break;
+            }
+            else if (c == '\\')
+            {
+                m_token.push_back(c);
+                escaped = true;
+                has_escape = true;
+            }
+            else if (static_cast<unsigned char>(c) < 0x20)
+            {
+                fail(ErrorCode::UnescapedControl, m_abs_base + m_pos - 1);
+                return false;
+            }
+            else
+            {
+                m_token.push_back(c);
+            }
+        }
+
+        const size_t raw_len = m_token.size();
+        if (!has_escape)
+        {
+            m_token_len = raw_len;
+            return true;
+        }
+
+        // Decode in place (destination <= source, so writes never clobber
+        // unread input). The NUL lookahead bounds handle_escape's read-ahead.
+        m_token.append(kStringDecodePadding, '\0');
+        char *dst = m_token.data();
+        const char *src = m_token.data();
+        const char *const src_end = src + raw_len;
+        while (src < src_end)
+        {
+            if (*src == '\\')
+            {
+                const char *ep = nullptr;
+                const ErrorCode ec = handle_escape(dst, src, ep);
+                if (ec != ErrorCode::None)
+                {
+                    if (ep != nullptr)
+                        fail(ec, content_base + static_cast<size_t>(ep - m_token.data()));
+                    else
+                        fail_context(ec);
+                    return false;
+                }
+            }
+            else
+            {
+                *dst++ = *src++;
+            }
+        }
+        m_token_len = static_cast<size_t>(dst - m_token.data());
+        return true;
+    }
+
+    /*
+     * Match true/false/null. Truncation at stream end is reported as
+     * UnexpectedEndOfInput; a full-length mismatch as InvalidLiteral. The
+     * trailing byte gate mirrors Parser::parse_literal so `truex` fails here
+     * rather than at the next structural step.
+     */
+    bool StreamReader::parse_literal(JsonEvent &out)
+    {
+        const char c = m_buf[m_pos];
+        const std::string_view lit = (c == 't') ? grammar::kTrue : (c == 'f') ? grammar::kFalse : grammar::kNull;
+        const size_t start_abs = abs();
+
+        if (!ensure(lit.size()))
+        {
+            if (m_has_error)
+                return false;
+            const size_t available = m_len - m_pos;
+            if (std::string_view(m_buf.data() + m_pos, available) != lit.substr(0, available))
+            {
+                fail(ErrorCode::InvalidLiteral, start_abs);
+                return false;
+            }
+            fail(ErrorCode::UnexpectedEndOfInput, start_abs + available);
+            return false;
+        }
+
+        const char *p = m_buf.data() + m_pos;
+        if (!grammar::match_literal(p, m_buf.data() + m_len, lit))
+        {
+            fail(ErrorCode::InvalidLiteral, start_abs);
+            return false;
+        }
+        m_pos += lit.size();
+
+        // EOF stands in for the DOM parser's NUL sentinel, which its trailing
+        // table accepts; only a real following byte can violate the gate.
+        if (ensure(1))
+        {
+            if (!valid_after_literal(static_cast<unsigned char>(m_buf[m_pos])))
+            {
+                fail(ErrorCode::InvalidLiteralTrailing, abs());
+                return false;
+            }
+        }
+        else if (m_has_error)
+        {
+            return false;
+        }
+
+        out = JsonEvent{};
+        if (c == 'n')
+        {
+            out.type = EventType::Null;
+        }
+        else
+        {
+            out.type = EventType::Boolean;
+            out.boolean = (c == 't');
+        }
+        return true;
+    }
+
+    /*
+     * Scan and classify a numeric token. grammar::scan_number runs over the
+     * current window; when it stops exactly at the window end and the stream
+     * has not ended, the window is grown and the scan restarts, so a token
+     * straddling refill boundaries is never truncated. classify_number (shared
+     * with Parser::parse_number) then yields int64 vs double with the same
+     * anchors the DOM parser reports.
+     */
+    bool StreamReader::parse_number(JsonEvent &out)
+    {
+        for (;;)
+        {
+            const char *e = m_buf.data() + m_len;
+            const char *p = m_buf.data() + m_pos;
+            grammar::number_scan scan;
+            const grammar::number_error ne = grammar::scan_number(p, e, scan);
+
+            if (p == e && !m_eof)
+            {
+                fill();
+                if (m_has_error)
+                    return false;
+                continue;
+            }
+
+            if (ne != grammar::number_error::ok)
+            {
+                fail(number_error_code(ne), m_abs_base + static_cast<size_t>(p - m_buf.data()));
+                return false;
+            }
+
+            Json val;
+            const char *err_pos = nullptr;
+            const ErrorCode ec = classify_number(m_buf.data() + m_pos, p, scan, val, err_pos);
+            if (ec != ErrorCode::None)
+            {
+                fail(ec, m_abs_base + static_cast<size_t>(err_pos - m_buf.data()));
+                return false;
+            }
+
+            m_pos = static_cast<size_t>(p - m_buf.data());
+            out = JsonEvent{};
+            if (val.is_int())
+            {
+                out.type = EventType::Integer;
+                out.integer = val.as_int();
+            }
+            else
+            {
+                out.type = EventType::Double;
+                out.number = val.as_float();
+            }
+            return true;
+        }
+    }
+
+    bool StreamReader::enter_container(Frame::Kind kind, size_t open_offset)
+    {
+        // Root container counts as level 1, matching Parser's DepthFrame.
+        if (m_max_depth != 0 && m_stack.size() + 1 > m_max_depth)
+        {
+            fail(ErrorCode::MaxDepthExceeded, open_offset);
+            return false;
+        }
+        Frame f;
+        f.kind = kind;
+        f.phase = (kind == Frame::Kind::Object) ? Frame::Phase::ObjectKeyOrEnd : Frame::Phase::ArrayValueOrEnd;
+        m_stack.push_back(f);
+        return true;
+    }
+
+    void StreamReader::complete_value()
+    {
+        if (m_stack.empty())
+        {
+            m_root_done = true;
+            return;
+        }
+        Frame &f = m_stack.back();
+        f.phase = (f.kind == Frame::Kind::Object) ? Frame::Phase::ObjectCommaOrEnd : Frame::Phase::ArrayCommaOrEnd;
+    }
+
+    /*
+     * Expect a value at the cursor and emit its first event: a container open,
+     * or a scalar. A container leaves its frame on the stack for the following
+     * next() calls; a scalar immediately closes its parent value slot.
+     */
+    bool StreamReader::expect_value(JsonEvent &out, bool at_root)
+    {
+        skip_ws();
+        if (m_has_error)
+            return false;
+        if (m_len == m_pos)
+        {
+            fail(at_root ? ErrorCode::UnexpectedEndOfInput : ErrorCode::UnexpectedCharacter, abs());
+            return false;
+        }
+
+        switch (m_buf[m_pos])
+        {
+        case '{':
+            if (!enter_container(Frame::Kind::Object, abs()))
+                return false;
+            ++m_pos;
+            out = JsonEvent{};
+            out.type = EventType::BeginObject;
+            return true;
+        case '[':
+            if (!enter_container(Frame::Kind::Array, abs()))
+                return false;
+            ++m_pos;
+            out = JsonEvent{};
+            out.type = EventType::BeginArray;
+            return true;
+        case '"':
+            if (!parse_string_token())
+                return false;
+            out = JsonEvent{};
+            out.type = EventType::String;
+            out.text = std::string_view(m_token.data(), m_token_len);
+            complete_value();
+            return true;
+        case 't':
+        case 'f':
+        case 'n':
+            if (!parse_literal(out))
+                return false;
+            complete_value();
+            return true;
+        case '-':
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+            if (!parse_number(out))
+                return false;
+            complete_value();
+            return true;
+        default:
+            fail(at_root ? ErrorCode::UnexpectedValueCharacter : ErrorCode::UnexpectedCharacter, abs());
+            return false;
+        }
+    }
+
+    /*
+     * Pull one event. The state is (root-done | stack of open containers with
+     * a phase each); every call advances exactly one event. Transitions that
+     * do not emit (colon, comma) loop internally. Clean end is reached only
+     * after the root value completes and trailing content is checked.
+     */
+    bool StreamReader::next(JsonEvent &out)
+    {
+        for (;;)
+        {
+            if (m_has_error || m_finished)
+                return false;
+
+            if (m_root_done)
+            {
+                skip_ws();
+                if (m_has_error)
+                    return false;
+                if (m_len != m_pos)
+                {
+                    fail(ErrorCode::ExtraCharactersAfterValue, abs());
+                    return false;
+                }
+                m_finished = true;
+                return false;
+            }
+
+            if (m_stack.empty())
+                return expect_value(out, true);
+
+            Frame &f = m_stack.back();
+            switch (f.phase)
+            {
+            case Frame::Phase::ObjectKeyOrEnd:
+            case Frame::Phase::ObjectKey:
+            {
+                skip_ws();
+                if (m_has_error)
+                    return false;
+                if (m_len == m_pos)
+                {
+                    fail(ErrorCode::ExpectedStringKey, abs());
+                    return false;
+                }
+                const char c = m_buf[m_pos];
+                if (c == '}' && f.phase == Frame::Phase::ObjectKeyOrEnd)
+                {
+                    ++m_pos;
+                    m_stack.pop_back();
+                    out = JsonEvent{};
+                    out.type = EventType::EndObject;
+                    complete_value();
+                    return true;
+                }
+                if (c != '"')
+                {
+                    fail(ErrorCode::ExpectedStringKey, abs());
+                    return false;
+                }
+                if (!parse_string_token())
+                    return false;
+                f.phase = Frame::Phase::ObjectColon;
+                out = JsonEvent{};
+                out.type = EventType::MapKey;
+                out.text = std::string_view(m_token.data(), m_token_len);
+                return true;
+            }
+            case Frame::Phase::ObjectColon:
+            {
+                skip_ws();
+                if (m_has_error)
+                    return false;
+                if (m_len == m_pos || m_buf[m_pos] != ':')
+                {
+                    fail(ErrorCode::ExpectedColon, abs());
+                    return false;
+                }
+                ++m_pos;
+                f.phase = Frame::Phase::ObjectValue;
+                continue;
+            }
+            case Frame::Phase::ObjectValue:
+                return expect_value(out, false);
+            case Frame::Phase::ObjectCommaOrEnd:
+            {
+                skip_ws();
+                if (m_has_error)
+                    return false;
+                if (m_len == m_pos)
+                {
+                    fail(ErrorCode::UnexpectedEndOfObject, abs());
+                    return false;
+                }
+                const char c = m_buf[m_pos];
+                if (c == '}')
+                {
+                    ++m_pos;
+                    m_stack.pop_back();
+                    out = JsonEvent{};
+                    out.type = EventType::EndObject;
+                    complete_value();
+                    return true;
+                }
+                if (c == ',')
+                {
+                    ++m_pos;
+                    f.phase = Frame::Phase::ObjectKey;
+                    continue;
+                }
+                fail(ErrorCode::ExpectedCommaOrBrace, abs());
+                return false;
+            }
+            case Frame::Phase::ArrayValueOrEnd:
+            {
+                skip_ws();
+                if (m_has_error)
+                    return false;
+                if (m_len == m_pos)
+                {
+                    fail(ErrorCode::UnexpectedCharacter, abs());
+                    return false;
+                }
+                if (m_buf[m_pos] == ']')
+                {
+                    ++m_pos;
+                    m_stack.pop_back();
+                    out = JsonEvent{};
+                    out.type = EventType::EndArray;
+                    complete_value();
+                    return true;
+                }
+                return expect_value(out, false);
+            }
+            case Frame::Phase::ArrayValue:
+                return expect_value(out, false);
+            case Frame::Phase::ArrayCommaOrEnd:
+            {
+                skip_ws();
+                if (m_has_error)
+                    return false;
+                if (m_len == m_pos)
+                {
+                    fail(ErrorCode::ExpectedCommaOrBracket, abs());
+                    return false;
+                }
+                const char c = m_buf[m_pos];
+                if (c == ']')
+                {
+                    ++m_pos;
+                    m_stack.pop_back();
+                    out = JsonEvent{};
+                    out.type = EventType::EndArray;
+                    complete_value();
+                    return true;
+                }
+                if (c == ',')
+                {
+                    ++m_pos;
+                    f.phase = Frame::Phase::ArrayValue;
+                    continue;
+                }
+                fail(ErrorCode::ExpectedCommaOrBracket, abs());
+                return false;
+            }
+            }
+        }
+        return false; // unreachable: the loop only exits through return
+    }
+
+    bool StreamReader::has_error() const noexcept
+    {
+        return m_has_error;
+    }
+
+    const Error &StreamReader::error() const noexcept
+    {
+        return m_error;
+    }
+
+    std::optional<JsonEvent> StreamReader::next()
+    {
+        JsonEvent ev;
+        if (!next(ev))
+        {
+            if (m_has_error)
+                throw ParseError(m_error);
+            return std::nullopt;
+        }
+        return ev;
+    }
+
+    pjh::result::Result<std::optional<JsonEvent>, ParseError> StreamReader::next_result()
+    {
+        using ResultT = pjh::result::Result<std::optional<JsonEvent>, ParseError>;
+        JsonEvent ev;
+        if (!next(ev))
+        {
+            if (m_has_error)
+                return ResultT::Err(ParseError(m_error));
+            return ResultT::Ok(std::nullopt);
+        }
+        return ResultT::Ok(std::optional<JsonEvent>(ev));
     }
 }
