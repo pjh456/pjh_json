@@ -6,11 +6,35 @@
 #include "validate.hpp"
 
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
+#include <utility>
 
 namespace pjh::json
 {
+
+    // ===================================================================
+    // ConstJsonKind — compile-time JSON kind tag
+    // ===================================================================
+
+    /// @brief Discriminator for the compile-time JSON value family.
+    ///
+    /// Every ConstJson* type exposes a `static constexpr ConstJsonKind kind_v`
+    /// so that generic code can query the kind without knowing the concrete
+    /// type. Use `const_json_kind_v<V>` for the decayed-type variable form.
+    enum class ConstJsonKind : std::uint8_t
+    {
+        Null,   ///< ConstJsonNull
+        Bool,   ///< ConstJsonBool
+        Int,    ///< ConstJsonInt
+        Double, ///< ConstJsonDouble
+        String, ///< ConstJsonStr
+        Array,  ///< ConstJsonArray<Ts...>
+        Object  ///< ConstJsonObject<Es...>
+    };
 
     // ===================================================================
     // compile-time scalar value types — one type per JSON scalar kind
@@ -19,30 +43,44 @@ namespace pjh::json
     /// @brief Compile-time JSON null value.
     struct ConstJsonNull
     {
+        /// @brief Compile-time kind tag.
+        static constexpr ConstJsonKind kind_v = ConstJsonKind::Null;
     };
 
     /// @brief Compile-time JSON boolean value.
     struct ConstJsonBool
     {
         bool v; ///< The boolean value.
+
+        /// @brief Compile-time kind tag.
+        static constexpr ConstJsonKind kind_v = ConstJsonKind::Bool;
     };
 
     /// @brief Compile-time JSON integer value (int64_t).
     struct ConstJsonInt
     {
         int64_t v; ///< The integer value.
+
+        /// @brief Compile-time kind tag.
+        static constexpr ConstJsonKind kind_v = ConstJsonKind::Int;
     };
 
     /// @brief Compile-time JSON floating-point value (double).
     struct ConstJsonDouble
     {
         double v; ///< The double value.
+
+        /// @brief Compile-time kind tag.
+        static constexpr ConstJsonKind kind_v = ConstJsonKind::Double;
     };
 
     /// @brief Compile-time JSON string value (borrowed view, no copy).
     struct ConstJsonStr
     {
         std::string_view v; ///< The string view.
+
+        /// @brief Compile-time kind tag.
+        static constexpr ConstJsonKind kind_v = ConstJsonKind::String;
     };
 
     // ===================================================================
@@ -223,6 +261,9 @@ namespace pjh::json
         /// @brief The array elements, stored inline in a tuple.
         std::tuple<Ts...> elems;
 
+        /// @brief Compile-time kind tag.
+        static constexpr ConstJsonKind kind_v = ConstJsonKind::Array;
+
         /// @brief Compile-time element count.
         static constexpr size_t size_v = sizeof...(Ts);
 
@@ -256,6 +297,9 @@ namespace pjh::json
     template <typename V>
     struct ConstJsonEntry
     {
+        /// @brief The compile-time JSON type of the value.
+        using value_type = V;
+
         /// @brief The object key (borrowed view into a string literal).
         std::string_view key;
 
@@ -293,6 +337,9 @@ namespace pjh::json
 
         /// @brief The object entries, stored inline in a tuple.
         std::tuple<Es...> entries;
+
+        /// @brief Compile-time kind tag.
+        static constexpr ConstJsonKind kind_v = ConstJsonKind::Object;
 
         /// @brief Compile-time entry count.
         static constexpr size_t size_v = sizeof...(Es);
@@ -421,6 +468,219 @@ namespace pjh::json
             return {json, ok};
         }
     };
+
+    // ===================================================================
+    // compile-time kind introspection
+    // ===================================================================
+
+    /// @brief The ConstJsonKind of a compile-time JSON value type.
+    /// @tparam V A ConstJson* type (decayed internally).
+    ///
+    /// The type must expose a `static constexpr ConstJsonKind kind_v`; a
+    /// non-ConstJson type is a hard error at the point of instantiation.
+    template <typename V>
+    inline constexpr ConstJsonKind const_json_kind_v = std::decay_t<V>::kind_v;
+
+    /// @brief True when v is a compile-time JSON null.
+    /// @tparam V A ConstJson* type (deduced).
+    /// @param v The value to inspect.
+    /// @return true for ConstJsonNull, false otherwise.
+    template <typename V>
+    [[nodiscard]] constexpr bool is_null(const V &) noexcept
+    {
+        return const_json_kind_v<V> == ConstJsonKind::Null;
+    }
+
+    /// @brief True when v is a compile-time JSON boolean.
+    /// @tparam V A ConstJson* type (deduced).
+    /// @param v The value to inspect.
+    /// @return true for ConstJsonBool, false otherwise.
+    template <typename V>
+    [[nodiscard]] constexpr bool is_bool(const V &) noexcept
+    {
+        return const_json_kind_v<V> == ConstJsonKind::Bool;
+    }
+
+    /// @brief True when v is a compile-time JSON integer.
+    /// @tparam V A ConstJson* type (deduced).
+    /// @param v The value to inspect.
+    /// @return true for ConstJsonInt, false otherwise.
+    template <typename V>
+    [[nodiscard]] constexpr bool is_int(const V &) noexcept
+    {
+        return const_json_kind_v<V> == ConstJsonKind::Int;
+    }
+
+    /// @brief True when v is a compile-time JSON double.
+    /// @tparam V A ConstJson* type (deduced).
+    /// @param v The value to inspect.
+    /// @return true for ConstJsonDouble, false otherwise.
+    template <typename V>
+    [[nodiscard]] constexpr bool is_double(const V &) noexcept
+    {
+        return const_json_kind_v<V> == ConstJsonKind::Double;
+    }
+
+    /// @brief True when v is a compile-time JSON string.
+    /// @tparam V A ConstJson* type (deduced).
+    /// @param v The value to inspect.
+    /// @return true for ConstJsonStr, false otherwise.
+    template <typename V>
+    [[nodiscard]] constexpr bool is_string(const V &) noexcept
+    {
+        return const_json_kind_v<V> == ConstJsonKind::String;
+    }
+
+    /// @brief True when v is a compile-time JSON array.
+    /// @tparam V A ConstJson* type (deduced).
+    /// @param v The value to inspect.
+    /// @return true for ConstJsonArray, false otherwise.
+    template <typename V>
+    [[nodiscard]] constexpr bool is_array(const V &) noexcept
+    {
+        return const_json_kind_v<V> == ConstJsonKind::Array;
+    }
+
+    /// @brief True when v is a compile-time JSON object.
+    /// @tparam V A ConstJson* type (deduced).
+    /// @param v The value to inspect.
+    /// @return true for ConstJsonObject, false otherwise.
+    template <typename V>
+    [[nodiscard]] constexpr bool is_object(const V &) noexcept
+    {
+        return const_json_kind_v<V> == ConstJsonKind::Object;
+    }
+
+    // ===================================================================
+    // scalar accessors — the argument type selects the accessor
+    // ===================================================================
+
+    /// @brief Read the value of a compile-time JSON boolean.
+    /// @param v The boolean value.
+    /// @return The stored bool.
+    [[nodiscard]] constexpr bool as_bool(const ConstJsonBool &v) noexcept
+    {
+        return v.v;
+    }
+
+    /// @brief Read the value of a compile-time JSON integer.
+    /// @param v The integer value.
+    /// @return The stored int64_t.
+    [[nodiscard]] constexpr std::int64_t as_int(const ConstJsonInt &v) noexcept
+    {
+        return v.v;
+    }
+
+    /// @brief Read the value of a compile-time JSON double.
+    /// @param v The double value.
+    /// @return The stored double.
+    [[nodiscard]] constexpr double as_double(const ConstJsonDouble &v) noexcept
+    {
+        return v.v;
+    }
+
+    /// @brief Read the value of a compile-time JSON string.
+    /// @param v The string value.
+    /// @return The borrowed string view.
+    [[nodiscard]] constexpr std::string_view as_string(const ConstJsonStr &v) noexcept
+    {
+        return v.v;
+    }
+
+    // ===================================================================
+    // array access — get<I>() is compile-time indexed
+    // ===================================================================
+
+    /// @brief Access the I-th element of a compile-time JSON array.
+    /// @tparam I The element index (must be < size()).
+    /// @tparam Ts The array element types.
+    /// @param a The array.
+    /// @return A reference to the I-th element.
+    template <std::size_t I, typename... Ts>
+    [[nodiscard]] constexpr decltype(auto) get(const ConstJsonArray<Ts...> &a) noexcept
+    {
+        return std::get<I>(a.elems);
+    }
+
+    /// @brief The first element of a non-empty compile-time JSON array.
+    /// @tparam Ts The array element types.
+    /// @param a The array (must not be empty).
+    /// @return A reference to element 0.
+    template <typename... Ts>
+        requires(sizeof...(Ts) > 0)
+    [[nodiscard]] constexpr decltype(auto) front(const ConstJsonArray<Ts...> &a) noexcept
+    {
+        return std::get<0>(a.elems);
+    }
+
+    // ===================================================================
+    // object access — positional get<I>() plus key lookup
+    // ===================================================================
+
+    /// @brief Access the I-th entry of a compile-time JSON object.
+    /// @tparam I The entry index (must be < size()).
+    /// @tparam Es The object entry types.
+    /// @param o The object.
+    /// @return A reference to the I-th ConstJsonEntry.
+    template <std::size_t I, typename... Es>
+    [[nodiscard]] constexpr decltype(auto) get(const ConstJsonObject<Es...> &o) noexcept
+    {
+        return std::get<I>(o.entries);
+    }
+
+    /// @brief Test whether a compile-time JSON object contains a key.
+    /// @tparam Es The object entry types.
+    /// @param o The object.
+    /// @param k The key to look up.
+    /// @return true when any entry's key equals k (structural order, no dedup).
+    template <typename... Es>
+    [[nodiscard]] constexpr bool has_key(const ConstJsonObject<Es...> &o,
+                                         std::string_view k) noexcept
+    {
+        return [&]<std::size_t... I>(std::index_sequence<I...>)
+        {
+            return ((std::get<I>(o.entries).key == k) || ...);
+        }(std::index_sequence_for<Es...>{});
+    }
+
+    namespace detail
+    {
+        /// @brief Return a pointer to the value of entry I when its wrapped
+        ///        type matches T, else nullptr. Non-matching branches are
+        ///        discarded with `if constexpr` (no ill-typed `&value`).
+        template <std::size_t I, typename Tuple, typename T>
+        [[nodiscard]] constexpr const T *const_json_find_one(const Tuple &t,
+                                                             std::string_view k) noexcept
+        {
+            using E = std::tuple_element_t<I, Tuple>;
+            if constexpr (std::is_same_v<typename E::value_type, T>)
+                return std::get<I>(t).key == k ? &std::get<I>(t).value : nullptr;
+            else
+                return nullptr;
+        }
+    } // namespace detail
+
+    /// @brief Find a key in a compile-time JSON object, typed by the wrapped
+    ///        compile-time type (e.g. `find<ConstJsonInt>(o, "a")`).
+    /// @tparam T The expected wrapped ConstJson type (must match exactly).
+    /// @tparam Es The object entry types.
+    /// @param o The object.
+    /// @param k The key to look up.
+    /// @return A pointer to the first structurally matching value of type T,
+    ///         or nullptr when the key is missing or typed differently.
+    /// @note Structural-order first match; duplicate keys are unsupported
+    ///       (ConstJsonObject does not deduplicate).
+    template <typename T, typename... Es>
+    [[nodiscard]] constexpr const T *find(const ConstJsonObject<Es...> &o,
+                                          std::string_view k) noexcept
+    {
+        const T *r = nullptr;
+        [&]<std::size_t... I>(std::index_sequence<I...>)
+        {
+            ((r = r ? r : detail::const_json_find_one<I, std::tuple<Es...>, T>(o.entries, k)), ...);
+        }(std::index_sequence_for<Es...>{});
+        return r;
+    }
 
 } // namespace pjh::json
 
