@@ -1367,6 +1367,41 @@ TEST_CASE("String: release leaves a null view") {
     REQUIRE(static_cast<std::string_view>(v) == std::string_view(src));
 }
 
+TEST_CASE("String: borrowed length round-trips")
+{
+    // Covers all six borrowed-length write sites with a normal (far below
+    // 4 GiB) string. Pre-fix these cast to uint32_t; the widening must keep
+    // every path bit-identical for in-range inputs.
+    const std::string src(512, 'r');
+    const std::string_view expect(src);
+
+    String from_view{std::string_view(src)}; // String(std::string_view)
+    REQUIRE(static_cast<std::string_view>(from_view) == expect);
+
+    const char *cstr = src.c_str();
+    String from_cstr{cstr}; // String(const char *)
+    REQUIRE(static_cast<std::string_view>(from_cstr) == expect);
+
+    Json from_json_view{std::string_view(src)}; // Json(std::string_view)
+    REQUIRE(from_json_view.as_string() == expect);
+
+    String ctor_src{std::string_view(src)};
+    Json from_string_ctor(std::move(ctor_src)); // Json(String &&)
+    REQUIRE(from_string_ctor.as_string() == expect);
+
+    String assign_src{std::string_view(src)};
+    Json assigned;
+    assigned = std::move(assign_src); // Json::operator=(String &&)
+    REQUIRE(assigned.as_string() == expect);
+
+    Json from_assign_op;
+    from_assign_op = std::string_view(src); // Json::operator=(std::string_view)
+    REQUIRE(from_assign_op.as_string() == expect);
+
+    Json owned = Json::own(src); // owned reference (already size_t)
+    REQUIRE(owned.as_string() == expect);
+}
+
 TEST_CASE("Json: clone allocates header through resource") {
     TestCountingResource cr;
     static const char kCloneSrc[] = "clone-source-long-enough-to-exceed-sso-capacity";
@@ -1765,6 +1800,9 @@ TEST_CASE("Json: entry view const track (compile pins)") {
     static_assert(sizeof(ConstValuesView) == sizeof(const void *));
     // Layout zero change: Json stays 24 bytes
     static_assert(sizeof(Json) == 24);
+    // Widening the borrowed length to size_t fills existing tail padding:
+    // String also stays 24 bytes.
+    static_assert(sizeof(String) == 24);
 
     // Runtime: the const track is usable (compiles AND runs on const Json)
     auto doc = parse_copy(R"({"a":1,"b":2})");

@@ -170,7 +170,7 @@ namespace pjh::json
         destroy();
         m_type = Type::StringView;
         m_data.str_view.data = val.data();
-        m_data.str_view.length = static_cast<uint32_t>(val.size());
+        m_data.str_view.length = val.size();
         return *this;
     }
 

@@ -127,8 +127,11 @@ namespace pjh::json
         struct StrView
         {
             const char *data;
-            uint32_t length;
+            size_t length;
         };
+
+        // Borrowed lengths are size_t so >4 GiB strings are never truncated.
+        static_assert(std::is_same_v<decltype(StrView::length), size_t>, "borrowed string length must be size_t");
 
         /**
          * @brief Value storage. Only one member is active, selected by m_type.
@@ -268,7 +271,7 @@ namespace pjh::json
         constexpr Json(std::string_view sv) : m_type(Type::StringView)
         {
             m_data.str_view.data = sv.data();
-            m_data.str_view.length = static_cast<uint32_t>(sv.size());
+            m_data.str_view.length = sv.size();
         }
 
         /**
@@ -343,7 +346,7 @@ namespace pjh::json
         {
             std::string_view sv = s;
             m_data.str_view.data = sv.data();
-            m_data.str_view.length = static_cast<uint32_t>(sv.size());
+            m_data.str_view.length = sv.size();
 
             if (s.is_owned())
             {
@@ -461,7 +464,7 @@ namespace pjh::json
             destroy();
             std::string_view sv = s;
             m_data.str_view.data = sv.data();
-            m_data.str_view.length = static_cast<uint32_t>(sv.size());
+            m_data.str_view.length = sv.size();
             if (s.is_owned())
             {
                 m_type = Type::StringOwned;

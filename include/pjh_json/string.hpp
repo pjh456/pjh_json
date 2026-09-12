@@ -1,6 +1,7 @@
 #ifndef INCLUDE_PJH_JSON_STRING_HPP
 #define INCLUDE_PJH_JSON_STRING_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <memory>
@@ -60,8 +61,11 @@ namespace pjh::json
         struct ViewData
         {
             const char *data;
-            uint32_t length;
+            size_t length;
         };
+
+        // Borrowed lengths are size_t so >4 GiB strings are never truncated.
+        static_assert(std::is_same_v<decltype(ViewData::length), size_t>, "borrowed string length must be size_t");
 
         /**
          * @brief Inline storage. Only one member is active per m_storage.
@@ -93,7 +97,7 @@ namespace pjh::json
         constexpr String(std::string_view sv) noexcept : m_storage(Storage::View)
         {
             view_data.data = sv.data();
-            view_data.length = static_cast<uint32_t>(sv.size());
+            view_data.length = sv.size();
         }
 
         /**
@@ -105,7 +109,7 @@ namespace pjh::json
         {
             std::string_view sv(s);
             view_data.data = sv.data();
-            view_data.length = static_cast<uint32_t>(sv.size());
+            view_data.length = sv.size();
         }
 
         /**
