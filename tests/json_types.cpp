@@ -8,6 +8,9 @@
 #include <limits>
 #include <memory_resource>
 #include <functional>
+#include <iterator>
+#include <ranges>
+#include <type_traits>
 #include <variant>
 #include <cstring>
 #include <string>
@@ -1816,6 +1819,99 @@ TEST_CASE("Json: entry view const track (compile pins)") {
     }
     REQUIRE(n == 2);
     REQUIRE(sum == 3);
+}
+
+// --- task 70: iterator range-for-only contract ---
+//
+// std::iterator_traits<X> for a non-standard iterator X is an empty primary
+// template, but naming a missing member on a concrete (non-dependent) type is
+// a hard error, so the absence probe is a concept (the template parameter
+// makes the member lookup dependent and therefore SFINAE-friendly). These
+// concepts are also the executable half of the documented contract: if a
+// future task makes an iterator standard, they flip red and force the docs
+// (README "### Iteration", header @notes) to move with them.
+template <class I>
+concept has_iterator_value_type = requires { typename std::iterator_traits<I>::value_type; };
+
+template <class I>
+concept has_iterator_difference_type = requires { typename std::iterator_traits<I>::difference_type; };
+
+TEST_CASE("Json: iterator range-for-only contract")
+{
+    // Range-for is a language protocol (the desugaring finds the member
+    // begin()/end() directly), independent of the <ranges> concepts. Since
+    // std::ranges::begin constrains its result on input_or_output_iterator,
+    // the pjh proxy iterators make these types fail even std::ranges::range
+    // (not merely input_range). That is the footgun this case pins: a
+    // begin()/end() pair alone does not a std::ranges range make.
+    static_assert(!std::ranges::range<Json>);
+    static_assert(!std::ranges::input_range<Json>);
+    static_assert(!std::ranges::range<const Json>);
+    static_assert(!std::ranges::input_range<const Json>);
+    static_assert(!std::ranges::range<Object>);
+    static_assert(!std::ranges::input_range<Object>);
+
+    // The const Object track and Array are native random-access iterators:
+    // the algorithm escape hatch (deliberately conforming, unchanged).
+    static_assert(std::ranges::range<const Object>);
+    static_assert(std::ranges::random_access_range<const Object>);
+    static_assert(std::ranges::random_access_range<Array>);
+    static_assert(std::ranges::random_access_range<const Array>);
+
+    // Projection views share the proxy-iterator contract.
+    static_assert(!std::ranges::range<KeysView>);
+    static_assert(!std::ranges::input_range<KeysView>);
+    static_assert(!std::ranges::range<ValuesView>);
+    static_assert(!std::ranges::input_range<ValuesView>);
+    static_assert(!std::ranges::range<ConstValuesView>);
+    static_assert(!std::ranges::input_range<ConstValuesView>);
+
+    // No pjh proxy iterator models input_or_output_iterator (each lacks
+    // difference_type and/or post-increment / movable).
+    static_assert(!std::input_or_output_iterator<JsonIterator>);
+    static_assert(!std::input_or_output_iterator<ConstJsonIterator>);
+    static_assert(!std::input_or_output_iterator<Object::iterator>);
+    static_assert(!std::input_or_output_iterator<KeysView::KeyIt>);
+    static_assert(!std::input_or_output_iterator<ValuesView::ValueIt>);
+    static_assert(!std::input_or_output_iterator<ConstValuesView::ValueIt>);
+
+    // Object::iterator is a move-only per-step proxy (copy deleted by
+    // design, no assignment because the cached proxy holds references);
+    // JsonIterator inherits the non-assignability through its variant.
+    static_assert(!std::is_copy_constructible_v<Object::iterator>);
+    static_assert(std::is_move_constructible_v<Object::iterator>);
+    static_assert(!std::is_copy_assignable_v<Object::iterator>);
+    static_assert(!std::is_move_assignable_v<Object::iterator>);
+    static_assert(!std::is_copy_constructible_v<JsonIterator>);
+    static_assert(std::is_move_constructible_v<JsonIterator>);
+    static_assert(!std::is_copy_assignable_v<JsonIterator>);
+    static_assert(!std::is_move_assignable_v<JsonIterator>);
+
+    // Deliberately no iterator_traits member types.
+    static_assert(!has_iterator_value_type<JsonIterator>);
+    static_assert(!has_iterator_difference_type<Object::iterator>);
+    static_assert(!has_iterator_value_type<ConstJsonIterator>);
+    static_assert(!has_iterator_value_type<KeysView::KeyIt>);
+    static_assert(!has_iterator_value_type<ValuesView::ValueIt>);
+    static_assert(!has_iterator_value_type<ConstValuesView::ValueIt>);
+    // Positive control: the const Object iterator is a real standard iterator
+    // (its traits are present), so the probe itself is not vacuous.
+    static_assert(has_iterator_value_type<Object::const_iterator>);
+    static_assert(has_iterator_difference_type<Object::const_iterator>);
+
+    // Runtime sanity: the supported range-for forms compile and run.
+    auto doc = parse_copy(R"({"a":1,"b":2})");
+    std::size_t n = 0;
+    for (auto &&e : doc.root())
+    {
+        (void)e;
+        ++n;
+    }
+    REQUIRE(n == 2);
+
+    // Future conformance must update this pin and the docs in the SAME
+    // commit: adding traits / post-increment / assignment to make these
+    // iterators standard flips these asserts red (a one-way contract lock).
 }
 
 TEST_CASE("Json: begin() on scalar throws TypeError") {

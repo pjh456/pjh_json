@@ -1303,6 +1303,14 @@ namespace pjh::json
          * @note The loop variable is bound to a per-step prvalue view:
          *       use auto &&e, auto e, or const auto &e (a plain auto &e
          *       cannot bind the prvalue yield).
+         * @note Iteration is range-for-only: the Json-level iterators
+         *       carry no iterator_traits member types, so std::distance/
+         *       advance, the standard algorithms and the std::ranges
+         *       iterator algorithms do not accept them, and Json does not
+         *       model std::ranges::range through this track either
+         *       (std::ranges::begin requires input_or_output_iterator).
+         *       For algorithms use the Array iterators/data() or the
+         *       const Object track; see "### Iteration" in README.md.
          * @warning Iterators are invalidated by any storage-changing
          *          operation on the container (Array push_back/resize/erase/
          *          clear; Object insert/remove/clear) — the std::vector
@@ -1594,7 +1602,14 @@ namespace pjh::json
      * synthesizes an EntryView (key = the entry's key, or the empty view
      * for an array element; value = the child, in place).
      * Designed for range-for only: no iterator_traits typedefs;
-     * std::distance/advance are not supported.
+     * std::distance/advance are not supported, and no standard or
+     * std::ranges iterator algorithm accepts it. Pre-increment only and
+     * no operator->. The variant of alternatives (the Object::iterator
+     * alternative is non-copy-assignable) makes this iterator
+     * non-copy-assignable too. Because std::ranges::begin constrains its
+     * result on input_or_output_iterator, Json does not model
+     * std::ranges::range through this track; for algorithms use the Array
+     * native iterators/data() or the const Object track.
      */
     class JsonIterator
     {
@@ -1649,6 +1664,10 @@ namespace pjh::json
     /**
      * @brief Iterator returned by Json::begin() const / end() const.
      * Same mechanism as JsonIterator with a const value reference.
+     * Range-for-only like JsonIterator: no iterator_traits; pre-increment
+     * only; no operator->; const Json does not model std::ranges::range
+     * through it. For algorithms use the underlying const container
+     * iterators (Array / const Object).
      */
     class ConstJsonIterator
     {
@@ -1707,12 +1726,17 @@ namespace pjh::json
      * yielded as std::string_view by value through the nested iterator.
      * Valid while the Object's storage stays stable (a move-assign of the
      * Object invalidates the view — the std::vector contract).
+     *
+     * The nested KeyIt is a range-for-only projection iterator: no
+     * iterator_traits, no standard algorithm support (for that, use the
+     * const Object iterators/data()).
      */
     class KeysView
     {
     public:
         /**
          * @brief Keys iterator: *it = a std::string_view into the key
+         * @note Range-for-only: no iterator_traits, pre-increment only.
          */
         class KeyIt
         {
@@ -1751,12 +1775,16 @@ namespace pjh::json
      *
      * Same mechanism as KeysView; the nested iterator yields Json &
      * (patch in place). Order = entry order.
+     *
+     * The nested ValueIt is a range-for-only projection iterator: no
+     * iterator_traits, no standard algorithm support.
      */
     class ValuesView
     {
     public:
         /**
          * @brief Values iterator: *it = Json & (the child, in place)
+         * @note Range-for-only: no iterator_traits, pre-increment only.
          */
         class ValueIt
         {
@@ -1784,10 +1812,17 @@ namespace pjh::json
     /**
      * @brief Zero-allocation view of an Object's values (const track).
      * Same as ValuesView yielding const Json &.
+     *
+     * The nested ValueIt is a range-for-only projection iterator: no
+     * iterator_traits, no standard algorithm support.
      */
     class ConstValuesView
     {
     public:
+        /**
+         * @brief Const values iterator: *it = const Json &
+         * @note Range-for-only: no iterator_traits, pre-increment only.
+         */
         class ValueIt
         {
         public:

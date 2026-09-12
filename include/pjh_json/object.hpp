@@ -57,6 +57,10 @@ namespace pjh::json
         /**
          * @brief Const-track iterator (std::vector const_iterator; the
          *        key side is already read-only through the const pair)
+         * @note A native std::vector const_iterator: a standard
+         *       random-access iterator usable with the standard
+         *       algorithms (the const track is the algorithm escape
+         *       hatch; the non-const iterator below is range-for-only).
          */
         using const_iterator = Vec::const_iterator;
 
@@ -83,9 +87,25 @@ namespace pjh::json
          * value patchable); operator-> re-binds the cached EntryRef on
          * every call (a pointer held across ++ reads at most a stale
          * value, never a dangling one — the cache lives in the
-         * iterator). Pre-increment only: the iterator is non-copyable
-         * (the cache holds reference members). No iterator_traits
-         * typedefs: range-for is the only promised scenario.
+         * iterator). Pre-increment only.
+         *
+         * Range-for-only contract: this iterator implements just the
+         * language's `*it` / `++it` / `it != end` protocol. It has no
+         * iterator_traits member types, so std::distance/advance, the
+         * standard algorithms and the std::ranges iterator algorithms
+         * do not accept it. Since std::ranges::begin constrains its
+         * result on input_or_output_iterator, Object does not model
+         * std::ranges::range through this track either. For algorithms
+         * use data() (mutable; drops the lookup-index cache) or the
+         * const track, whose const_iterator is a native random-access
+         * vector iterator.
+         *
+         * Copy is deleted by design, not because the language forces
+         * it: the cached proxy holds reference members, so a copy would
+         * bind the same referents (a copy constructor could in fact be
+         * defined) — the class is deliberately move-only. It is
+         * move-constructible but has no copy or move assignment: a
+         * reference-member proxy cannot be assigned.
          * Dereferencing end() is undefined, as with every std container
          * iterator.
          * @warning Do not hold the address of a loop variable (&e)
@@ -106,8 +126,10 @@ namespace pjh::json
             iterator &operator++() noexcept;
 
             /**
-             * @brief Copy not allowed — the cached proxy holds reference
-             *        members (move-only by construction)
+             * @brief Copy not allowed — a deliberate design choice: the
+             *        cached proxy is a per-step view and a copy would
+             *        bind the same referents (reference members do not
+             *        prevent copy construction)
              */
             iterator(const iterator &) = delete;
             /**
@@ -119,8 +141,8 @@ namespace pjh::json
              */
             iterator(iterator &&) noexcept = default;
             /**
-             * @brief Copy not allowed — the cached proxy holds reference
-             *        members (move-only by construction)
+             * @brief Copy assign not allowed — the cached proxy's
+             *        reference members are not assignable
              */
             iterator &operator=(const iterator &) = delete;
 
@@ -297,6 +319,9 @@ namespace pjh::json
          *         is read-only (a mutable key would silently re-key the
          *         entry or dangle its source; task 21.1), the value
          *         side stays patchable
+         * @note Range-for-only (see class iterator): no iterator_traits,
+         *       no standard algorithm support; use data() or the const
+         *       track for algorithms.
          */
         [[nodiscard]] iterator begin() noexcept;
         /**
@@ -307,6 +332,9 @@ namespace pjh::json
         /**
          * @brief Const iterator to first entry
          * @return Const iterator
+         * @note Native std::vector const_iterator (standard
+         *       random-access): the const track is the algorithm escape
+         *       hatch.
          */
         [[nodiscard]] Vec::const_iterator begin() const noexcept;
         /**
@@ -392,6 +420,9 @@ namespace pjh::json
          *       mutation path; for mutable values use values().
          * @note A duplicate-key overwrite keeps the first occurrence's
          *       position (last-wins semantics, task 10).
+         * @note KeysView is range-for-only: its nested iterator has no
+         *       iterator_traits, so no standard algorithm accepts it.
+         *       For algorithms use the const Object iterators/data().
          * @code
          * for (std::string_view k : obj.keys())
          *     log(k);
@@ -401,11 +432,16 @@ namespace pjh::json
         /**
          * @brief The object's values (mutable), in entry order
          * @return Zero-allocation view; the loop variable is a Json &
+         * @note ValuesView is range-for-only (no iterator_traits); for
+         *       algorithms sort/project through data() instead.
          */
         [[nodiscard]] ValuesView values() noexcept;
         /**
          * @brief The object's values (read-only), in entry order
          * @return Zero-allocation view; the loop variable is a const Json &
+         * @note ConstValuesView is range-for-only (no iterator_traits);
+         *       the const Object iterators/data() are the algorithm
+         *       surface.
          */
         [[nodiscard]] ConstValuesView values() const noexcept;
         /**@}*/

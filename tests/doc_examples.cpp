@@ -122,6 +122,27 @@ using namespace pjh::json;
     return total;
 }
 
+// --- mirrors README.md "### Iteration" (and json.hpp Iteration @code) --------
+[[maybe_unused]] static Document header_iteration_example()
+{
+    auto doc = parse_copy(R"({"nums":[1,2,3],"obj":{"a":1,"b":2}})");
+
+    // range-for: arrays yield elements, objects yield (key, value) views.
+    for (auto &&e : doc.root()["nums"]) // e.key is empty for array elements
+        e.value = Json(e.value.as_int() * 2);
+
+    Object &o = doc.root()["obj"].as_object();
+    auto consume = [](std::string_view) {}; // stand-in for real work
+    for (std::string_view k : o.keys())     // keys are read-only
+        consume(k);
+    for (auto &v : o.values()) // values are mutable references
+        v = Json(nullptr);
+
+    // Need std algorithms? Use the raw/const container surfaces, not the
+    // Json-level iterators: Array::begin/end, const Object::begin/end, data().
+    return doc;
+}
+
 TEST_CASE("Docs: README runtime example compiles and runs")
 {
     readme_runtime_example();
@@ -151,4 +172,10 @@ TEST_CASE("Docs: header @code examples compile and run")
 
     auto obj = parse_copy(R"({"ab":1,"cde":2})");
     REQUIRE(header_keys_example(obj.root().as_object()) == (std::size_t)5);
+
+    auto iter_doc = header_iteration_example();
+    REQUIRE(iter_doc.root()["nums"][0] == (int64_t)2);
+    REQUIRE(iter_doc.root()["nums"][2] == (int64_t)6);
+    REQUIRE(iter_doc.root()["obj"]["a"] == nullptr);
+    REQUIRE(iter_doc.root()["obj"]["b"] == nullptr);
 }

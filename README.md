@@ -14,6 +14,7 @@ SIMD-accelerated C++20 JSON parser. Custom tagged-union `Json` type (24 bytes), 
 * **Serialization**: `dump` (compact/pretty), `dump_jsonl`, `prettify`
 * **Safe access**: `try_as_int()`, `try_as_string()`, `try_as_array()`, etc. -- returns `nullopt` on type mismatch
 * **Builder API**: `Array::of(...)`, `Object::of(...)` for in-code construction
+* **Range-for iteration**: arrays, objects, `keys()`/`values()`; the iterators are range-for-only — use `data()`/const containers for std algorithms (see [Iteration](#iteration))
 * **Compile-time JSON**: `ConstJson::of()` builds nested JSON trees at compile time via template type encoding. `ConstJson::parse()` validates JSON strings at compile time. No heap allocation — all data lives inline in `std::tuple`.
 
 > The compile-time API is opt-in: `#include "pjh_json/json_constexpr.hpp"`. The
@@ -93,6 +94,53 @@ std::pmr::string compact = dump(doc);
 std::pmr::string pretty  = dump(doc, DumpOptions{.pretty = true, .indent = 2});
 dump_file("out.json", doc.root());
 ```
+
+### Iteration
+
+`Json`, `Object`, and the `keys()`/`values()` projections are iterable with
+range-for. Arrays yield elements, objects yield `(key, value)` views; the key
+side is always read-only:
+
+```cpp
+auto doc = parse_copy(R"({"nums":[1,2,3],"obj":{"a":1,"b":2}})");
+
+// range-for: arrays yield elements, objects yield (key, value) views.
+for (auto &&e : doc.root()["nums"])   // e.key is empty for array elements
+    e.value = Json(e.value.as_int() * 2);
+
+Object &o = doc.root()["obj"].as_object();
+auto consume = [](std::string_view) {};  // stand-in for real work
+for (std::string_view k : o.keys())      // keys are read-only
+    consume(k);
+for (auto &v : o.values())               // values are mutable references
+    v = Json(nullptr);
+
+// Need std algorithms? Use the raw/const container surfaces, not the
+// Json-level iterators: Array::begin/end, const Object::begin/end, data().
+```
+
+The `Json`-level iterators (`JsonIterator`, `ConstJsonIterator`,
+`Object::iterator`, `KeysView::KeyIt`, `ValuesView::ValueIt`,
+`ConstValuesView::ValueIt`) are **range-for-only**: they implement the
+language's `*it` / `++it` / `it != end` protocol but carry **no
+`iterator_traits` member types**. `std::distance`/`advance`, the standard
+algorithms, and the `std::ranges` iterator algorithms reject them; because
+`std::ranges::begin` constrains its result on `input_or_output_iterator`, these
+types do not satisfy `std::ranges::range` either. `Object::iterator` is
+additionally pre-increment-only and move-only (copy construction is deleted by
+design), and `JsonIterator`/`ConstJsonIterator` are non-copy-assignable and
+have no `operator->`.
+
+For standard algorithms use the native container surfaces instead: `Array`
+iterators/`data()`, `const Object` iterators/`data()` (both model
+`std::ranges::random_access_range`), or `Object::data()` (mutable; drops the
+internal lookup-index cache). Do not `std::sort` a non-const `Object` through
+its iterators: entries are keyed and a key is lookup identity, so reordering
+them is not a meaningful operation.
+
+Loop-variable forms: `auto &&e`, `auto e`, or `const auto &e` for the `Json`
+views (a plain `auto &e` cannot bind the per-step prvalue view);
+`keys()`/`values()` yield a value/reference, so `auto &v` is fine there.
 
 ### JSON5 input mode
 
