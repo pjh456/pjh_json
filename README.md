@@ -16,6 +16,44 @@ SIMD-accelerated C++20 JSON parser. Custom tagged-union `Json` type (24 bytes), 
 * **Builder API**: `Array::of(...)`, `Object::of(...)` for in-code construction
 * **Compile-time JSON**: `ConstJson::of()` builds nested JSON trees at compile time via template type encoding. `ConstJson::parse()` validates JSON strings at compile time. No heap allocation — all data lives inline in `std::tuple`.
 
+## Accessors
+
+`Json` has four value-read tracks plus a path/Result surface. Pick by the
+question you are answering:
+
+| I want to… | Use | On wrong type | Returns |
+|------------|-----|---------------|---------|
+| read a known tag (parser/validated data, hot path) | `as_*()` | debug: throws; **release: undefined behavior** | `T&` / `string_view` |
+| read a tag and throw on mismatch | `as_*_strict()` | throws `TypeError` (debug + release) | `T&` / `string_view` |
+| probe a tag without exceptions | `try_as_*()` | `nullopt` / `nullptr` | `optional<T>` / `T*` |
+| read a number, converting if needed | `get<T>()` | throws `TypeError` (debug + release) | `T` |
+| probe a number, converting if needed | `try_get<T>()` | `nullopt` | `optional<T>` |
+| resolve a field path | `find_path_result()` / `get_path<T>()` | `Result<_, AccessError>` | node / `T` |
+
+`is_*()` (`is_null`, `is_boolean`, `is_int`, `is_integer`, `is_float`,
+`is_number`, `is_string`, `is_array`, `is_object`) tests the stored slot
+first and is `constexpr`/`noexcept`.
+
+Numeric slots are `Integer` (`int64_t`) and `Floating` (`double`); there is no
+`float` slot. `get<T>` / `try_get<T>` accept:
+
+| `T` | Accepted slots | Notes |
+|-----|----------------|-------|
+| `bool` | Boolean | identity |
+| `int64_t` | Integer | a `Floating` source is rejected (narrowing) |
+| `float` | Integer, Floating | `int64 → float` rounds (round-to-even) |
+| `double` | Integer, Floating | `int64 → double` rounds; values above 2^53 may not round-trip |
+
+`try_as_boolean()` / `try_as_int()` are equivalent to `try_get<bool>()` /
+`try_get<int64_t>()` (same signature, same accepted slot). `try_as_float()` is
+the `Floating`-slot probe; `try_get<double>()` additionally widens `Integer`.
+
+Strings have no node-level `get<T>`: use `as_string()` / `as_string_strict()` /
+`try_as_string()`. `get_path<std::string_view>` is the path-based string
+channel. To resolve a path, `at_path()` throws, `find_path()` returns
+`nullptr`, and `find_path_result()` / `get_path<T>()` return a
+`Result<_, AccessError>` carrying the failing field path.
+
 ## Example
 
 ```cpp

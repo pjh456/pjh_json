@@ -2791,3 +2791,45 @@ TEST_CASE("Object: std::string key temporary is deleted (compile pins)") {
     REQUIRE(o.at("lit2") == (int64_t)2);
     REQUIRE(o.at("live-key") == (int64_t)3);
 }
+
+TEST_CASE("Json: accessor track equivalence pins") {
+    // Compile-time: try_get<T> and the matching try_as_* share a signature
+    // (optional<T>) and are noexcept. bool/int64 are exact-equivalent probes;
+    // try_get<double> also accepts Integer (widening) — see the loop below.
+    static_assert(std::is_same_v<decltype(std::declval<const Json &>().try_get<bool>()),
+                                 std::optional<bool>>);
+    static_assert(std::is_same_v<decltype(std::declval<const Json &>().try_get<int64_t>()),
+                                 std::optional<int64_t>>);
+    static_assert(std::is_same_v<decltype(std::declval<const Json &>().try_get<double>()),
+                                 std::optional<double>>);
+    static_assert(noexcept(std::declval<const Json &>().try_as_int()));
+    static_assert(noexcept(std::declval<const Json &>().try_get<int64_t>()));
+
+    // The deliberate asymmetry: no node-level get<std::string_view>.
+    static_assert(!can_get<std::string_view>::value);
+
+    Array slots = make_slots();
+    for (const auto &j : slots) {
+        // Exact equivalences: the bool and int64 probes are one probe.
+        REQUIRE(j.try_get<bool>().has_value()    == j.try_as_boolean().has_value());
+        REQUIRE(j.try_get<int64_t>().has_value() == j.try_as_int().has_value());
+        if (j.try_as_boolean()) REQUIRE(*j.try_get<bool>() == *j.try_as_boolean());
+        if (j.try_as_int()) REQUIRE(*j.try_get<int64_t>() == *j.try_as_int());
+        // double: try_as_float() is the Floating-slot probe; try_get<double>()
+        // adds the int64->double widening (accepted set Integer + Floating).
+        // So try_as_float() succeeding implies try_get<double>() succeeds with
+        // the same value, but not the reverse.
+        if (j.try_as_float()) {
+            REQUIRE(j.try_get<double>().has_value());
+            REQUIRE(*j.try_get<double>() == *j.try_as_float());
+        }
+        if (j.is_integer()) {
+            REQUIRE(j.try_get<double>().has_value());
+            REQUIRE(!j.try_as_float().has_value());
+        }
+        // Value-form domain mirrors the strict-form domain.
+        REQUIRE(j.is_boolean() == j.try_get<bool>().has_value());
+        REQUIRE(j.is_integer() == j.try_get<int64_t>().has_value());
+        REQUIRE(j.is_number()  == j.try_get<double>().has_value());
+    }
+}

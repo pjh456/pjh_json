@@ -531,7 +531,13 @@ namespace pjh::json
         /**@}*/
 
     public:
-        /** @name Unchecked access (no type validation) */
+        /**
+         * @name Unchecked access (no type validation)
+         * @note Decision guide: README "Accessors" (track: known tag). A
+         *       mismatched release call reads an inactive union member
+         *       (undefined behavior) — see each member's @note; use
+         *       as_*_strict()/try_as_*() when the tag is not guaranteed.
+         */
         /**@{*/
 
         /**
@@ -690,6 +696,9 @@ namespace pjh::json
          * you own the tag — see each as_* @note); this family is the
          * safe API for code that does not. For the nullopt/nullptr
          * form use try_as_* (already safe in both modes).
+         *
+         * @note Decision guide: README "Accessors" (track: checked
+         *       reference read).
          */
         /**@{*/
 
@@ -837,6 +846,13 @@ namespace pjh::json
     public:
         /**
          * @name Safe access (returns nullopt/nullptr on type mismatch)
+         * @note Decision guide: README "Accessors" (track: no-throw probe).
+         *       The scalar probes try_as_boolean()/try_as_int() are
+         *       equivalent to try_get<bool>()/try_get<int64_t>() (same
+         *       signature, same accepted slot); try_as_float() matches
+         *       try_get<double>() on the Floating slot, while
+         *       try_get<double>() also widens Integer. For a converted value
+         *       or a float target use try_get<T>().
          */
         /**@{*/
         /**
@@ -892,6 +908,12 @@ namespace pjh::json
          * joins at()'s family). Tag is the single source of truth: a
          * slot is read only after m_type confirms it (no
          * non-active union member read in any mode).
+         *
+         * @note Decision guide: README "Accessors" (tracks: numeric
+         *       conversion). Identity reads that return a reference/mutable
+         *       slot use as_*_strict() (Integer/Bool/Floating); get<T>() is
+         *       the value form and additionally covers the int64->float and
+         *       int64->double widening the identity tracks cannot express.
          */
         /**@{*/
         /**
