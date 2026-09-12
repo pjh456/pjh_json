@@ -174,7 +174,10 @@ namespace pjh::json
      *    c. Expect and consume ':' separator.
      *    d. Parse the value in-place; if the key already exists (strict
      *       off) overwrite the first occurrence's value, preserving its
-     *       key and position — last-wins, as in Object::insert.
+     *       key and position — last-wins, as in Object::insert. With
+     *       strict ON a duplicate already threw in (b), so every key is
+     *       distinct and each is appended directly; the first-match scan
+     *       is skipped entirely.
      *    e. Check for ',' (continue) or '}' (done).
      */
     void Parser::parse_object_inplace(Json &out)
@@ -230,33 +233,40 @@ namespace pjh::json
             // Parse value — last-wins duplicate policy, mirroring
             // Object::insert: the first occurrence keeps its key and
             // position, its value is overwritten in place; append only
-            // when the key is unseen. (When strict is ON a duplicate
-            // already threw above, so a hit here is a non-strict
-            // duplicate.)
+            // when the key is unseen. When strict is ON a duplicate
+            // already threw above, so this scan block does not run at all
+            // and every key takes the append path.
             auto &entries = obj.data();
             size_t pos = entries.size();
-            if (entries.size() >= kKeyIndexThreshold && !seen)
+            // Strict mode: check_duplicate_key above already rejected any
+            // repeated key, so every key here is distinct and the
+            // first-match scan would always miss. Skip it (and never build
+            // the lazy key index) and let the append path below run.
+            if (!seen)
             {
-                // Indexed fast path for large objects; the index is built
-                // once, from the entries already stored, and kept in sync
-                // by find_or_insert on every append below.
-                if (!key_index)
+                if (entries.size() >= kKeyIndexThreshold)
                 {
-                    key_index.emplace(m_resource);
-                    key_index->build(obj);
-                }
-                pos = key_index->find_or_insert(obj, std::string_view(key));
-            }
-            else
-            {
-                // Small-object (or strict) scalar sweep: direct index
-                // access, first equal entry wins.
-                for (size_t i = 0; i < entries.size(); ++i)
-                {
-                    if (entries[i].first == key)
+                    // Indexed fast path for large objects; the index is built
+                    // once, from the entries already stored, and kept in sync
+                    // by find_or_insert on every append below.
+                    if (!key_index)
                     {
-                        pos = i;
-                        break;
+                        key_index.emplace(m_resource);
+                        key_index->build(obj);
+                    }
+                    pos = key_index->find_or_insert(obj, std::string_view(key));
+                }
+                else
+                {
+                    // Small-object scalar sweep: direct index access,
+                    // first equal entry wins.
+                    for (size_t i = 0; i < entries.size(); ++i)
+                    {
+                        if (entries[i].first == key)
+                        {
+                            pos = i;
+                            break;
+                        }
                     }
                 }
             }

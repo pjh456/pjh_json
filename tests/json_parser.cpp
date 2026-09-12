@@ -503,6 +503,60 @@ TEST_CASE("Parser: duplicate keys large object index path") {
     REQUIRE(de.root()["k0"] == (int64_t)1);
 }
 
+TEST_CASE("Parser: strict duplicate keys large object") {
+    ConfigGuard guard; // first: save the entering state before any mutation
+    Config::instance().set_strict_duplicate_keys(true);
+
+    // A large object (past kKeyIndexThreshold) with all-distinct keys must
+    // parse: strict mode never builds a key index, every key is appended
+    // directly, and insertion order/values are preserved.
+    constexpr int n = 300; // > kKeyIndexThreshold (256)
+    std::string json = "{";
+    for (int i = 0; i < n; ++i)
+    {
+        if (i)
+            json += ',';
+        json += "\"k" + std::to_string(i) + "\":1";
+    }
+    json += '}';
+
+    auto d = parse_copy(json);
+    REQUIRE(d.root().is_object());
+    REQUIRE(d.root().size() == (size_t)n);
+    int seen = 0;
+    for (const auto &entry : d.root().as_object())
+    {
+        REQUIRE(entry.first == ("k" + std::to_string(seen)));
+        REQUIRE(entry.second == (int64_t)1);
+        ++seen;
+    }
+    REQUIRE(seen == n);
+
+    // A duplicate after the threshold must still throw: skipping the
+    // first-match scan must not skip the duplicate verdict.
+    std::string dup = json.substr(0, json.size() - 1) + ",\"k7\":2}";
+    REQUIRE_THROWS_AS((void)parse_copy(dup), ParseError);
+
+    // An escaped key equal to a plain key still collides.
+    REQUIRE_THROWS_AS((void)parse_copy(R"({"\u0061":1,"a":2})"), ParseError);
+
+    // Escaped large object, all distinct, still succeeds (the borrowed
+    // decoded key views stay stable in the strict seen set).
+    std::string esc = "{";
+    for (int k = 0; k < n; ++k)
+    {
+        if (k)
+            esc += ',';
+        esc += "\"\\u006b" + std::to_string(k) + "\":1";
+    }
+    esc += '}';
+    auto de = parse_copy(esc);
+    REQUIRE(de.root().size() == (size_t)n);
+
+    // Empty-string key duplicated still throws.
+    REQUIRE_THROWS_AS((void)parse_copy(R"({"":1,"":2})"), ParseError);
+}
+
 TEST_CASE("Parser: in_situ padding") {
     using std::pmr::get_default_resource;
 
