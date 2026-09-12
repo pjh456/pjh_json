@@ -1883,6 +1883,10 @@ TEST_CASE("Json: iterator range-for-only contract")
     static_assert(std::is_move_constructible_v<JsonIterator>);
     static_assert(!std::is_copy_assignable_v<JsonIterator>);
     static_assert(!std::is_move_assignable_v<JsonIterator>);
+    // Positive control: ConstJsonIterator is a variant of two native const
+    // iterators, so it is copy/move assignable (the README must say so).
+    static_assert(std::is_copy_assignable_v<ConstJsonIterator>);
+    static_assert(std::is_move_assignable_v<ConstJsonIterator>);
 
     // Deliberately no iterator_traits member types.
     static_assert(!has_iterator_value_type<JsonIterator>);

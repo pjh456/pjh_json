@@ -128,8 +128,10 @@ algorithms, and the `std::ranges` iterator algorithms reject them; because
 `std::ranges::begin` constrains its result on `input_or_output_iterator`, these
 types do not satisfy `std::ranges::range` either. `Object::iterator` is
 additionally pre-increment-only and move-only (copy construction is deleted by
-design), and `JsonIterator`/`ConstJsonIterator` are non-copy-assignable and
-have no `operator->`.
+design). `JsonIterator` is non-copy-assignable, because its variant holds that
+non-copy-assignable `Object::iterator` alternative; `ConstJsonIterator` — a
+variant of two native const iterators — is copy/move-assignable. Neither has an
+`operator->`.
 
 For standard algorithms use the native container surfaces instead: `Array`
 iterators/`data()`, `const Object` iterators/`data()` (both model
@@ -139,8 +141,10 @@ its iterators: entries are keyed and a key is lookup identity, so reordering
 them is not a meaningful operation.
 
 Loop-variable forms: `auto &&e`, `auto e`, or `const auto &e` for the `Json`
-views (a plain `auto &e` cannot bind the per-step prvalue view);
-`keys()`/`values()` yield a value/reference, so `auto &v` is fine there.
+views (a plain `auto &e` cannot bind the per-step prvalue view). `values()`
+yields a mutable `Json &`, so `auto &v` is fine there; `keys()` yields
+`std::string_view` by value, so use `auto`/`const auto &` (a plain `auto &k`
+cannot bind the prvalue).
 
 ### JSON5 input mode
 
