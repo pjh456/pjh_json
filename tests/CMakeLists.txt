@@ -3,6 +3,12 @@ FetchContent_Declare(doctest
     GIT_REPOSITORY https://github.com/doctest/doctest.git
     GIT_TAG v2.5.0)
 
+# doctest is a test-only dependency: suppress its own install rules so
+# `cmake --install` does not leak include/doctest, lib/cmake/doctest and
+# lib/pkgconfig/doctest.pc into the consumer prefix. Same pattern as
+# XSIMD_SKIP_INSTALL (root CMakeLists). Must precede MakeAvailable, which
+# add_subdirectory()s doctest and registers its install() commands.
+set(DOCTEST_NO_INSTALL ON CACHE BOOL "Skip doctest install rules" FORCE)
 set(DOCTEST_WITH_MAIN_IN_STATIC_LIB OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(doctest)
 
