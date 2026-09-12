@@ -110,7 +110,6 @@ add_library(pjh::json ALIAS pjh_json)
 target_include_directories(pjh_json
     PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/xsimd/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/pjh_result/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
@@ -247,9 +246,18 @@ endif()
 # -------------------------
 target_link_libraries(pjh_json
     PUBLIC
-    xsimd
     pjh_result
 )
+# xsimd is a private build dependency: the 3 SIMD TUs under src/ include
+# <xsimd/xsimd.hpp> directly and obtain that include directory through this
+# PRIVATE edge. The $<BUILD_INTERFACE:...> wrapper is required because pjh_json
+# is a STATIC library: a plain PRIVATE edge is still re-exported as
+# $<LINK_ONLY:xsimd> in INTERFACE_LINK_LIBRARIES, and install(EXPORT) then
+# hard-errors because xsimd has no export set of its own (XSIMD_SKIP_INSTALL).
+# Wrapping in BUILD_INTERFACE keeps the edge for the build tree only; the
+# installed package references no xsimd target. Public headers are xsimd-free
+# (task 28.1), so no in-repo executable needs its own xsimd edge.
+target_link_libraries(pjh_json PRIVATE $<BUILD_INTERFACE:xsimd>)
 
 # -------------------------
 # install / export（仅独立工程时生成；作为子项目被 add_subdirectory 时跳过，
@@ -258,7 +266,9 @@ target_link_libraries(pjh_json
 if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     set(pjh_json_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/cmake/pjh_json)
 
-    install(TARGETS pjh_json xsimd EXPORT pjh_jsonTargets)   # pjh_result 不入集（文件级守卫全有全无）
+    # xsimd / pjh_result are deliberately absent from the export set: both are
+    # file-level guards (all-or-nothing) and xsimd is a PRIVATE build dependency.
+    install(TARGETS pjh_json EXPORT pjh_jsonTargets)
     install(EXPORT pjh_jsonTargets
         NAMESPACE pjh::
         FILE pjh_jsonTargets.cmake
@@ -270,7 +280,6 @@ if(CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     install(DIRECTORY include/
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
         PATTERN "detail" EXCLUDE)
-    install(DIRECTORY thirdparty/xsimd/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
     install(DIRECTORY thirdparty/pjh_result/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 
     configure_package_config_file(cmake/pjh_jsonConfig.cmake.in

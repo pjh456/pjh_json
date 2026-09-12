@@ -104,7 +104,7 @@ endif()
 # (never built by a normal `cmake --build`); the ctest test builds just that one
 # target and WILL_FAIL inverts the expected failure. Using a real CMake target
 # (rather than a hand-spelled compiler command) keeps C++20, the pjh_json PUBLIC
-# include set (incl. pjh_result/xsimd) and GCC/Clang/MSVC driver differences
+# include set (incl. pjh_result) and GCC/Clang/MSVC driver differences
 # handled by CMake.
 #
 # These are NOT doctest TUs -> never add them to PJH_JSON_TEST_SOURCES.
