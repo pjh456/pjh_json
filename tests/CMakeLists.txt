@@ -11,6 +11,7 @@ set(PJH_JSON_TEST_SOURCES
     access_result.cpp
     config_document.cpp
     constexpr_json_test.cpp
+    differential_errors.cpp
     differential_validation.cpp
     doc_examples.cpp
     error_kernel.cpp
