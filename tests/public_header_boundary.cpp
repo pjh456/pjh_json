@@ -12,6 +12,9 @@
 #ifdef INCLUDE_PJH_JSON_DETAIL_LITERAL_HPP
 #error "public headers must not include pjh_json/detail/literal.hpp"
 #endif
+#ifdef INCLUDE_PJH_JSON_DETAIL_WRITER_STATE_HPP
+#error "public headers must not include pjh_json/detail/writer_state.hpp"
+#endif
 #ifdef INCLUDE_PJH_JSON_UTILS_HPP
 #error "utils.hpp must no longer exist as a public header"
 #endif

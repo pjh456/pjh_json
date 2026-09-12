@@ -1,4 +1,5 @@
 #include "pjh_json/writer.hpp"
+#include "pjh_json/detail/writer_state.hpp"
 #include <bit>
 #include <cstdint>
 #include <xsimd/xsimd.hpp>
@@ -63,7 +64,8 @@ namespace pjh::json
      * 2. For non-ASCII (>0x7F), decode the UTF-8 sequence, then emit
      *    the codepoint as \uXXXX (or surrogate pair for >U+FFFF).
      */
-    static void write_escaped_ascii(std::pmr::string &sink, std::string_view s)
+    [[nodiscard]] static bool write_escaped_ascii(std::pmr::string &sink, std::string_view s,
+                                                  DumpState &st)
     {
         const auto *p = reinterpret_cast<const uint8_t *>(s.data());
         const auto *end = p + s.size();
@@ -88,30 +90,55 @@ namespace pjh::json
                 if ((c & 0xE0) == 0xC0) { cp = c & 0x1F; len = 2; }
                 else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; len = 3; }
                 else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; len = 4; }
-                else throw JsonError("Invalid UTF-8 lead byte in string");
+                else
+                {
+                    st.fail(ErrorCode::Utf8InvalidLead);
+                    return false;
+                }
 
                 // Validate continuation bytes
                 if (p + len > end)
-                    throw JsonError("Truncated UTF-8 sequence in string");
+                {
+                    st.fail(ErrorCode::Utf8Truncated);
+                    return false;
+                }
                 for (int i = 1; i < len; ++i)
                 {
                     if ((p[i] & 0xC0) != 0x80)
-                        throw JsonError("Invalid UTF-8 continuation byte in string");
+                    {
+                        st.fail(ErrorCode::Utf8InvalidContinuation);
+                        return false;
+                    }
                     cp = (cp << 6) | (p[i] & 0x3F);
                 }
                 p += len;
 
                 // Validate codepoint per RFC 3629
                 if (len == 2 && cp < 0x80)
-                    throw JsonError("Overlong UTF-8 sequence in string");
+                {
+                    st.fail(ErrorCode::Utf8Overlong);
+                    return false;
+                }
                 if (len == 3 && cp < 0x800)
-                    throw JsonError("Overlong UTF-8 sequence in string");
+                {
+                    st.fail(ErrorCode::Utf8Overlong);
+                    return false;
+                }
                 if (len == 4 && cp < 0x10000)
-                    throw JsonError("Overlong UTF-8 sequence in string");
+                {
+                    st.fail(ErrorCode::Utf8Overlong);
+                    return false;
+                }
                 if (cp > 0x10FFFF)
-                    throw JsonError("UTF-8 codepoint exceeds U+10FFFF in string");
+                {
+                    st.fail(ErrorCode::Utf8ExceedsMax);
+                    return false;
+                }
                 if (cp >= 0xD800 && cp <= 0xDFFF)
-                    throw JsonError("UTF-8 surrogate codepoint in string");
+                {
+                    st.fail(ErrorCode::Utf8Surrogate);
+                    return false;
+                }
 
                 // Emit as \uXXXX (or surrogate pair for >U+FFFF)
                 if (cp <= 0xFFFF)
@@ -126,6 +153,7 @@ namespace pjh::json
                 }
             }
         }
+        return true;
     }
 
     /*
@@ -140,15 +168,17 @@ namespace pjh::json
      *   4. Scan remaining bytes one-by-one.
      *   5. Copy clean runs verbatim, escape special characters.
      */
-    void write_escaped(std::pmr::string &sink, std::string_view s, bool ascii)
+    [[nodiscard]] bool write_escaped_impl(std::pmr::string &sink, std::string_view s, bool ascii,
+                                          DumpState &st)
     {
         sink.push_back('"');
 
         if (ascii)
         {
-            write_escaped_ascii(sink, s);
+            if (!write_escaped_ascii(sink, s, st))
+                return false;
             sink.push_back('"');
-            return;
+            return true;
         }
 
         const char *curr = s.data();
@@ -208,5 +238,13 @@ namespace pjh::json
             sink.append(run, end - run);
 
         sink.push_back('"');
+        return true;
+    }
+
+    void write_escaped(std::pmr::string &sink, std::string_view s, bool ascii)
+    {
+        DumpState st;
+        if (!write_escaped_impl(sink, s, ascii, st))
+            throw JsonError(st.error);
     }
 }

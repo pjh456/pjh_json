@@ -1,4 +1,5 @@
 #include "pjh_json/writer.hpp"
+#include "pjh_json/detail/writer_state.hpp"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -24,15 +25,21 @@ namespace pjh::json
      * 3. If the output is a bare integer (no '.' or 'e'), append ".0"
      *    to distinguish float from int64 on round-trip.
      */
-    static void write_double(std::pmr::string &sink, double val)
+    [[nodiscard]] static bool write_double(std::pmr::string &sink, double val, DumpState &st)
     {
         if (!std::isfinite(val))
-            throw JsonError("Cannot serialize non-finite double (NaN/Inf) to JSON");
+        {
+            st.fail(ErrorCode::NonFiniteDouble);
+            return false;
+        }
 
         char buf[32];
         auto [end, ec] = std::to_chars(buf, buf + sizeof(buf), val);
         if (ec != std::errc{})
-            throw JsonError("Failed to format double");
+        {
+            st.fail(ErrorCode::FormatDoubleFailed);
+            return false;
+        }
 
         sink.append(buf, end - buf);
 
@@ -48,6 +55,7 @@ namespace pjh::json
         }
         if (!has_point)
             sink.append(".0");
+        return true;
     }
 
     /*
@@ -61,8 +69,9 @@ namespace pjh::json
      * Container branches reject depth + 1 > max_depth (0 = unlimited)
      * before the empty-container early return, so empty containers count.
      */
-    static void write_value(std::pmr::string &sink, const Json &value,
-                            const DumpOptions &opts, size_t depth, size_t max_depth)
+    [[nodiscard]] static bool write_value(std::pmr::string &sink, const Json &value,
+                                          const DumpOptions &opts, size_t depth, size_t max_depth,
+                                          DumpState &st)
     {
         if (value.is_null())
         {
@@ -77,25 +86,33 @@ namespace pjh::json
             char buf[24];
             auto [end, ec] = std::to_chars(buf, buf + sizeof(buf), *i);
             if (ec != std::errc{})
-                throw JsonError("Failed to format integer");
+            {
+                st.fail(ErrorCode::FormatIntFailed);
+                return false;
+            }
             sink.append(buf, end - buf);
         }
         else if (auto f = value.try_as_float())
         {
-            write_double(sink, *f);
+            if (!write_double(sink, *f, st))
+                return false;
         }
         else if (auto s = value.try_as_string())
         {
-            write_escaped(sink, *s, opts.ascii);
+            if (!write_escaped_impl(sink, *s, opts.ascii, st))
+                return false;
         }
         else if (auto *arr = value.try_as_array())
         {
             if (max_depth != 0 && depth + 1 > max_depth)
-                throw JsonError("Maximum nesting depth exceeded during dump");
+            {
+                st.fail(ErrorCode::DumpMaxDepthExceeded);
+                return false;
+            }
             if (arr->empty())
             {
                 sink.append("[]");
-                return;
+                return true;
             }
             sink.push_back('[');
             bool first = true;
@@ -106,7 +123,8 @@ namespace pjh::json
                 first = false;
                 if (opts.pretty)
                     write_indent(sink, opts, depth + 1);
-                write_value(sink, el, opts, depth + 1, max_depth);
+                if (!write_value(sink, el, opts, depth + 1, max_depth, st))
+                    return false;
             }
             if (opts.pretty)
                 write_indent(sink, opts, depth);
@@ -115,11 +133,14 @@ namespace pjh::json
         else if (auto *obj = value.try_as_object())
         {
             if (max_depth != 0 && depth + 1 > max_depth)
-                throw JsonError("Maximum nesting depth exceeded during dump");
+            {
+                st.fail(ErrorCode::DumpMaxDepthExceeded);
+                return false;
+            }
             if (obj->empty())
             {
                 sink.append("{}");
-                return;
+                return true;
             }
             sink.push_back('{');
             bool first = true;
@@ -143,9 +164,11 @@ namespace pjh::json
                     first = false;
                     if (opts.pretty)
                         write_indent(sink, opts, depth + 1);
-                    write_escaped(sink, e->first, opts.ascii);
+                    if (!write_escaped_impl(sink, e->first, opts.ascii, st))
+                        return false;
                     sink.append(opts.pretty ? ": " : ":");
-                    write_value(sink, e->second, opts, depth + 1, max_depth);
+                    if (!write_value(sink, e->second, opts, depth + 1, max_depth, st))
+                        return false;
                 }
             }
             else
@@ -158,15 +181,28 @@ namespace pjh::json
                     first = false;
                     if (opts.pretty)
                         write_indent(sink, opts, depth + 1);
-                    write_escaped(sink, key, opts.ascii);
+                    if (!write_escaped_impl(sink, key, opts.ascii, st))
+                        return false;
                     sink.append(opts.pretty ? ": " : ":");
-                    write_value(sink, val, opts, depth + 1, max_depth);
+                    if (!write_value(sink, val, opts, depth + 1, max_depth, st))
+                        return false;
                 }
             }
             if (opts.pretty)
                 write_indent(sink, opts, depth);
             sink.push_back('}');
         }
+        return true;
+    }
+
+    /*
+     * Serialize JSON value into a pmr::string sink at depth 0.
+     * Shared kernel driver for dump_to(Pmr)/dump/dump_jsonl_to.
+     */
+    [[nodiscard]] bool dump_value_to(std::pmr::string &sink, const Json &value,
+                                     const DumpOptions &opts, DumpState &st)
+    {
+        return write_value(sink, value, opts, 0, Config::instance().max_depth(), st);
     }
 
     /*
@@ -174,7 +210,9 @@ namespace pjh::json
      */
     void dump_to(std::pmr::string &sink, const Json &value, const DumpOptions &opts)
     {
-        write_value(sink, value, opts, 0, Config::instance().max_depth());
+        DumpState st;
+        if (!dump_value_to(sink, value, opts, st))
+            throw JsonError(st.error); // pmr sink may be partially written (documented)
     }
 
     /*
@@ -200,7 +238,8 @@ namespace pjh::json
         std::pmr::string out = dump(value, opts);
         os.write(out.data(), static_cast<std::streamsize>(out.size()));
         if (!os)
-            throw JsonError("Failed to write to stream");
+            throw JsonError(Error{ErrorCode::StreamWriteFailed,
+                                  Category::Json, 0, false, {}});
     }
 
     /*
@@ -212,8 +251,10 @@ namespace pjh::json
     std::pmr::string dump(const Json &value, const DumpOptions &opts,
                           std::pmr::memory_resource *res)
     {
+        DumpState st;
         std::pmr::string sink(res);
-        write_value(sink, value, opts, 0, Config::instance().max_depth());
+        if (!dump_value_to(sink, value, opts, st))
+            throw JsonError(st.error);
         return sink;
     }
 
@@ -233,13 +274,16 @@ namespace pjh::json
     {
         std::ofstream file(std::string(path), std::ios::binary);
         if (!file.is_open())
-            throw JsonError("Failed to open file for writing: " + std::string(path));
+            throw JsonError(Error{ErrorCode::FileWriteOpenFailed,
+                                  Category::Json, 0, false, path});
         file.write(data.data(), static_cast<std::streamsize>(data.size()));
         if (!file)
-            throw JsonError("Failed to write file: " + std::string(path));
+            throw JsonError(Error{ErrorCode::FileWriteFailed,
+                                  Category::Json, 0, false, path});
         file.close();
         if (!file)
-            throw JsonError("Failed to close file: " + std::string(path));
+            throw JsonError(Error{ErrorCode::FileWriteCloseFailed,
+                                  Category::Json, 0, false, path});
     }
 
     /*

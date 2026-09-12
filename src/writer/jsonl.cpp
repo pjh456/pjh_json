@@ -1,4 +1,5 @@
 #include "pjh_json/writer.hpp"
+#include "pjh_json/detail/writer_state.hpp"
 
 namespace pjh::json
 {
@@ -13,7 +14,11 @@ namespace pjh::json
         DumpOptions compact{};
         for (const auto &el : arr)
         {
-            dump_to(sink, el, compact);
+            // Per-element DumpState mirrors the old "each element dumps and
+            // throws on its own"; the first failure aborts immediately.
+            DumpState st;
+            if (!dump_value_to(sink, el, compact, st))
+                throw JsonError(st.error);
             sink.push_back('\n');
         }
     }

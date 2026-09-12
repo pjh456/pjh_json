@@ -503,3 +503,36 @@ TEST_CASE("Writer: dump to std::string") {
     REQUIRE(keep2 == "keep2");
 #endif
 }
+
+TEST_CASE("Writer: dump_to(std::string&) strong guarantee") {
+    auto d = parse_copy(R"({"a":1,"b":[true,null,"x"]})");
+
+    // Success: append semantics byte-identical to dump()
+    {
+        std::string sink = "prefix:";
+        dump_to(sink, d.root());
+        auto out = dump(d.root());
+        REQUIRE(sink == "prefix:" + std::string(out.data(), out.size()));
+    }
+
+    // Failure 1 -- max_depth: serialization throws before the append,
+    // so the caller's sink stays byte-identical (strong guarantee).
+    {
+        MaxDepthGuard guard;                 // restores entering max_depth
+        Config::instance().set_max_depth(1);
+        std::string keep = "keep";
+        REQUIRE_THROWS_AS(dump_to(keep, d.root()), JsonError);
+        REQUIRE(keep == "keep");
+        REQUIRE(keep == std::string("keep")); // byte-identical
+    }
+
+#ifndef __FAST_MATH__
+    // Failure 2 -- non-finite double (write_double site)
+    {
+        Json bad = std::numeric_limits<double>::infinity();
+        std::string keep2 = "keep2";
+        REQUIRE_THROWS_AS(dump_to(keep2, bad), JsonError);
+        REQUIRE(keep2 == "keep2");
+    }
+#endif
+}
