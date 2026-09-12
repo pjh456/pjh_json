@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -366,6 +367,55 @@ namespace
         // Both entry points must reject the same input (classification parity
         // is sampled here, not pinned byte-for-byte).
         REQUIRE(parse_copy_result(input).is_err());
+    }
+
+    // Snapshot a borrowed event into the owned test form.
+    OwnedEvent own_of(const JsonEvent &ev)
+    {
+        OwnedEvent owned;
+        owned.type = ev.type;
+        owned.text = std::string(ev.text);
+        owned.boolean = ev.boolean;
+        owned.integer = ev.integer;
+        owned.number = ev.number;
+        return owned;
+    }
+
+    // Drain an items(prefix) cursor, asserting the underlying reader is clean.
+    std::vector<OwnedEvent> collect_item_events(const std::string &input, std::string_view prefix, size_t chunk = 4)
+    {
+        std::istringstream in(input);
+        StreamReader reader(in, chunk);
+        StreamItems items = reader.items(prefix);
+        std::vector<OwnedEvent> events;
+        JsonEvent ev;
+        while (items.next(ev))
+            events.push_back(own_of(ev));
+        REQUIRE(!items.has_error());
+        return events;
+    }
+
+    OwnedEvent ev_type(EventType type)
+    {
+        OwnedEvent ev;
+        ev.type = type;
+        return ev;
+    }
+
+    OwnedEvent ev_str(EventType type, std::string text)
+    {
+        OwnedEvent ev;
+        ev.type = type;
+        ev.text = std::move(text);
+        return ev;
+    }
+
+    OwnedEvent ev_int(int64_t value)
+    {
+        OwnedEvent ev;
+        ev.type = EventType::Integer;
+        ev.integer = value;
+        return ev;
     }
 }
 
@@ -1045,4 +1095,287 @@ TEST_CASE("Stream: error classification parity")
         REQUIRE(reader.error().offset() == ref_err.offset());
         REQUIRE(reader.error().format() == std::string(ref_err.what()));
     }
+}
+
+TEST_CASE("Stream: items prefix object and array")
+{
+    const std::string input = "{\"a\":{\"b\":1},\"c\":[10,20,{\"d\":\"x\"}],\"a/b\":5}";
+
+    // A nested object value yields its whole event subtree, MapKey included.
+    {
+        auto events = collect_item_events(input, "/a");
+        const std::vector<OwnedEvent> expected = {
+            ev_type(EventType::BeginObject),
+            ev_str(EventType::MapKey, "b"),
+            ev_int(1),
+            ev_type(EventType::EndObject),
+        };
+        REQUIRE(same_events(events, expected));
+    }
+    {
+        auto events = collect_item_events(input, "/a/b");
+        REQUIRE(events.size() == 1);
+        REQUIRE(events[0].type == EventType::Integer);
+        REQUIRE(events[0].integer == (int64_t)1);
+    }
+    // Array index selection.
+    {
+        auto events = collect_item_events(input, "/c/0");
+        REQUIRE(events.size() == 1);
+        REQUIRE(events[0].integer == (int64_t)10);
+    }
+    // An object nested in an array: full subtree.
+    {
+        auto events = collect_item_events(input, "/c/2");
+        const std::vector<OwnedEvent> expected = {
+            ev_type(EventType::BeginObject),
+            ev_str(EventType::MapKey, "d"),
+            ev_str(EventType::String, "x"),
+            ev_type(EventType::EndObject),
+        };
+        REQUIRE(same_events(events, expected));
+    }
+    {
+        auto events = collect_item_events(input, "/c/2/d");
+        REQUIRE(events.size() == 1);
+        REQUIRE(events[0].text == "x");
+    }
+    // `*` matches every array element.
+    {
+        auto events = collect_item_events(input, "/c/*");
+        const std::vector<OwnedEvent> expected = {
+            ev_int(10),
+            ev_int(20),
+            ev_type(EventType::BeginObject),
+            ev_str(EventType::MapKey, "d"),
+            ev_str(EventType::String, "x"),
+            ev_type(EventType::EndObject),
+        };
+        REQUIRE(same_events(events, expected));
+    }
+    // JSON Pointer escape: ~1 decodes to '/'.
+    {
+        auto events = collect_item_events(input, "/a~1b");
+        REQUIRE(events.size() == 1);
+        REQUIRE(events[0].integer == (int64_t)5);
+    }
+    // Non-matching prefixes yield nothing and are not an error.
+    for (const char *prefix : {"/nope", "/c/9", "/c/2/nope", "/a/b/c"})
+    {
+        CAPTURE(prefix);
+        auto events = collect_item_events(input, prefix);
+        REQUIRE(events.empty());
+    }
+    // The empty prefix matches the root, i.e. raw iteration.
+    {
+        std::istringstream raw_in(input);
+        StreamReader raw_reader(raw_in, 4);
+        auto raw = collect_events(raw_reader);
+        auto filtered = collect_item_events(input, "");
+        REQUIRE(same_events(filtered, raw));
+    }
+    // Malformed pointers are rejected when the cursor is constructed.
+    {
+        std::istringstream in(input);
+        StreamReader reader(in);
+        REQUIRE_THROWS_AS((void)reader.items("a/b"), std::invalid_argument);
+        REQUIRE_THROWS_AS((void)reader.items("/a~2"), std::invalid_argument);
+        REQUIRE_THROWS_AS((void)reader.items("/a~"), std::invalid_argument);
+    }
+}
+
+TEST_CASE("Stream: items multi value prefix")
+{
+    const std::string input = "{\"a\":1}\n{\"a\":[2,3]}\n{\"b\":4}\n[5]\n";
+
+    std::istringstream in(input);
+    StreamReader reader(in, StreamMode::MultiValue, 3);
+    StreamItems items = reader.items("/a");
+    std::vector<OwnedEvent> events;
+    JsonEvent ev;
+    while (items.next(ev))
+        events.push_back(own_of(ev));
+    REQUIRE(!items.has_error());
+
+    const std::vector<OwnedEvent> expected = {
+        ev_int(1), ev_type(EventType::BeginArray), ev_int(2), ev_int(3), ev_type(EventType::EndArray),
+    };
+    REQUIRE(same_events(events, expected));
+
+    // An empty root prefix over a multi-value stream duplicates raw iteration.
+    std::istringstream raw_in(input);
+    StreamReader raw_reader(raw_in, StreamMode::MultiValue, 3);
+    auto raw = collect_events(raw_reader);
+
+    std::istringstream all_in(input);
+    StreamReader all_reader(all_in, StreamMode::MultiValue, 3);
+    StreamItems all = all_reader.items("");
+    std::vector<OwnedEvent> all_events;
+    while (all.next(ev))
+        all_events.push_back(own_of(ev));
+    REQUIRE(!all.has_error());
+    REQUIRE(same_events(all_events, raw));
+}
+
+TEST_CASE("Stream: push adapter")
+{
+    const std::string input = "{\"a\":\"x\",\"b\":[1,2]}";
+
+    // Borrowed push: the callback snapshots (copies) text before returning.
+    {
+        std::istringstream in(input);
+        StreamReader reader(in, 2);
+        std::vector<OwnedEvent> events;
+        const bool clean = reader.for_each_event(
+            [&](const JsonEvent &ev)
+            {
+                events.push_back(own_of(ev));
+            });
+        REQUIRE(clean);
+        REQUIRE(!reader.has_error());
+        REQUIRE(events.size() == 9);
+        REQUIRE(events[0].type == EventType::BeginObject);
+        REQUIRE(events[2].type == EventType::String);
+        REQUIRE(events[2].text == "x");
+        REQUIRE(events[8].type == EventType::EndObject);
+    }
+    // Owned push: text may be retained by the callback without copying.
+    {
+        std::istringstream in(input);
+        StreamReader reader(in, 2);
+        std::vector<std::string> strings;
+        const bool clean = reader.for_each_owned_event(
+            [&](const OwnedJsonEvent &ev)
+            {
+                if (!ev.text.empty())
+                    strings.emplace_back(ev.text.data(), ev.text.size());
+            });
+        REQUIRE(clean);
+        const std::vector<std::string> expected = {"a", "x", "b"};
+        REQUIRE(strings == expected);
+    }
+    // Error reporting: the failing pull is not delivered to the callback.
+    {
+        std::istringstream bad_in("[1 2]");
+        StreamReader reader(bad_in);
+        size_t calls = 0;
+        const bool clean = reader.for_each_event(
+            [&](const JsonEvent &)
+            {
+                ++calls;
+            });
+        REQUIRE(!clean);
+        REQUIRE(reader.has_error());
+        REQUIRE(reader.error().code == ErrorCode::ExpectedCommaOrBracket);
+        REQUIRE(reader.error().offset() == 3);
+        REQUIRE(calls == 2); // BeginArray + Integer 1
+    }
+    // StreamItems::for_each is the filtered push adapter.
+    {
+        std::istringstream in("{\"a\":[1,2],\"b\":3}");
+        StreamReader reader(in, 2);
+        StreamItems items = reader.items("/a");
+        std::vector<OwnedEvent> events;
+        const bool clean = items.for_each(
+            [&](const JsonEvent &ev)
+            {
+                events.push_back(own_of(ev));
+            });
+        REQUIRE(clean);
+        const std::vector<OwnedEvent> expected = {
+            ev_type(EventType::BeginArray),
+            ev_int(1),
+            ev_int(2),
+            ev_type(EventType::EndArray),
+        };
+        REQUIRE(same_events(events, expected));
+    }
+}
+
+TEST_CASE("Stream: owned event lifetime")
+{
+    OwnedJsonEvent first;
+    OwnedJsonEvent second;
+    {
+        std::istringstream in("[\"alpha\",\"beta\"]");
+        StreamReader reader(in, 1);
+        JsonEvent skip;
+        REQUIRE(reader.next(skip));
+        REQUIRE(skip.type == EventType::BeginArray);
+        REQUIRE(reader.next(first));
+        REQUIRE(first.type == EventType::String);
+        REQUIRE(first.text == "alpha");
+        REQUIRE(reader.next(second));
+        REQUIRE(second.type == EventType::String);
+        REQUIRE(second.text == "beta");
+        // The first string survives the second pull because it is owned.
+        REQUIRE(first.text == "alpha");
+    }
+    // ... and it survives the reader's destruction.
+    REQUIRE(first.text == "alpha");
+    REQUIRE(second.text == "beta");
+
+    // MapKey text is owned too; non-string events clear the owned buffer.
+    {
+        std::istringstream in("{\"key\":1}");
+        StreamReader reader(in, 1);
+        OwnedJsonEvent ev;
+        REQUIRE(reader.next(ev));
+        REQUIRE(ev.type == EventType::BeginObject);
+        REQUIRE(ev.text.empty());
+        REQUIRE(reader.next(ev));
+        REQUIRE(ev.type == EventType::MapKey);
+        REQUIRE(ev.text == "key");
+        REQUIRE(reader.next(ev));
+        REQUIRE(ev.type == EventType::Integer);
+        REQUIRE(ev.integer == (int64_t)1);
+        REQUIRE(ev.text.empty());
+    }
+
+    // Owned push can retain every string without a separate copy.
+    {
+        std::istringstream in("[\"one\",\"two\",\"three\"]");
+        StreamReader reader(in, 2);
+        std::vector<std::string> seen;
+        const bool clean = reader.for_each_owned_event(
+            [&](const OwnedJsonEvent &ev)
+            {
+                if (ev.type == EventType::String)
+                    seen.emplace_back(ev.text.data(), ev.text.size());
+            });
+        REQUIRE(clean);
+        const std::vector<std::string> expected = {"one", "two", "three"};
+        REQUIRE(seen == expected);
+    }
+}
+
+TEST_CASE("Stream: items error and shell")
+{
+    std::istringstream in("{\"a\":[1 2]}");
+    StreamReader reader(in, 3);
+    StreamItems items = reader.items("/a");
+    JsonEvent ev;
+    REQUIRE(items.next(ev));
+    REQUIRE(ev.type == EventType::BeginArray);
+    REQUIRE(items.next(ev));
+    REQUIRE(ev.integer == (int64_t)1);
+    REQUIRE(items.next(ev) == false);
+    REQUIRE(items.has_error());
+    REQUIRE(items.error().code == ErrorCode::ExpectedCommaOrBracket);
+    REQUIRE(items.error().offset() == 8);
+
+    // Throwing shell: a non-matching prefix ends cleanly with nullopt.
+    std::istringstream missing_in("{\"z\":1}");
+    StreamReader missing_reader(missing_in);
+    StreamItems missing = missing_reader.items("/a");
+    REQUIRE(!missing.next().has_value());
+    REQUIRE(!missing.has_error());
+
+    // Throwing shell: reader failure materialises a ParseError.
+    std::istringstream bad_in("[1 2]");
+    StreamReader bad_reader(bad_in);
+    StreamItems bad = bad_reader.items("");
+    REQUIRE(bad.next().has_value()); // BeginArray
+    REQUIRE(bad.next().has_value()); // Integer 1
+    REQUIRE_THROWS_AS((void)bad.next(), ParseError);
 }

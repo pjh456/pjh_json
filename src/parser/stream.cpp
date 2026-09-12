@@ -6,7 +6,10 @@
 
 #include <cstring>
 #include <istream>
+#include <limits>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace pjh::json
@@ -82,6 +85,28 @@ namespace pjh::json
         // from a backslash (a surrogate pair's second \uXXXX), so 16 is safe;
         // the decoder writes at or below its read cursor.
         constexpr size_t kStringDecodePadding = 16;
+
+        // A JSON Pointer token made only of decimal digits indexes an array.
+        // Returns false for anything else (including overflow, which is then
+        // treated as an object member name).
+        bool parse_decimal_index(std::string_view s, size_t &out) noexcept
+        {
+            if (s.empty())
+                return false;
+            size_t value = 0;
+            constexpr size_t kMax = std::numeric_limits<size_t>::max();
+            for (char c : s)
+            {
+                if (c < '0' || c > '9')
+                    return false;
+                const size_t digit = static_cast<size_t>(c - '0');
+                if (value > (kMax - digit) / 10)
+                    return false;
+                value = value * 10 + digit;
+            }
+            out = value;
+            return true;
+        }
 
         // Scratch containers must never be built on a null resource; the
         // public default is Config::resource(), but a caller may pass null.
@@ -880,6 +905,28 @@ namespace pjh::json
         return false; // unreachable: the loop only exits through return
     }
 
+    /*
+     * Owned-payload pull. Reuses the borrowed kernel and copies a MapKey or
+     * String text into out.text before the reader's token buffer can be
+     * reused. The borrowed view is valid at this point (no further pull has
+     * happened), so the copy is safe.
+     */
+    bool StreamReader::next(OwnedJsonEvent &out)
+    {
+        JsonEvent ev;
+        if (!next(ev))
+            return false;
+        out.type = ev.type;
+        out.boolean = ev.boolean;
+        out.integer = ev.integer;
+        out.number = ev.number;
+        if (ev.type == EventType::MapKey || ev.type == EventType::String)
+            out.text.assign(ev.text.data(), ev.text.size());
+        else
+            out.text.clear();
+        return true;
+    }
+
     bool StreamReader::has_error() const noexcept
     {
         return m_has_error;
@@ -913,5 +960,242 @@ namespace pjh::json
             return ResultT::Ok(std::nullopt);
         }
         return ResultT::Ok(std::optional<JsonEvent>(ev));
+    }
+
+    // ======================================================================
+    // StreamItems — JSON Pointer prefix filter over the event cursor
+    // ======================================================================
+
+    StreamItems StreamReader::items(std::string_view prefix)
+    {
+        return StreamItems(*this, prefix, m_buf.get_allocator().resource());
+    }
+
+    StreamItems::StreamItems(StreamReader &reader, std::string_view prefix, std::pmr::memory_resource *res)
+        : m_reader(&reader),
+          m_prefix_raw(scratch_resource(res)),
+          m_prefix(scratch_resource(res)),
+          m_frames(scratch_resource(res))
+    {
+        parse_prefix(prefix);
+    }
+
+    /*
+     * Decode the RFC 6901 pointer into m_prefix. The empty string is the root
+     * path (no tokens). Key bytes are unescaped in place into m_prefix_raw and
+     * referenced by offset so prefix tokens never own a nested string.
+     */
+    void StreamItems::parse_prefix(std::string_view prefix)
+    {
+        if (prefix.empty())
+            return;
+        if (prefix.front() != '/')
+            throw std::invalid_argument(
+                "StreamReader::items: prefix must be empty or a JSON Pointer beginning with '/'");
+
+        size_t pos = 1;
+        for (;;)
+        {
+            const size_t slash = prefix.find('/', pos);
+            const size_t end = (slash == std::string_view::npos) ? prefix.size() : slash;
+            const size_t key_offset = m_prefix_raw.size();
+
+            for (size_t i = pos; i < end; ++i)
+            {
+                char c = prefix[i];
+                if (c == '~')
+                {
+                    if (i + 1 >= end)
+                    {
+                        m_prefix_raw.resize(key_offset);
+                        throw std::invalid_argument("StreamReader::items: invalid JSON Pointer escape");
+                    }
+                    const char escaped = prefix[++i];
+                    if (escaped == '0')
+                        c = '~';
+                    else if (escaped == '1')
+                        c = '/';
+                    else
+                    {
+                        m_prefix_raw.resize(key_offset);
+                        throw std::invalid_argument("StreamReader::items: invalid JSON Pointer escape");
+                    }
+                }
+                m_prefix_raw.push_back(c);
+            }
+
+            PrefixToken token;
+            const std::string_view decoded(m_prefix_raw.data() + key_offset, m_prefix_raw.size() - key_offset);
+            if (decoded == "*")
+                token.kind = PrefixToken::Kind::Any;
+            else if (parse_decimal_index(decoded, token.index))
+                token.kind = PrefixToken::Kind::Index;
+            else
+            {
+                token.kind = PrefixToken::Kind::Key;
+                token.key_offset = key_offset;
+                token.key_len = decoded.size();
+            }
+            m_prefix.push_back(token);
+
+            if (slash == std::string_view::npos)
+                break;
+            pos = slash + 1;
+        }
+    }
+
+    std::string_view StreamItems::token_key(const PrefixToken &token) const noexcept
+    {
+        return std::string_view(m_prefix_raw.data() + token.key_offset, token.key_len);
+    }
+
+    /*
+     * Match length of the next child of the top frame: the number of leading
+     * prefix tokens the child's path shares with the prefix, or -1 once it has
+     * diverged. At the root (no open frame) zero tokens are consumed yet, so a
+     * value whose path is empty always starts at 0.
+     */
+    long StreamItems::child_match_len() const noexcept
+    {
+        if (m_frames.empty())
+            return 0;
+        const PathFrame &parent = m_frames.back();
+        const long base = parent.match_len;
+        if (base < 0 || static_cast<size_t>(base) >= m_prefix.size())
+            return -1;
+        const PrefixToken &token = m_prefix[static_cast<size_t>(base)];
+        if (parent.is_object)
+            return m_pending_child_match; // resolved when the key was seen
+        if (token.kind == PrefixToken::Kind::Any)
+            return base + 1;
+        if (token.kind == PrefixToken::Kind::Index && token.index == parent.next_index)
+            return base + 1;
+        return -1;
+    }
+
+    // Object member names are compared against the prefix while the MapKey
+    // event's borrowed text is still valid; only the result (advance or
+    // diverge) outlives the call.
+    void StreamItems::on_map_key(std::string_view key)
+    {
+        m_pending_child_match = -1;
+        if (m_frames.empty() || !m_frames.back().is_object)
+            return;
+        const long base = m_frames.back().match_len;
+        if (base < 0 || static_cast<size_t>(base) >= m_prefix.size())
+            return;
+        const PrefixToken &token = m_prefix[static_cast<size_t>(base)];
+        if (token.kind != PrefixToken::Kind::Key)
+            return;
+        if (key == token_key(token))
+            m_pending_child_match = base + 1;
+    }
+
+    /*
+     * Pull reader events until one belongs to a prefix match. The path is
+     * tracked with a frame per open container; match state is the number of
+     * prefix tokens consumed, and a container whose match reaches the prefix
+     * length switches to emitting its whole subtree.
+     */
+    bool StreamItems::next(JsonEvent &out)
+    {
+        for (;;)
+        {
+            JsonEvent ev;
+            if (!m_reader->next(ev))
+                return false;
+
+            switch (ev.type)
+            {
+            case EventType::BeginObject:
+            case EventType::BeginArray:
+            {
+                const bool is_object = ev.type == EventType::BeginObject;
+                if (m_emitting)
+                {
+                    m_frames.push_back(PathFrame{is_object, -1, 0});
+                    ++m_emit_depth;
+                    out = ev;
+                    return true;
+                }
+                const long match = child_match_len();
+                m_frames.push_back(PathFrame{is_object, match, 0});
+                if (static_cast<size_t>(match) == m_prefix.size())
+                {
+                    m_emitting = true;
+                    m_emit_depth = 1;
+                    out = ev;
+                    return true;
+                }
+                break;
+            }
+            case EventType::EndObject:
+            case EventType::EndArray:
+            {
+                if (!m_frames.empty())
+                    m_frames.pop_back();
+                if (!m_frames.empty() && !m_frames.back().is_object)
+                    ++m_frames.back().next_index;
+                if (m_emitting)
+                {
+                    out = ev;
+                    if (--m_emit_depth == 0)
+                        m_emitting = false;
+                    return true;
+                }
+                break;
+            }
+            case EventType::MapKey:
+            {
+                if (m_emitting)
+                {
+                    out = ev;
+                    return true;
+                }
+                on_map_key(ev.text);
+                break;
+            }
+            default:
+            {
+                if (m_emitting)
+                {
+                    out = ev;
+                    return true;
+                }
+                const long match = child_match_len();
+                if (!m_frames.empty() && !m_frames.back().is_object)
+                    ++m_frames.back().next_index;
+                m_pending_child_match = -1;
+                if (static_cast<size_t>(match) == m_prefix.size())
+                {
+                    out = ev;
+                    return true;
+                }
+                break;
+            }
+            }
+        }
+    }
+
+    bool StreamItems::has_error() const noexcept
+    {
+        return m_reader->has_error();
+    }
+
+    const Error &StreamItems::error() const noexcept
+    {
+        return m_reader->error();
+    }
+
+    std::optional<JsonEvent> StreamItems::next()
+    {
+        JsonEvent ev;
+        if (!next(ev))
+        {
+            if (m_reader->has_error())
+                throw ParseError(m_reader->error());
+            return std::nullopt;
+        }
+        return ev;
     }
 }
