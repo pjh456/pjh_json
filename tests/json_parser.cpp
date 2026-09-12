@@ -447,6 +447,62 @@ TEST_CASE("Parser: duplicate keys last-wins") {
     REQUIRE(out == R"({"a":2})");
 }
 
+TEST_CASE("Parser: duplicate keys large object index path") {
+    // An object past the internal index threshold switches the non-strict
+    // first-match scan from a scalar sweep to a key->position index. This
+    // pins that the indexed path is semantically identical: same size,
+    // same first key/position and insertion order, same last-wins values.
+    constexpr int n = 300; // > kKeyIndexThreshold (256)
+    std::string json = "{";
+    for (int i = 0; i < n; ++i)
+    {
+        if (i)
+            json += ',';
+        json += "\"k" + std::to_string(i) + "\":1";
+    }
+    // duplicates appended after the index is already active
+    for (int i = 0; i < 8; ++i)
+        json += ",\"k" + std::to_string(i * 7) + "\":2";
+    json += '}';
+
+    auto d = parse_copy(json);
+    REQUIRE(d.root().is_object());
+    REQUIRE(d.root().size() == (size_t)n);
+    // first occurrence keeps its key and position
+    REQUIRE(d.root().as_object().begin()->first == "k0");
+    // insertion order is the first-occurrence order
+    int seen = 0;
+    for (const auto &entry : d.root().as_object())
+    {
+        REQUIRE(entry.first == ("k" + std::to_string(seen)));
+        ++seen;
+    }
+    REQUIRE(seen == n);
+    // last value wins for duplicated keys, first value elsewhere
+    for (int k = 0; k < n; ++k)
+    {
+        bool is_dup = (k < 56 && k % 7 == 0);
+        auto key = "k" + std::to_string(k);
+        REQUIRE(d.root()[key] == (int64_t)(is_dup ? 2 : 1));
+    }
+
+    // Escaped keys materialise as owned pmr::strings: the index compares
+    // through the live entry keys, so this must hold after the key String
+    // is moved into the entry (and after in-place overwrites).
+    std::string esc = "{";
+    for (int k = 0; k < n; ++k)
+    {
+        if (k)
+            esc += ',';
+        esc += "\"\\u006b" + std::to_string(k) + "\":1";
+    }
+    esc += ",\"\\u006b3\":2}";
+    auto de = parse_copy(esc);
+    REQUIRE(de.root().size() == (size_t)n);
+    REQUIRE(de.root()["k3"] == (int64_t)2);
+    REQUIRE(de.root()["k0"] == (int64_t)1);
+}
+
 TEST_CASE("Parser: in_situ padding") {
     using std::pmr::get_default_resource;
 

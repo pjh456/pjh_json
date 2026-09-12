@@ -1,10 +1,150 @@
 #include "pjh_json/parser.hpp"
 #include "pjh_json/json.hpp"
+#include <functional>
 #include <optional>
+#include <string_view>
 #include <unordered_set>
+#include <vector>
+
+// The key-index slow paths below are deliberately kept out of line so the
+// small-object scalar sweep stays small and register-friendly (measured:
+// inlining them costs ~3% on objects that never build an index). C++20 has
+// no standard spelling, so fall back to plain functions elsewhere.
+#if defined(__GNUC__) || defined(__clang__)
+#define PJH_JSON_NOINLINE [[gnu::noinline]]
+#else
+#define PJH_JSON_NOINLINE
+#endif
 
 namespace pjh::json
 {
+    namespace
+    {
+        /*
+         * Entry count at which the per-key first-match scan switches from a
+         * scalar sweep to a lazily materialised key->position index.
+         *
+         * Below the threshold the sweep is only a handful of short
+         * string_view comparisons and beats any hashing (benchmark objects
+         * average ~3 keys, so they never build the index). The index costs
+         * a one-off build over the entries parsed so far, so it only pays
+         * off once that build is amortised by enough indexed lookups; the
+         * value is set above the measured crossover to keep medium objects
+         * on the scalar path.
+         */
+        constexpr size_t kKeyIndexThreshold = 256;
+
+        /*
+         * Flat open-addressing key -> first-occurrence position index for
+         * one object.
+         *
+         * A single contiguous slot array (entry_index + 1, 0 = empty) with
+         * linear probing avoids the per-key node allocation of a node-based
+         * unordered_map — measured ~10x cheaper to build. Positions, not
+         * key views, are stored: comparisons read the live entry keys, so
+         * the index stays correct across vector reallocation and String
+         * moves, and covers owned (escaped) keys unchanged.
+         */
+        class KeyIndex
+        {
+        public:
+            explicit KeyIndex(std::pmr::memory_resource *res)
+                : m_slots(res), m_resource(res) {}
+
+            KeyIndex(const KeyIndex &) = delete;
+            KeyIndex &operator=(const KeyIndex &) = delete;
+            KeyIndex(KeyIndex &&) = default;
+            KeyIndex &operator=(KeyIndex &&) = default;
+
+            // (Re)build over every entry currently stored in obj.
+            PJH_JSON_NOINLINE void build(const Object &obj)
+            {
+                const auto &entries = obj.data();
+                // 4x headroom keeps the load low so the build stays
+                // collision-light and no rehash is needed until the object
+                // has grown well past the threshold (the rehash would
+                // otherwise land right in the threshold-adjacent window).
+                size_t cap = 16;
+                while (cap < entries.size() * 4)
+                    cap <<= 1;
+                m_slots.assign(cap, 0);
+                m_mask = cap - 1;
+                m_count = 0;
+                for (size_t i = 0; i < entries.size(); ++i)
+                    insert_slot(std::string_view(entries[i].first), i);
+            }
+
+            // First-occurrence position of `key`, or entries.size() when
+            // unseen. On a miss `key` is stored at the position the following
+            // append will use, so the index stays in sync.
+            PJH_JSON_NOINLINE size_t find_or_insert(
+                const Object &obj, std::string_view key)
+            {
+                const auto &entries = obj.data();
+                size_t slot = hash(key) & m_mask;
+                while (m_slots[slot] != 0)
+                {
+                    size_t idx = m_slots[slot] - 1;
+                    if (entries[idx].first == key)
+                        return idx;
+                    slot = (slot + 1) & m_mask;
+                }
+                // Grow before storing the not-yet-appended position: all
+                // currently stored positions refer to real entries, so it is
+                // safe for grow() to re-read their keys.
+                if ((m_count + 1) * 2 > m_slots.size())
+                {
+                    grow(obj);
+                    slot = hash(key) & m_mask;
+                    while (m_slots[slot] != 0)
+                        slot = (slot + 1) & m_mask;
+                }
+                size_t pos = entries.size();
+                m_slots[slot] = pos + 1;
+                ++m_count;
+                return pos;
+            }
+
+        private:
+            static size_t hash(std::string_view key)
+            {
+                return std::hash<std::string_view>{}(key);
+            }
+
+            void insert_slot(std::string_view key, size_t idx)
+            {
+                size_t slot = hash(key) & m_mask;
+                while (m_slots[slot] != 0)
+                    slot = (slot + 1) & m_mask;
+                m_slots[slot] = idx + 1;
+                ++m_count;
+            }
+
+            PJH_JSON_NOINLINE void grow(const Object &obj)
+            {
+                const auto &entries = obj.data();
+                std::pmr::vector<size_t> old(m_resource);
+                old.swap(m_slots);
+                size_t cap = old.size() * 2;
+                m_slots.assign(cap, 0);
+                m_mask = cap - 1;
+                m_count = 0;
+                for (size_t s = 0; s < old.size(); ++s)
+                {
+                    if (old[s] != 0)
+                        insert_slot(
+                            std::string_view(entries[old[s] - 1].first),
+                            old[s] - 1);
+                }
+            }
+
+            std::pmr::vector<size_t> m_slots;
+            std::pmr::memory_resource *m_resource;
+            size_t m_mask = 0;
+            size_t m_count = 0;
+        };
+    }
+
     /*
      * Track seen keys via unordered_set for duplicate detection.
      *
@@ -26,7 +166,8 @@ namespace pjh::json
      * 1. Consume opening '{'.
      * 2. Skip whitespace; if '}' immediately -> empty object, return.
      * 3. Pre-allocate capacity hints. Duplicate-key tracking is lazily
-     *    initialized only when Config::strict_duplicate_keys() is set.
+     *    initialized only when Config::strict_duplicate_keys() is set; the
+     *    non-strict first-match index is likewise lazy (large objects only).
      * 4. Loop:
      *    a. Parse a string key.
      *    b. Conditionally check for duplicate keys.
@@ -64,6 +205,11 @@ namespace pjh::json
             seen->reserve(8);
         }
 
+        // Lazy key -> position index for the non-strict first-match scan.
+        // Only materialised once the entry count reaches
+        // kKeyIndexThreshold; small objects never touch it.
+        std::optional<KeyIndex> key_index;
+
         while (true)
         {
             // Parse key
@@ -86,19 +232,31 @@ namespace pjh::json
             // when the key is unseen. (When strict is ON a duplicate
             // already threw above, so a hit here is a non-strict
             // duplicate.)
-            // Manual first-match scan with direct index access — same
-            // semantics as std::ranges::find_if (first equal entry
-            // wins) without iterator/lambda indirection; the common
-            // no-duplicate case is a few comparisons over the small
-            // entry vector.
             auto &entries = obj.data();
             size_t pos = entries.size();
-            for (size_t i = 0; i < entries.size(); ++i)
+            if (entries.size() >= kKeyIndexThreshold && !seen)
             {
-                if (entries[i].first == key)
+                // Indexed fast path for large objects; the index is built
+                // once, from the entries already stored, and kept in sync
+                // by find_or_insert on every append below.
+                if (!key_index)
                 {
-                    pos = i;
-                    break;
+                    key_index.emplace(m_resource);
+                    key_index->build(obj);
+                }
+                pos = key_index->find_or_insert(obj, std::string_view(key));
+            }
+            else
+            {
+                // Small-object (or strict) scalar sweep: direct index
+                // access, first equal entry wins.
+                for (size_t i = 0; i < entries.size(); ++i)
+                {
+                    if (entries[i].first == key)
+                    {
+                        pos = i;
+                        break;
+                    }
                 }
             }
             if (pos < entries.size())
@@ -128,3 +286,5 @@ namespace pjh::json
         }
     }
 }
+
+#undef PJH_JSON_NOINLINE
