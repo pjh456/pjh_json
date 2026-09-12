@@ -16,8 +16,8 @@ namespace pjh::json
      * @brief Machine-readable error class (no RTTI needed)
      *
      * One value per concrete exception class: ParseError -> Parse,
-     * TypeError -> Type, PatchError -> Patch, base JsonError
-     * (writer/serialization + write-side file I/O) -> Json.
+     * TypeError -> Type, PatchError -> Patch, SchemaError -> Schema, base
+     * JsonError (writer/serialization + write-side file I/O) -> Json.
      *
      * @note Deliberately class-level, not site-level: an Io value is not
      *       expressible per class — file I/O failures are ParseError on the
@@ -25,8 +25,17 @@ namespace pjh::json
      *       (dump_file). Splitting them would need per-site tagging at ~9
      *       throw sites; the "Failed to <verb> file" message family stays the
      *       human distinction (what() is an implementation detail either way).
+     * @note Schema is appended (not reordered) so existing enumerator values
+     *       stay stable; no exhaustive switch over Category exists.
      */
-    enum class Category { Parse, Type, Json, Patch };
+    enum class Category
+    {
+        Parse,
+        Type,
+        Json,
+        Patch,
+        Schema
+    };
 
     /**
      * @brief Zero-allocation kernel error vocabulary (one key per failure site)
@@ -680,6 +689,191 @@ namespace pjh::json
         std::string m_pointer;
     };
 
+    /**
+     * @brief Machine tag for a lightweight-schema validation failure
+     *
+     * The structural core (task 38.1) produces TypeMismatch, MissingRequired
+     * and InvalidSchema. The remaining values are reserved for the value
+     * constraints of task 38.2 (enum / const / length / numeric /
+     * additionalProperties); they are declared here with the rest of the
+     * vocabulary so the enum does not change shape between the two subtasks.
+     */
+    enum class SchemaErrorKind
+    {
+        TypeMismatch,       // "type": instance kind differs from the declared name
+        MissingRequired,    // "required": a listed key is absent
+        UnexpectedProperty, // "additionalProperties": false (38.2)
+        TooShort,           // minLength / minItems (38.2)
+        TooLong,            // maxLength / maxItems (38.2)
+        BelowMinimum,       // minimum / exclusiveMinimum (38.2)
+        AboveMaximum,       // maximum / exclusiveMaximum (38.2)
+        EnumMismatch,       // enum (38.2)
+        ConstMismatch,      // const (38.2)
+        InvalidSchema       // keyword parameter shape/value is malformed
+    };
+
+    /**
+     * @brief Stable name of a SchemaErrorKind (machine tag rendering)
+     * @param k Schema error kind
+     * @return Static PascalCase name; empty for an out-of-range value
+     */
+    [[nodiscard]] constexpr std::string_view schema_error_kind_name(SchemaErrorKind k) noexcept
+    {
+        switch (k)
+        {
+        case SchemaErrorKind::TypeMismatch:
+            return "TypeMismatch";
+        case SchemaErrorKind::MissingRequired:
+            return "MissingRequired";
+        case SchemaErrorKind::UnexpectedProperty:
+            return "UnexpectedProperty";
+        case SchemaErrorKind::TooShort:
+            return "TooShort";
+        case SchemaErrorKind::TooLong:
+            return "TooLong";
+        case SchemaErrorKind::BelowMinimum:
+            return "BelowMinimum";
+        case SchemaErrorKind::AboveMaximum:
+            return "AboveMaximum";
+        case SchemaErrorKind::EnumMismatch:
+            return "EnumMismatch";
+        case SchemaErrorKind::ConstMismatch:
+            return "ConstMismatch";
+        case SchemaErrorKind::InvalidSchema:
+            return "InvalidSchema";
+        }
+        return "";
+    }
+
+    namespace detail
+    {
+        /**
+         * @brief Build the what() text of a SchemaError (allocates)
+         * @param k Schema error kind
+         * @param path Failing path ('.' joins a key, "[n]" an index; empty = root)
+         * @param expected Expected kind / shape / constraint text
+         * @param actual Actual kind / value text
+         * @param keyword Failing schema keyword ("type", "required", ...)
+         * @return House-style short message fragment
+         * @note The empty root path renders as `<root>`; path text is a
+         *       diagnostic rendering only and does not round-trip when a key
+         *       contains '.', '[' or ']'.
+         */
+        [[nodiscard]] inline std::string schema_error_message(SchemaErrorKind k, std::string_view path,
+                                                              std::string_view expected, std::string_view actual,
+                                                              std::string_view keyword)
+        {
+            const std::string display = path.empty() ? std::string("<root>") : std::string(path);
+            switch (k)
+            {
+            case SchemaErrorKind::TypeMismatch:
+                return "schema type mismatch at " + display + ": expected " + std::string(expected) + ", got " +
+                       std::string(actual);
+            case SchemaErrorKind::MissingRequired:
+                return "missing required property: " + display;
+            case SchemaErrorKind::UnexpectedProperty:
+                return "unexpected property: " + display;
+            case SchemaErrorKind::TooShort:
+                return "too short at " + display + ": expected " + std::string(expected) + ", got " +
+                       std::string(actual);
+            case SchemaErrorKind::TooLong:
+                return "too long at " + display + ": expected " + std::string(expected) + ", got " +
+                       std::string(actual);
+            case SchemaErrorKind::BelowMinimum:
+                return "below minimum at " + display + ": expected " + std::string(expected) + ", got " +
+                       std::string(actual);
+            case SchemaErrorKind::AboveMaximum:
+                return "above maximum at " + display + ": expected " + std::string(expected) + ", got " +
+                       std::string(actual);
+            case SchemaErrorKind::EnumMismatch:
+                return "value not in enum at " + display + ": got " + std::string(actual);
+            case SchemaErrorKind::ConstMismatch:
+                return "value does not match const at " + display + ": got " + std::string(actual);
+            case SchemaErrorKind::InvalidSchema:
+                return "invalid schema: " + std::string(keyword);
+            }
+            return {};
+        }
+    } // namespace detail
+
+    /**
+     * @brief Structured lightweight-schema validation failure
+     *
+     * Carries the machine tag plus the failing location and the expected /
+     * actual / keyword context a caller needs to report a schema violation.
+     * Satisfies pjh::result::Diagnostic (message()/kind()) via JsonError, so a
+     * Result carrying it can be rendered by pjh::result::render().
+     *
+     * @note Follows the PatchError model: one type is both thrown by the
+     *       compatibility shell (schema::validate) and carried as the E of
+     *       Result<void, SchemaError>; unlike AccessError it is not a pure
+     *       value. See include/pjh_json/schema.hpp.
+     * @note All four text fields are owned strings: the message is assembled
+     *       once in the constructor and expected/actual may be formatted
+     *       text (e.g. "length>=3"), so no borrowed view can dangle.
+     */
+    class SchemaError : public JsonError
+    {
+    public:
+        /**
+         * @brief Construct a structured schema failure
+         * @param code Machine tag
+         * @param path Failing path (empty = root, rendered as `<root>` in what())
+         * @param expected Expected kind / shape / constraint text
+         * @param actual Actual kind / value text
+         * @param keyword Failing schema keyword ("type", "required", "schema", ...)
+         */
+        SchemaError(SchemaErrorKind code, std::string path, std::string expected = {}, std::string actual = {},
+                    std::string keyword = {})
+            : JsonError(detail::schema_error_message(code, path, expected, actual, keyword)),
+              m_code(code),
+              m_path(std::move(path)),
+              m_expected(std::move(expected)),
+              m_actual(std::move(actual)),
+              m_keyword(std::move(keyword))
+        {
+        }
+
+        /**
+         * @brief Machine tag for the failure
+         */
+        [[nodiscard]] SchemaErrorKind code() const noexcept { return m_code; }
+
+        /**
+         * @brief Failing path ('.' joins a key, "[n]" an index; empty = root)
+         * @note Diagnostic rendering only; not guaranteed to round-trip when a
+         *       key contains '.', '[' or ']'.
+         */
+        [[nodiscard]] std::string_view path() const noexcept { return m_path; }
+
+        /**
+         * @brief Expected kind / shape / constraint text
+         */
+        [[nodiscard]] std::string_view expected() const noexcept { return m_expected; }
+
+        /**
+         * @brief Actual kind / value text
+         */
+        [[nodiscard]] std::string_view actual() const noexcept { return m_actual; }
+
+        /**
+         * @brief Failing schema keyword ("type", "required", "properties", ...)
+         */
+        [[nodiscard]] std::string_view keyword() const noexcept { return m_keyword; }
+
+        /**
+         * @brief Machine-readable class (see Category)
+         * @return Category::Schema
+         */
+        [[nodiscard]] Category category() const noexcept override { return Category::Schema; }
+
+    private:
+        SchemaErrorKind m_code;
+        std::string m_path;
+        std::string m_expected;
+        std::string m_actual;
+        std::string m_keyword;
+    };
 }
 
 #endif
