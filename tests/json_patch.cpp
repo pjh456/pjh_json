@@ -6,6 +6,7 @@
 #include <limits>
 #include <memory>
 #include <memory_resource>
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <utility>
