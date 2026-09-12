@@ -93,22 +93,30 @@ target_compile_options(pjh_json PRIVATE -std=c++20)
 # in particular -march=native is deliberately NOT used (non-portable artifacts
 # and unsupported by AppleClang on arm64). SIMD width follows xsimd's default
 # architecture; runtime ISA dispatch is tracked in the roadmap.
+#
+# PGO flags are PRIVATE to pjh_json: a pre-built static library cannot be
+# re-profiled by a consumer, and inherited instrumentation/link flags would be
+# meaningless (and, for GENERATE, unsound) on the consumer side. The same list
+# is re-applied PRIVATE to every in-repo executable that links the library
+# (tests / benchmarks / examples / fuzz) so the GENERATE runtime is linked and
+# the profiling workload can run. Keep those re-applies in lockstep.
 if(PJH_JSON_PGO STREQUAL "GENERATE")
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(pjh_json PUBLIC -fprofile-generate)
-        target_link_options(pjh_json PUBLIC -fprofile-generate)
+        set(PJH_JSON_PGO_FLAGS -fprofile-generate)
     elseif(MSVC)
-        target_compile_options(pjh_json PUBLIC /GENPROFILE)
-        target_link_options(pjh_json PUBLIC /GENPROFILE)
+        set(PJH_JSON_PGO_FLAGS /GENPROFILE)
     endif()
 elseif(PJH_JSON_PGO STREQUAL "USE")
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(pjh_json PUBLIC -fprofile-use)
-        target_link_options(pjh_json PUBLIC -fprofile-use)
+        set(PJH_JSON_PGO_FLAGS -fprofile-use)
     elseif(MSVC)
-        target_compile_options(pjh_json PUBLIC /USEPROFILE)
-        target_link_options(pjh_json PUBLIC /USEPROFILE)
+        set(PJH_JSON_PGO_FLAGS /USEPROFILE)
     endif()
+endif()
+
+if(PJH_JSON_PGO_FLAGS)
+    target_compile_options(pjh_json PRIVATE ${PJH_JSON_PGO_FLAGS})
+    target_link_options(pjh_json PRIVATE ${PJH_JSON_PGO_FLAGS})
 endif()
 
 # -------------------------

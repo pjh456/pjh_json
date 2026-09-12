@@ -136,3 +136,13 @@ if(PJH_JSON_SANITIZER_FLAGS)
     target_compile_options(pjh_json_header_isolation PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
     target_link_options(pjh_json_header_isolation PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
 endif()
+
+# PGO flags are PRIVATE to pjh_json (root CMakeLists, same pattern as the
+# sanitizer block above). Re-apply them so both test executables link the
+# GENERATE profile runtime. Keep in lockstep with the root list.
+if(PJH_JSON_PGO_FLAGS)
+    target_compile_options(pjh_json_tests PRIVATE ${PJH_JSON_PGO_FLAGS})
+    target_link_options(pjh_json_tests PRIVATE ${PJH_JSON_PGO_FLAGS})
+    target_compile_options(pjh_json_header_isolation PRIVATE ${PJH_JSON_PGO_FLAGS})
+    target_link_options(pjh_json_header_isolation PRIVATE ${PJH_JSON_PGO_FLAGS})
+endif()

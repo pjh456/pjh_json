@@ -166,7 +166,7 @@ cmake --build build
 | `PJH_JSON_BUILD_TESTS` | `OFF` | Build unit tests |
 | `PJH_JSON_BUILD_EXAMPLES` | `OFF` | Build example programs |
 | `PJH_JSON_BUILD_BENCHMARKS` | `OFF` | Build Google Benchmark suite |
-| `PJH_JSON_PGO` | `OFF` | PGO mode: `GENERATE` or `USE` (requires separate build directories) |
+| `PJH_JSON_PGO` | `OFF` | PGO mode: `GENERATE` or `USE` (requires separate build directories); flags are library-only and tagged PRIVATE, so they are never exported to consumers |
 
 The library injects no optimization or ISA flags of its own — pick the level with the
 standard `-DCMAKE_BUILD_TYPE=Release` (or `Debug`). `-march=native` is deliberately not

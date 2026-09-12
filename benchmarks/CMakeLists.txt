@@ -58,6 +58,12 @@ if(PJH_JSON_SANITIZER_FLAGS)
     target_link_options(pjh_json_benchmark PRIVATE ${PJH_JSON_SANITIZER_FLAGS})
 endif()
 
+# Same PGO re-apply as tests/CMakeLists.txt (root list). Keep in lockstep.
+if(PJH_JSON_PGO_FLAGS)
+    target_compile_options(pjh_json_benchmark PRIVATE ${PJH_JSON_PGO_FLAGS})
+    target_link_options(pjh_json_benchmark PRIVATE ${PJH_JSON_PGO_FLAGS})
+endif()
+
 # Benchmark 数据目录（roadmap 67）：生成物写进构建目录，不再污染仓库根。
 # 默认每棵构建树一份；想让多树共享 ~1.8 GiB 数据，可把 PJH_JSON_BENCH_DATA_DIR
 # 指到公共缓存。编译期把绝对路径（正斜杠）传给可执行程序。

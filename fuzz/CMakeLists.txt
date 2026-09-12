@@ -31,6 +31,13 @@ function(pjh_json_add_fuzzer name corpus)
     target_compile_options(${name} PRIVATE ${PJH_JSON_FUZZ_FLAGS})
     target_link_options(${name} PRIVATE ${PJH_JSON_FUZZ_FLAGS})
 
+    # PGO flags are PRIVATE to pjh_json (root CMakeLists). Re-apply them so the
+    # GENERATE profile runtime is linked when fuzzers are built with PGO on.
+    if(PJH_JSON_PGO_FLAGS)
+        target_compile_options(${name} PRIVATE ${PJH_JSON_PGO_FLAGS})
+        target_link_options(${name} PRIVATE ${PJH_JSON_PGO_FLAGS})
+    endif()
+
     pjh_json_fuzz_corpus(${name}
         ${CMAKE_CURRENT_SOURCE_DIR}/corpus/${corpus}
         ${CMAKE_CURRENT_BINARY_DIR}/corpus/${corpus})
