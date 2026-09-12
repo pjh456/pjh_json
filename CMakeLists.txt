@@ -17,7 +17,6 @@ include(CMakePackageConfigHelpers)
 option(PJH_JSON_BUILD_TESTS "Build tests" OFF)
 option(PJH_JSON_BUILD_EXAMPLES "Build examples" OFF)
 option(PJH_JSON_BUILD_BENCHMARKS "Build benchmarks" OFF)
-option(PJH_JSON_ENABLE_OPTIMIZATIONS "Enable compiler optimizations (-O3, -march=native, etc.)" ON)
 set(PJH_JSON_PGO OFF CACHE STRING "PGO mode: OFF, GENERATE, or USE")
 
 # -------------------------
@@ -66,30 +65,11 @@ target_compile_options(pjh_json PRIVATE -std=c++20)
 # -------------------------
 # Compiler Optimizations
 # -------------------------
-if(PJH_JSON_ENABLE_OPTIMIZATIONS)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(pjh_json PUBLIC -O3 -march=native -ffast-math)
-    elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
-        target_compile_options(pjh_json PUBLIC /O2 /arch:AVX2 /fp:fast)
-    endif()
-
-    include(CheckIPOSupported)
-    check_ipo_supported(RESULT _ipo_supported LANGUAGES CXX)
-    # 不使用 LTO：静态库产物为 LLVM bitcode 时，消费者的链接命令若缺少
-    # -flto 标志，GNU ld 会报 "file format not recognized"；而将 LTO 选项
-    # 作为 INTERFACE 传播又会强制所有消费方开启 LTO，因此直接关闭。
-    # if(_ipo_supported)
-    #     set_property(TARGET pjh_json PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    #     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    #         target_link_options(pjh_json INTERFACE -flto=thin)
-    #     elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-    #         target_link_options(pjh_json INTERFACE -flto)
-    #     elseif(MSVC)
-    #         target_link_options(pjh_json INTERFACE /LTCG)
-    #     endif()
-    # endif()
-endif()
-
+# The library never injects optimization or ISA flags. Optimization level is
+# the consumer's/packager's choice via CMAKE_BUILD_TYPE / CMAKE_CXX_FLAGS;
+# in particular -march=native is deliberately NOT used (non-portable artifacts
+# and unsupported by AppleClang on arm64). SIMD width follows xsimd's default
+# architecture; runtime ISA dispatch is tracked in the roadmap.
 if(PJH_JSON_PGO STREQUAL "GENERATE")
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(pjh_json PUBLIC -fprofile-generate)

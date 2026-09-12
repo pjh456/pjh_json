@@ -116,8 +116,11 @@ cmake --build build
 | `PJH_JSON_BUILD_TESTS` | `OFF` | Build unit tests |
 | `PJH_JSON_BUILD_EXAMPLES` | `OFF` | Build example programs |
 | `PJH_JSON_BUILD_BENCHMARKS` | `OFF` | Build Google Benchmark suite |
-| `PJH_JSON_ENABLE_OPTIMIZATIONS` | `ON` | Apply `-O3 -march=native -ffast-math` (GCC/Clang) or `/O2 /arch:AVX2` (MSVC), plus LTO |
 | `PJH_JSON_PGO` | `OFF` | PGO mode: `GENERATE` or `USE` (requires separate build directories) |
+
+The library injects no optimization or ISA flags of its own — pick the level with the
+standard `-DCMAKE_BUILD_TYPE=Release` (or `Debug`). `-march=native` is deliberately not
+used (non-portable artifacts); pass your own `CMAKE_CXX_FLAGS` if you want it locally.
 
 ## Benchmark
 
