@@ -20,12 +20,8 @@ namespace pjh::json
          *   - a wide load may overread one batch, so the padding contract
          *     must cover 2x the batch (kPaddingWidth == 128 today).
          */
-        static_assert(
-            batch_type::size <= 64,
-            "batch_size too large for uint64_t mask");
-        static_assert(
-            2 * batch_type::size <= kPaddingWidth,
-            "padding must keep 2x SIMD batch headroom");
+        static_assert(batch_type::size <= 64, "batch_size too large for uint64_t mask");
+        static_assert(2 * batch_type::size <= kPaddingWidth, "padding must keep 2x SIMD batch headroom");
     } // namespace
 
     std::size_t simd_batch_width() noexcept
