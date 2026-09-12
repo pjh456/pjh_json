@@ -144,10 +144,25 @@ auto port = doc.root()["port"].as_int();  // 8080
 
 > **How it works**: `ConstJson::of()` encodes the entire JSON structure as C++ template types. `ConstJson::of(1, 2, 3)` produces `ConstJsonArray<ConstJsonInt, ConstJsonInt, ConstJsonInt>` — each element's type lives in the template parameter pack. Nested containers are embedded in `std::tuple`, so pointers never escape and all data lives on the stack. `to_runtime()` recursively walks the type tree and copies into PMR-backed `Json`. Pure C++20 — no `std::vector`, no heap allocation, no compiler non-transient constexpr support required.
 
+## Requirements
+
+* C++20 (`CXX_STANDARD 20`); configure enforces a compiler floor of GCC >= 11,
+  Clang >= 16, AppleClang >= 15, or MSVC >= 19.29.
+* CMake >= 3.20.
+* Run `git submodule update --init` before the first configure —
+  `thirdparty/xsimd` and `thirdparty/pjh_result` are git submodules, not
+  FetchContent dependencies.
+
 ## Build
 
+`pjh_json` builds a **static library** (`src/*.cpp` compile into it), producing
+`libpjh_json.a` (or `pjh_json.lib`); consumers link the target rather than
+copying headers.
+
 ```bash
-# header-only
+git submodule update --init
+
+# library only
 cmake -B build -S . -G Ninja
 
 # with tests, examples, benchmarks
@@ -167,6 +182,8 @@ cmake --build build
 | `PJH_JSON_BUILD_EXAMPLES` | `OFF` | Build example programs |
 | `PJH_JSON_BUILD_BENCHMARKS` | `OFF` | Build Google Benchmark suite |
 | `PJH_JSON_PGO` | `OFF` | PGO mode: `GENERATE` or `USE` (requires separate build directories); flags are library-only and tagged PRIVATE, so they are never exported to consumers |
+| `PJH_JSON_BUILD_FUZZERS` | `OFF` | Build the libFuzzer differential fuzz targets (Clang only; requires `PJH_JSON_SANITIZERS` to be set) |
+| `PJH_JSON_SANITIZERS` | `OFF` | Comma-separated GCC/Clang sanitizer list, e.g. `address,undefined`, or `thread` alone; PRIVATE instrumentation, never exported |
 
 The library injects no optimization or ISA flags of its own — pick the level with the
 standard `-DCMAKE_BUILD_TYPE=Release` (or `Debug`). `-march=native` is deliberately not
@@ -174,10 +191,23 @@ used (non-portable artifacts); pass your own `CMAKE_CXX_FLAGS` if you want it lo
 (x86-64: `-march=native`; arm64/AppleClang: `-mcpu=native` — `-march=native` is
 rejected on Apple Silicon; never pass both).
 
-> Only public headers are installed: `<prefix>/include/pjh_json.hpp` and
-> `<prefix>/include/pjh_json/**`, minus the internal `pjh_json/detail/`.
-> `kPaddingWidth` lives in `pjh_json/document.hpp`; the former `literal.hpp` /
-> `utils.hpp` are implementation details and are not part of the package.
+### Using the installed package
+
+```cmake
+find_package(pjh_json 0.2 REQUIRED)
+target_link_libraries(my_app PRIVATE pjh::json)
+```
+
+```cpp
+#include <pjh_json.hpp>
+```
+
+The exported target is namespaced `pjh::json`; the package resolves its pinned
+`pjh_result` dependency itself (`find_dependency`). Public headers land in
+`<prefix>/include/pjh_json.hpp` + `<prefix>/include/pjh_json/**`, plus the
+`pjh_result` headers. The internal `pjh_json/detail/` and the former
+`literal.hpp` / `utils.hpp` are implementation details and are not installed. No
+optimization, ISA, PGO, or sanitizer flags cross the install boundary.
 
 ## Versioning
 
@@ -188,7 +218,15 @@ is pre-1.0, a minor-version bump may be breaking. See
 
 ## Benchmark
 
-Google Benchmark, 2026-07-10, Windows x64, MinGW GCC 15.2, `-O3 -march=native -ffast-math -flto`. Time in nanoseconds, lower is better.
+> Historical numbers (2026-07-10, Windows x64, MinGW GCC 15.2), captured with an
+> optimization/ISA flag set that the library has since removed; LTO is
+> intentionally disabled. See [Build](#build) for the current flag policy.
+> Time in nanoseconds, lower is better.
+
+Inputs (`1mb.json` … `1gb.json`) are generated on first run under
+`<build>/benchmarks/data`; set `PJH_JSON_BENCH_DATA_DIR` to share one cache
+across build trees, and remove them with
+`cmake --build <build> --target pjh_json_benchmark_clean_data`.
 
 | File | `pjh_json` | `Nlohmann` | `RapidJSON` | vs `Nlohmann` | vs `RapidJSON` |
 |------|----------|----------|-----------|-------------|--------------|
