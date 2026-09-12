@@ -948,7 +948,10 @@ TEST_CASE("Json: owned string ctor") {
         REQUIRE(j.is_string());
         REQUIRE(j.as_string() == sv);
         // Header + buffer both go through res now (was buffer only):
-        // 1 header + 1 buffer + optional MSVC _Container_proxy.
+        // 1 header + 1 buffer + optional MSVC _Container_proxy. The exact
+        // count is the resource-routing pin; last_bytes() is only a soft
+        // size sanity check (the content buffer is not guaranteed to be the
+        // final cr allocation on every STL).
         REQUIRE(cr.outstanding() == 2 + kContainerOverhead);
         REQUIRE(cr.last_bytes() >= sv.size()); // host allocates sv.size(); >= is the portable pin
     } // ~j -> header and buffer deallocate back into cr
@@ -1039,6 +1042,47 @@ TEST_CASE("Json: clone allocates header through resource") {
         REQUIRE(cr.outstanding() == 2 + kContainerOverhead);
     }
     REQUIRE(cr.outstanding() == 0);
+}
+
+TEST_CASE("Json: clone propagates string allocation failure") {
+    // Resource that fails a chosen allocation, so the clone String arm's
+    // make_owned throws mid-construction. Regression pin for the
+    // "allocate first, tag second" order (R_51 F1): pre-fix, unwinding ran
+    // ~Json -> destroy_owned on a never-assigned heap pointer (null deref /
+    // UB); post-fix the bad_alloc propagates and make_owned's catch(...)
+    // returns the raw header block to the resource.
+    struct ThrowOnAllocResource : std::pmr::memory_resource
+    {
+        std::pmr::memory_resource *up = std::pmr::new_delete_resource();
+        int allocs = 0;
+        int fail_at = 0; // 1-based allocation to fail; 0 = never
+        long long outstanding = 0;
+
+    protected:
+        void *do_allocate(std::size_t n, std::size_t align) override
+        {
+            ++allocs;
+            if (allocs == fail_at)
+                throw std::bad_alloc();
+            ++outstanding;
+            return up->allocate(n, align);
+        }
+        void do_deallocate(void *p, std::size_t n, std::size_t align) override
+        {
+            --outstanding;
+            up->deallocate(p, n, align);
+        }
+        bool do_is_equal(const std::pmr::memory_resource &other) const noexcept override
+        {
+            return this == &other;
+        }
+    };
+
+    ThrowOnAllocResource res;
+    res.fail_at = 2; // #1 header, #2 content buffer (MSVC proxy may interleave)
+    Json src("clone-source-long-enough-to-exceed-sso-capacity");
+    REQUIRE_THROWS_AS((void)src.clone(&res), std::bad_alloc);
+    REQUIRE(res.outstanding == 0); // header deallocated on throw
 }
 
 TEST_CASE("Json: owned string outlives source") {

@@ -162,10 +162,15 @@ namespace pjh::json
         case Type::StringView:
         case Type::StringOwned:
         {
+            // Allocate/tag ordering (mirrors the Array/Object arms below):
+            // make_owned is the only throwing call, so it must complete
+            // before `out` exists. Tagging `out` first would unwind into
+            // ~Json -> destroy_owned on a never-assigned m_data.heap.
             std::string_view sv = as_string();
+            auto *ptr = String::make_owned(sv, into);
             Json out;
             out.m_type = Type::StringOwned;
-            out.m_data.heap = String::make_owned(sv, into);
+            out.m_data.heap = ptr;
             return out;
         }
         case Type::ArrayType:
